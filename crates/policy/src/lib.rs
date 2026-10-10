@@ -1,12 +1,13 @@
 //! Layered, deterministic policy evaluation for brokered agent actions.
 //!
-//! This stage adds policy layers and rules, the built-in profiles, privacy and
-//! host-trust context, network settings, and the immutable hard safety rules.
+//! This stage adds closed-schema TOML policy documents, workspace project rules,
+//! and the policy set that holds them.
 
 mod action;
 mod classify;
 mod context;
 mod decision;
+mod document;
 mod error;
 mod facts;
 mod fingerprint;
@@ -26,6 +27,10 @@ pub use context::{EvaluationContext, HostTrust, PrivacyMode};
 pub use decision::{
     ApprovalScope, DEFAULT_APPROVAL_EXPIRY, Decision, RateLimit, RuleOrigin, RuleRef, SandboxLevel,
     Verdict,
+};
+pub use document::{
+    MAX_DOCUMENT_BYTES, PROJECT_RULES_FILE, PolicyDocument, PolicySet, ProjectInfo, ProjectRules,
+    SCHEMA_VERSION,
 };
 pub use error::PolicyError;
 pub use hard::{HARD_RULES, HardRule, HardVerdict};
