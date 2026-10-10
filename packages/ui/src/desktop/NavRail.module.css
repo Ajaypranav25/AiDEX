@@ -1,0 +1,21 @@
+.rail {
+  user-select: none;
+  flex: none;
+  width: 72px;
+  padding: var(--aidex-space-2) 0;
+  overflow-y: auto;
+  border: 1px solid var(--aidex-color-border-subtle);
+  border-radius: var(--aidex-radius-xl);
+  background: var(--aidex-color-surface);
+  scrollbar-width: none;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}

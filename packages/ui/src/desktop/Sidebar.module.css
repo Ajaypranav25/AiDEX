@@ -1,0 +1,32 @@
+.sidebar {
+  user-select: none;
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  width: clamp(272px, 24vw, 340px);
+  overflow: hidden;
+  border: 1px solid var(--aidex-color-border-subtle);
+  border-radius: var(--aidex-radius-xl);
+  background: var(--aidex-color-surface);
+}
+
+.header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--aidex-space-5);
+  padding: var(--aidex-space-4) var(--aidex-space-4) var(--aidex-space-3);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  padding: var(--aidex-space-3) var(--aidex-space-4) var(--aidex-space-4);
+  overflow-y: auto;
+  scrollbar-color: transparent transparent;
+  scrollbar-width: thin;
+}
+
+.body:hover,
+.body:focus-within {
+  scrollbar-color: var(--aidex-color-border) transparent;
+}

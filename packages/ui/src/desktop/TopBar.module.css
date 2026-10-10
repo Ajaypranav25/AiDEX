@@ -1,0 +1,25 @@
+.topBar {
+  display: grid;
+  flex: none;
+  grid-template-columns: minmax(48px, 1fr) minmax(0, 600px) minmax(48px, 1fr);
+  align-items: center;
+  gap: var(--aidex-space-4);
+  min-height: 72px;
+  padding: var(--aidex-space-1) var(--aidex-space-1) var(--aidex-space-2) var(--aidex-space-4);
+}
+
+.start,
+.end {
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: var(--aidex-space-2);
+}
+
+.end {
+  justify-content: flex-end;
+}
+
+.center {
+  min-width: 0;
+}
