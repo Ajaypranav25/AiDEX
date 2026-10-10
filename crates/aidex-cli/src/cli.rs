@@ -5,6 +5,12 @@ use crate::commands::{
     agent::AgentCommand, daemon::DaemonCommand, events::EventsCommand, omp::SessionOptions,
     session::SessionArgs, vault::VaultCommand, workspace::WorkspaceArgs,
 };
+use crate::commands::{
+    approvals::{ApprovalsArgs, ApprovalsCommand, ApproveArgs, DenyArgs},
+    emergency::{ResumeArgs, StopArgs},
+    policy::PolicyArgs,
+    tools::ToolsArgs,
+};
 use crate::commands::{model::ModelArgs, offline::OfflineArgs, provider::ProviderArgs};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -84,6 +90,22 @@ pub enum Commands {
     /// Inspect durable sessions, checkpoints, and resume plans.
     #[command(alias = "sessions")]
     Session(SessionArgs),
+    /// List and inspect the broker's approval requests (default: list).
+    #[command(alias = "approval")]
+    Approvals(ApprovalsArgs),
+    /// Approve a pending request after reviewing its card (asks unless --yes).
+    Approve(ApproveArgs),
+    /// Deny a pending request.
+    Deny(DenyArgs),
+    /// Show or change the active policy, or explain a tool call without running it.
+    Policy(PolicyArgs),
+    /// List the tools the broker mediates.
+    #[command(alias = "tool")]
+    Tools(ToolsArgs),
+    /// Emergency stop: freeze tools, cancel approvals, kill managed processes.
+    Stop(StopArgs),
+    /// Resume tool execution after an emergency stop.
+    Resume(ResumeArgs),
 }
 
 impl Commands {
@@ -108,6 +130,13 @@ impl Commands {
             Some(Self::Provider(args)) => args.command.label(),
             Some(Self::Offline(args)) => args.command.label(),
             Some(Self::Session(args)) => args.command.label(),
+            Some(Self::Approvals(args)) => ApprovalsCommand::label(args.command.as_ref()),
+            Some(Self::Approve(_)) => "aidex approve",
+            Some(Self::Deny(_)) => "aidex deny",
+            Some(Self::Policy(args)) => args.command.label(),
+            Some(Self::Tools(args)) => args.command.label(),
+            Some(Self::Stop(_)) => "aidex stop",
+            Some(Self::Resume(_)) => "aidex resume",
         }
     }
 }
