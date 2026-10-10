@@ -7,6 +7,8 @@ members = [
     "crates/drive",
     "crates/events",
     "crates/host",
+    "crates/policy",
+    "crates/sandbox",
     "crates/sessions",
     "crates/storage",
     "crates/vault",

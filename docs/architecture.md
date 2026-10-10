@@ -16,6 +16,9 @@ crates/aidexd (`aidexd`)
    ├── transport: handshake, Router (`<domain>.<verb>`), bounded streams
    └── Services ── crates/core, drive, events, sessions, storage
 
+crates/policy (`aidex-policy`)
+   └── pure policy evaluation; not yet wired into the daemon (broker work, #17)
+
 apps/desktop, apps/installer
    └── future clients of the same daemon API
 ```
@@ -24,7 +27,7 @@ The desktop and installer are independent Tauri v2 projects. Their Rust shells o
 
 ## Rust workspace boundaries
 
-The Rust workspace remains the primary implementation focus. Its first layer is intentionally small: shared core types, portable-drive paths, host capability discovery, events, durable storage/session foundations, the encrypted vault (`aidex-vault`), the `aidexd` process boundary, and the `aidex` CLI. Depend on lower-level shared contracts rather than creating cycles. Future domains listed in the specification—harness, inference, providers/router, context/memory/indexing, tools and adapters, MCP/skills/plugins, broker/policy/sandbox, vault/identity/approvals/remote, cleanup/updater—must be introduced when there is a real API and consumer, not as empty service crates.
+The Rust workspace remains the primary implementation focus. Its first layer is intentionally small: shared core types, portable-drive paths, host capability discovery, events, durable storage/session foundations, the `aidex-sandbox` process isolation library, the encrypted vault (`aidex-vault`), the `aidexd` process boundary, and the `aidex` CLI. Depend on lower-level shared contracts rather than creating cycles. Future domains listed in the specification—harness, inference, providers/router, context/memory/indexing, tools and adapters, MCP/skills/plugins, broker/policy, identity/approvals/remote, cleanup/updater—must be introduced when there is a real API and consumer, not as empty service crates.
 
 ## Portable-drive data is not repository source
 
