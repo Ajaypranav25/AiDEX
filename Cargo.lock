@@ -19,9 +19,11 @@ name = "aidex-cli"
 version = "0.1.0"
 dependencies = [
  "aidex-drive",
+ "aidex-events",
  "aidex-host",
  "aidexd",
  "clap",
+ "serde_json",
 ]
 
 [[package]]
@@ -44,6 +46,12 @@ dependencies = [
 [[package]]
 name = "aidex-events"
 version = "0.1.0"
+dependencies = [
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
 
 [[package]]
 name = "aidex-host"
@@ -74,10 +82,12 @@ name = "aidexd"
 version = "0.1.0"
 dependencies = [
  "aidex-drive",
+ "aidex-events",
  "aidex-host",
  "getrandom",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
