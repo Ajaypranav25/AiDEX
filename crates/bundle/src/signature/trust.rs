@@ -428,7 +428,9 @@ impl TrustStore {
                 created_at: created_at.as_str().to_owned(),
                 window: format!(
                     "from {} to {}",
-                    key.not_before.as_ref().map_or("the beginning", Timestamp::as_str),
+                    key.not_before
+                        .as_ref()
+                        .map_or("the beginning", Timestamp::as_str),
                     key.not_after.as_ref().map_or("no end", Timestamp::as_str)
                 ),
             });

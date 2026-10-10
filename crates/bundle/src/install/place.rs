@@ -7,7 +7,7 @@ use std::{
 };
 
 use aidex_drive::DrivePaths;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     BundleError, BundleManifest, FileRole, Target,
@@ -25,7 +25,7 @@ use crate::{
 const NEW_SUFFIX: &str = ".aidex-new";
 
 /// What happened to one launcher path.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PlacementAction {
     Created,
@@ -36,7 +36,7 @@ pub enum PlacementAction {
 }
 
 /// One launcher written by an install.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct LauncherPlacement {
     pub path: PathBuf,
     pub action: PlacementAction,

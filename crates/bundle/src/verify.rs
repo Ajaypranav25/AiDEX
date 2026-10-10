@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     BundleError, BundleManifest, DocumentError, IntegrityProblem, MANIFEST_FILE_NAME,
@@ -19,7 +19,7 @@ use crate::{
 };
 
 /// Which files [`verify_bundle`] hashes.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VerifyScope {
     /// Critical roles (launcher, cli, daemon, helper, runtime), and `bin/` must hold
