@@ -10,7 +10,10 @@ pub mod daemon;
 pub mod doctor;
 pub mod drive;
 pub mod events;
+pub mod model;
+pub mod offline;
 pub mod omp;
+pub mod provider;
 pub mod vault;
 pub mod workspace;
 
@@ -33,5 +36,8 @@ pub fn dispatch(command: Option<Commands>, output: Output) -> Result<Exit, CliEr
         Some(Commands::Doctor) => doctor::run(output),
         Some(Commands::Vault { command }) => vault::run(command, output),
         Some(Commands::Workspace(args)) => workspace::run(args, output),
+        Some(Commands::Model(args)) => model::run(args, output),
+        Some(Commands::Provider(args)) => provider::run(args, output),
+        Some(Commands::Offline(args)) => offline::run(args, output),
     }
 }
