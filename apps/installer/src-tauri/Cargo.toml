@@ -1,0 +1,19 @@
+[package]
+name = "aidex-installer"
+version = "0.1.0"
+license = "MIT"
+description = "AiDEX portable workspace setup guide"
+authors = ["AiDEX"]
+edition = "2021"
+
+[lib]
+name = "aidex_installer_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[workspace]

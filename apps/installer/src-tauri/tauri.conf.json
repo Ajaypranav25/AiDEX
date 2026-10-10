@@ -1,0 +1,24 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AiDEX Setup",
+  "version": "0.1.0",
+  "identifier": "dev.aidex.installer",
+  "build": {
+    "beforeDevCommand": "bun run dev",
+    "devUrl": "http://localhost:3312",
+    "beforeBuildCommand": "bun run build",
+    "frontendDist": "../out"
+  },
+  "app": {
+    "windows": [{
+      "title": "AiDEX Setup",
+      "width": 1080,
+      "height": 760,
+      "minWidth": 780,
+      "minHeight": 620,
+      "resizable": true
+    }],
+    "security": { "csp": "default-src 'self'; connect-src ws://localhost:3312; style-src 'self' 'unsafe-inline'; img-src 'self' data:" }
+  },
+  "bundle": { "active": true, "targets": "all" }
+}
