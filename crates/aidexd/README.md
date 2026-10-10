@@ -17,7 +17,7 @@ uses. Wire format, handshake, error codes, and naming rules:
 | `stream` | `NotificationSink` for subscription methods |
 | `transport` (private) | listener, per-connection reader/writer threads, bounded outbox, shutdown |
 | `services` | `Services`, built once and shared with handlers as `Arc<Services>` |
-| `methods/<domain>` | JSON-RPC adapters: `daemon.*` (status/ping/stop), `events.*` (replay) |
+| `methods/<domain>` | JSON-RPC adapters: `daemon.*` (status/ping/stop), `events.*` (replay/latest/subscribe), `vault.*` (status/init/unlock/lock/secret.set/secret.list/secret.delete/passphrase.change), `workspace.*` (registry, discovery, ephemeral review/apply/discard over `aidex-workspace`) |
 | `lifecycle` | `Daemon`, `DaemonHandle`, `serve`, `launch`, `stop`, stale-endpoint recovery |
 | `client` | `Client`, `Subscription`, `ClientError` |
 
@@ -89,10 +89,18 @@ handlers without sockets.
 
 ## Limitations
 
-- Methods: only `daemon.status|ping|stop` and `events.replay` exist. Event push
-  streaming (`events.subscribe`) and every other domain are future work.
-- The event database stays at `.aidex/runtime/events.sqlite` (PR #40); moving it
-  under `DrivePaths` is left to the events owner.
+- Methods: `daemon.status|ping|stop`, `events.replay|latest|subscribe`, `workspace.*`,
+  and `vault.*` exist; every other domain is future work.
+- The event log is `DrivePaths::sessions()/events.sqlite3` (100 000 events, 90
+  days). PR #40's `.aidex/runtime/events.sqlite` is superseded: it is imported once,
+  read-only, into an empty new log and then left untouched (safe to delete).
+  The daemon records `daemon.started` once its endpoint is published and
+  `daemon.stopping` before it closes connections (best effort; live subscribers
+  may only see it on replay). Each `events.subscribe` stream uses one thread.
+- `Services::vault()` returns the drive's `Arc<aidex_vault::VaultService>` (vault in
+  `DrivePaths::vault()`, default 30 min idle auto-lock). A damaged vault does not stop
+  the daemon; `vault.status` reports it as `unavailable`. Secret handles are issued and
+  resolved through `VaultService` in-process (for the broker), never over IPC.
 - DTOs for daemon methods live in this crate (`methods::*`), not in the
   generated `aidex-core` contract schema yet.
 - No per-client authorization beyond the bearer capability; any process of the

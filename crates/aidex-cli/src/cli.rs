@@ -2,7 +2,8 @@
 //! handlers in `commands/<domain>.rs`; add one variant here per domain.
 
 use crate::commands::{
-    agent::AgentCommand, daemon::DaemonCommand, events::EventsArgs, omp::SessionOptions,
+    agent::AgentCommand, daemon::DaemonCommand, events::EventsCommand, omp::SessionOptions,
+    vault::VaultCommand, workspace::WorkspaceArgs,
 };
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -58,10 +59,21 @@ pub enum Commands {
         #[command(subcommand)]
         command: DaemonCommand,
     },
-    /// Stream durable workspace events, reconnecting from the last printed cursor.
-    Events(EventsArgs),
+    /// Print or follow the drive's event log, resuming from the last printed cursor.
+    Events {
+        #[command(subcommand)]
+        command: EventsCommand,
+    },
     /// Check host information, drive health, and Oh My Pi availability.
     Doctor,
+    /// Manage the drive's encrypted vault and its secrets.
+    Vault {
+        #[command(subcommand)]
+        command: VaultCommand,
+    },
+    /// Manage host, drive, and ephemeral workspaces.
+    #[command(alias = "project")]
+    Workspace(WorkspaceArgs),
 }
 
 impl Commands {
@@ -78,8 +90,10 @@ impl Commands {
                 DaemonCommand::Status { .. } => "aidex daemon status",
                 DaemonCommand::Stop { .. } => "aidex daemon stop",
             },
-            Some(Self::Events(_)) => "aidex events",
+            Some(Self::Events { command }) => command.label(),
             Some(Self::Doctor) => "aidex doctor",
+            Some(Self::Vault { command }) => command.label(),
+            Some(Self::Workspace(args)) => args.command.label(),
         }
     }
 }
@@ -128,14 +142,39 @@ mod tests {
         };
         assert_eq!(drive, Some(PathBuf::from("/media/aidex")));
 
-        let cli = parse(&["events", "--workspace", "ws", "--after", "7", "--follow"]).unwrap();
-        let Some(Commands::Events(events)) = cli.command else {
-            panic!("expected events");
+        let cli = parse(&[
+            "events",
+            "tail",
+            "--workspace",
+            "ws",
+            "--after",
+            "7",
+            "--kind",
+            "tool",
+            "--kind",
+            "approval",
+            "--follow",
+        ])
+        .unwrap();
+        let Some(Commands::Events {
+            command: EventsCommand::Tail(tail),
+        }) = cli.command
+        else {
+            panic!("expected events tail");
         };
         assert_eq!(
-            (events.workspace.as_str(), events.after, events.follow),
-            ("ws", 7, true)
+            (tail.filter.workspace.as_deref(), tail.after, tail.follow),
+            (Some("ws"), 7, true)
         );
+        assert_eq!(tail.filter.kinds, ["tool", "approval"]);
+        let cli = parse(&["events", "show", "--after", "3", "--limit", "9"]).unwrap();
+        let Some(Commands::Events {
+            command: EventsCommand::Show(show),
+        }) = cli.command
+        else {
+            panic!("expected events show");
+        };
+        assert_eq!((show.after, show.limit), (3, 9));
 
         let cli = parse(&["run", "--cwd", ".", "explain", "this"]).unwrap();
         let Some(Commands::Run { prompt, options }) = cli.command else {
@@ -158,6 +197,7 @@ mod tests {
             &["init"][..],
             &["run"],
             &["events"],
+            &["events", "tail", "--after", "-1"],
             &["daemon", "restart"],
             &["--bogus"],
         ] {
