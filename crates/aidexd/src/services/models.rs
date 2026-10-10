@@ -2,6 +2,7 @@
 //! router, and the vault-backed credential resolver.
 
 use super::ServicesError;
+use aidex_auth::AuthService;
 use aidex_core::EntityId;
 use aidex_drive::DrivePaths;
 use aidex_events::{EventKind, EventScope, EventSink};
@@ -23,11 +24,19 @@ const CREDENTIAL_HANDLE_TTL: Duration = Duration::from_secs(30);
 /// environment or configuration.
 pub struct VaultCredentials {
     vault: Arc<VaultService>,
+    auth: Option<Arc<AuthService>>,
 }
 
 impl VaultCredentials {
     pub fn new(vault: Arc<VaultService>) -> Self {
-        Self { vault }
+        Self { vault, auth: None }
+    }
+
+    pub fn with_auth(vault: Arc<VaultService>, auth: Arc<AuthService>) -> Self {
+        Self {
+            vault,
+            auth: Some(auth),
+        }
     }
 }
 
@@ -64,6 +73,26 @@ impl CredentialResolver for VaultCredentials {
         provider: &ProviderId,
         secret_name: &str,
     ) -> Result<SecretBytes, CredentialError> {
+        if AuthService::owns_secret(provider.as_str(), secret_name) {
+            let auth = self
+                .auth
+                .as_ref()
+                .ok_or_else(|| CredentialError::Unavailable {
+                    reason: "ChatGPT authentication service is unavailable".into(),
+                })?;
+            let secret = auth
+                .resolve(provider.as_str(), secret_name)
+                .map_err(|error| {
+                    if error == aidex_auth::AuthError::Locked {
+                        CredentialError::Locked
+                    } else {
+                        CredentialError::Unavailable {
+                            reason: error.to_string(),
+                        }
+                    }
+                })?;
+            return Ok(SecretBytes::new(secret.expose().to_vec()));
+        }
         let name = SecretName::new(secret_name).map_err(|_| CredentialError::NotFound {
             secret_name: secret_name.to_owned(),
         })?;
@@ -179,6 +208,7 @@ impl ModelObserver for EventsModelObserver {
 
 /// The daemon's model services.
 pub struct ModelServices {
+    auth: Arc<AuthService>,
     registry: Arc<ProviderRegistry>,
     offline: Arc<OfflineMode>,
     router: ModelRouter,
@@ -196,19 +226,36 @@ impl ModelServices {
             OfflineMode::load(paths)
                 .map_err(|error| ServicesError::new("network", error.code(), error.to_string()))?,
         );
+        let network = offline.clone();
+        let auth = Arc::new(
+            AuthService::with_network_gate(vault.clone(), Arc::new(move || !network.is_offline()))
+                .map_err(|error| {
+                    ServicesError::new(
+                        "auth",
+                        aidex_core::ServiceErrorCode::Unavailable,
+                        error.to_string(),
+                    )
+                })?,
+        );
         let registry = ProviderRegistry::load(
             paths,
-            Arc::new(VaultCredentials::new(vault)),
+            Arc::new(VaultCredentials::with_auth(vault, auth.clone())),
             Arc::clone(&offline) as _,
         )
         .map_err(|error| ServicesError::new("providers", error.code(), error.to_string()))?
         .with_observer(Arc::clone(&observer));
         Ok(Self {
+            auth,
             registry: Arc::new(registry),
             offline,
             router: ModelRouter::new(),
             observer,
         })
+    }
+
+    /// Configured and runtime model providers.
+    pub fn auth(&self) -> &Arc<AuthService> {
+        &self.auth
     }
 
     /// Configured and runtime model providers.
@@ -252,6 +299,34 @@ mod tests {
     use super::*;
     use aidex_events::MemoryEventSink;
     use aidex_providers::{FallbackEvent, ProviderErrorKind};
+
+    #[test]
+    fn oauth_names_never_release_stale_tokens_without_a_valid_auth_profile() {
+        use aidex_vault::{SecretKind, SecretPolicy, SecretString, VaultServiceConfig};
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Arc::new(
+            VaultService::open(dir.path().join("vault"), VaultServiceConfig::default()).unwrap(),
+        );
+        vault
+            .init(&SecretString::new("fixture passphrase only".into()), false)
+            .unwrap();
+        let provider = ProviderId::new("openai").unwrap();
+        vault
+            .put_secret(
+                &SecretName::new("oauth.openai.access").unwrap(),
+                SecretKind::Token,
+                aidex_vault::SecretBytes::new(b"stale-fixture-token".to_vec()),
+                SecretPolicy::new([ConsumerScope::provider("openai").unwrap()]).unwrap(),
+            )
+            .unwrap();
+        let auth = Arc::new(AuthService::new(vault.clone()).unwrap());
+        let credentials = VaultCredentials::with_auth(vault, auth);
+        assert!(
+            credentials
+                .resolve(&provider, "oauth.openai.access")
+                .is_err()
+        );
+    }
 
     #[test]
     fn model_notifications_become_typed_catalog_events() {

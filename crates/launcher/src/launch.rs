@@ -1,4 +1,4 @@
-//! Verify the active bundle, then run its `aidex` CLI with the caller's arguments.
+//! Verify the active bundle, then open its desktop or run an explicit CLI command.
 
 use std::{
     env,
@@ -75,7 +75,12 @@ pub fn resolve(scope: VerifyScope) -> Result<Resolved, LaunchError> {
 /// Verify the critical files, then run the CLI. On Unix the launcher process is
 /// replaced (`exec`); on Windows the CLI's exit code is returned.
 pub fn run(args: Vec<OsString>) -> Result<i32, LaunchError> {
-    let resolved = resolve(VerifyScope::Critical)?;
+    // Desktop libraries outside bin/ must also be checked before opening the app.
+    let resolved = resolve(if args.is_empty() {
+        VerifyScope::All
+    } else {
+        VerifyScope::Critical
+    })?;
     let manifest = &resolved.active.bundle.manifest;
     let cli_entry = manifest
         .file(FileRole::Cli)
@@ -85,7 +90,22 @@ pub fn run(args: Vec<OsString>) -> Result<i32, LaunchError> {
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| resolved.bundle_dir());
-    let mut command = Command::new(&cli);
+    let desktop_name = manifest.target.executable_name("aidex-desktop");
+    let desktop = manifest.files.iter().find(|entry| {
+        entry.role == FileRole::Desktop
+            && entry.executable
+            && Path::new(&entry.path)
+                .file_name()
+                .is_some_and(|name| name == desktop_name.as_str())
+    });
+    let program = if args.is_empty() {
+        desktop
+            .map(|entry| display_path(&resolved.active.file_path(&entry.path)))
+            .unwrap_or_else(|| cli.clone())
+    } else {
+        cli.clone()
+    };
+    let mut command = Command::new(&program);
     command
         .args(args)
         .env("AIDEX_DRIVE_ROOT", resolved.drive_root())
@@ -94,7 +114,7 @@ pub fn run(args: Vec<OsString>) -> Result<i32, LaunchError> {
         .env("AIDEX_BUNDLE_TARGET", manifest.target.as_str())
         .env("AIDEX_LAUNCHER_VERSION", env!("CARGO_PKG_VERSION"))
         .env("PATH", prepend_path(&bin)?);
-    exec(command, &cli)
+    exec(command, &program)
 }
 
 /// `bin` followed by the inherited `PATH` entries.

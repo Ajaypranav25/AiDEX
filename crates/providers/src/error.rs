@@ -8,6 +8,24 @@ use std::{fmt, time::Duration};
 use aidex_core::ServiceErrorCode;
 use serde::{Deserialize, Serialize};
 
+/// Recognized ChatGPT plan-route failures. Keep their recovery identity without
+/// accepting arbitrary upstream strings across the error boundary.
+pub(crate) fn chatgpt_error_status(code: &str) -> Option<u16> {
+    match code {
+        "subscription_sharing_user_not_eligible"
+        | "subscription_sharing_route_not_supported"
+        | "chatpass_v2_scope_not_authorized"
+        | "chatpass_v2_invalid_authorization_context" => Some(403),
+        "subscription_sharing_usage_limit_exceeded" => Some(429),
+        "subscription_sharing_usage_unavailable" | "subscription_sharing_user_unavailable" => {
+            Some(503)
+        }
+        "subscription_sharing_unsupported_capability" => Some(400),
+        "subscription_sharing_invalid_user" => Some(401),
+        _ => None,
+    }
+}
+
 /// Why a credential could not be produced. Carries names, never secret values.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CredentialError {
@@ -183,10 +201,20 @@ impl ProviderError {
     /// any change by the user: unavailability, rate limits, timeouts, and HTTP
     /// 408/425/429/5xx. Authentication, credential, privacy, cancellation,
     /// protocol, and request errors are never retryable.
-    pub const fn is_retryable(&self) -> bool {
+    /// ChatGPT plan-route errors also stop automatic provider/billing fallback;
+    /// temporary availability may be retried explicitly later.
+    pub fn is_retryable(&self) -> bool {
         match self {
             Self::Unavailable { .. } | Self::RateLimited { .. } | Self::Timeout => true,
-            Self::Http { status, .. } => {
+            Self::Http { status, code } => {
+                // Plan failures must stop this inference attempt rather than
+                // switch to another provider/billing path. A caller may retry
+                // temporary plan availability explicitly at a later time.
+                if let Some(code) = code
+                    && chatgpt_error_status(code).is_some()
+                {
+                    return false;
+                }
                 matches!(*status, 408 | 425 | 429) || (*status >= 500 && *status <= 599)
             }
             _ => false,

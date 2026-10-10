@@ -5,6 +5,7 @@
 //! are added here as fields constructed in [`Services::open`]; their JSON-RPC
 //! adapters live in `methods/<domain>.rs`.
 
+mod inference;
 mod models;
 
 pub use models::{EventsModelObserver, ModelServices, VaultCredentials, model_event_kind};
@@ -55,11 +56,13 @@ pub struct Services {
     shutdown: ShutdownSignal,
     events: EventLog,
     vault: Arc<VaultService>,
-    workspaces: WorkspaceRegistry,
+    workspaces: Arc<WorkspaceRegistry>,
     models: ModelServices,
     sessions: Arc<SessionStore>,
     session_recovery: RecoveryReport,
     context: Arc<ContextService>,
+    native: Arc<aidex_harness::NativeEngine>,
+    inference: Arc<aidex_inference::InferenceService>,
 }
 
 impl Services {
@@ -90,8 +93,10 @@ impl Services {
             .map_err(|error| ServicesError::new("vault", error.code(), error.to_string()))?;
         let vault = VaultService::open(vault_dir, VaultServiceConfig::default())
             .map_err(|error| ServicesError::new("vault", error.code(), error.to_string()))?;
-        let workspaces = WorkspaceRegistry::open(&paths)
-            .map_err(|error| ServicesError::new("workspace", error.code(), error.to_string()))?;
+        let workspaces =
+            Arc::new(WorkspaceRegistry::open(&paths).map_err(|error| {
+                ServicesError::new("workspace", error.code(), error.to_string())
+            })?);
         let vault = Arc::new(vault);
         // Model notifications are recorded as typed `model.*` events.
         let models = ModelServices::open(
@@ -102,6 +107,21 @@ impl Services {
         let (sessions, session_recovery) = open_sessions(&paths, &events)?;
         let context = ContextService::open(&paths, Arc::new(events.clone()))
             .map_err(|error| ServicesError::new("context", error.code(), error.to_string()))?;
+        let private_sessions = Arc::new(
+            aidex_native_sessions::SessionStore::open(
+                paths.sessions().join("native.sqlite3"),
+                vault.clone(),
+            )
+            .map_err(|e| ServicesError::new("native", ServiceErrorCode::Unavailable, e))?,
+        );
+        let native = aidex_harness::NativeEngine::new(
+            private_sessions,
+            models.registry().clone(),
+            workspaces.clone(),
+            Arc::new(events.clone()),
+            runtime.join("native-processes"),
+        );
+        let inference = inference::open_inference(&paths, &models)?;
         Ok(Self {
             drive_root: drive_root.to_path_buf(),
             paths,
@@ -115,6 +135,8 @@ impl Services {
             sessions: Arc::new(sessions),
             session_recovery,
             context: Arc::new(context),
+            native,
+            inference,
         })
     }
 
@@ -176,6 +198,12 @@ impl Services {
     /// (`aidex-context`). Dropping the services cancels running index jobs.
     pub fn context(&self) -> &Arc<ContextService> {
         &self.context
+    }
+    pub fn native(&self) -> &Arc<aidex_harness::NativeEngine> {
+        &self.native
+    }
+    pub fn inference(&self) -> &Arc<aidex_inference::InferenceService> {
+        &self.inference
     }
 }
 

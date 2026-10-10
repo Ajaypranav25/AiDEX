@@ -30,6 +30,8 @@ pub const MODEL_ROUTE: &str = "model.route";
 pub const MODEL_USE: &str = "model.use";
 pub const MODEL_DEFAULT: &str = "model.default";
 pub const PROVIDER_ADD: &str = "provider.add";
+pub const PROVIDER_UPDATE: &str = "provider.update";
+pub const PROVIDER_PRESETS: &str = "provider.presets";
 pub const PROVIDER_REMOVE: &str = "provider.remove";
 pub const PROVIDER_HEALTH: &str = "provider.health";
 pub const NETWORK_OFFLINE: &str = "network.offline";
@@ -283,7 +285,11 @@ fn route(services: &Services, params: RouteParams) -> Result<RouteResult, RpcErr
     })
 }
 
-fn add(services: &Services, params: ProviderAddParams) -> Result<ProviderEntry, RpcError> {
+fn add(
+    services: &Services,
+    params: ProviderAddParams,
+    update: bool,
+) -> Result<ProviderEntry, RpcError> {
     let mut config = ProviderConfig::new(provider_id(&params.id)?, params.kind, params.base_url);
     config.locality = params.locality;
     config.discover_models = params.discover_models;
@@ -291,11 +297,13 @@ fn add(services: &Services, params: ProviderAddParams) -> Result<ProviderEntry, 
     if let Some(secret_name) = params.secret_name {
         config.auth = AuthConfig::VaultSecret { secret_name };
     }
-    let descriptor = services
-        .models()
-        .registry()
-        .add_provider(config)
-        .map_err(registry_error)?;
+    let registry = services.models().registry();
+    let descriptor = if update {
+        registry.update_provider(config)
+    } else {
+        registry.add_provider(config)
+    }
+    .map_err(registry_error)?;
     Ok(ProviderEntry {
         descriptor,
         origin: aidex_providers::ProviderOrigin::Configured,
@@ -355,7 +363,15 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
     })?;
     let shared = Arc::clone(services);
     router.register(PROVIDER_ADD, move |_context, params| {
-        to_result(&add(&shared, parse_params(params)?)?)
+        to_result(&add(&shared, parse_params(params)?, false)?)
+    })?;
+    let shared = Arc::clone(services);
+    router.register(PROVIDER_UPDATE, move |_context, params| {
+        to_result(&add(&shared, parse_params(params)?, true)?)
+    })?;
+    router.register(PROVIDER_PRESETS, move |_context, params| {
+        expect_no_params(&params)?;
+        to_result(&json!({ "presets": aidex_providers::provider_presets() }))
     })?;
     let shared = Arc::clone(services);
     router.register(PROVIDER_REMOVE, move |_context, params| {
@@ -411,6 +427,51 @@ mod tests {
         router::{CallContext, ClientInfo},
     };
     use aidex_providers::{FakeProvider, ModelRole, ToolCallSupport};
+
+    #[test]
+    fn presets_and_account_update_expose_protocol_and_persist_custom_models() {
+        let (_root, services, router, context) = fixture();
+        let presets = router.call(&context, "provider.presets", serde_json::Value::Null);
+        assert!(
+            presets.is_ok(),
+            "provider presets must be exposed: {presets:?}"
+        );
+        let presets = presets.unwrap();
+        let presets = presets["presets"].as_array().unwrap();
+        assert!(
+            presets
+                .iter()
+                .any(|p| p["id"] == "anthropic" && p["kind"] == "anthropic")
+        );
+        assert!(
+            presets
+                .iter()
+                .any(|p| p["id"] == "openrouter" && p["kind"] == "openai-compatible")
+        );
+        router.call(&context, PROVIDER_ADD, json!({"id":"custom","base_url":"http://127.0.0.1:1/v1","discover_models":false,"models":[{"id":"custom-a","context_window":8192}]})).unwrap();
+        let updated = router.call(&context, "provider.update", json!({"id":"custom","base_url":"http://127.0.0.1:2/v1","discover_models":false,"models":[{"id":"custom-b","context_window":16384,"tool_calls":"native"}]}));
+        assert!(
+            updated.is_ok(),
+            "account update must be exposed: {updated:?}"
+        );
+        assert_eq!(
+            services.models().registry().models().models[0]
+                .model
+                .model_id
+                .as_str(),
+            "custom-b"
+        );
+        assert_eq!(
+            services.models().registry().models().models[0].context_window,
+            16384
+        );
+        let stored = services
+            .models()
+            .registry()
+            .provider_config(&ProviderId::new("custom").unwrap())
+            .unwrap();
+        assert_eq!(stored.base_url, "http://127.0.0.1:2/v1");
+    }
 
     fn fixture() -> (tempfile::TempDir, Arc<Services>, Router, CallContext) {
         let root = crate::services::testing::temp_drive();

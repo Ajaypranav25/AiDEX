@@ -144,27 +144,27 @@ pub fn assemble(
         }
     }
 
-    if request.include.memory {
-        if let Some(store) = sources.memory {
-            add_memories(&mut packer, store, request, &terms)?;
-        }
+    if request.include.memory
+        && let Some(store) = sources.memory
+    {
+        add_memories(&mut packer, store, request, &terms)?;
     }
 
     let index_state = match sources.index {
         Some(index) => index.summary()?.state,
         None => IndexState::Empty,
     };
-    if request.include.search_hits {
-        if let Some(index) = sources.index {
-            add_retrieved(
-                &mut packer,
-                index,
-                &mut checker,
-                &request.task_text,
-                &terms,
-                &explicit_files,
-            )?;
-        }
+    if request.include.search_hits
+        && let Some(index) = sources.index
+    {
+        add_retrieved(
+            &mut packer,
+            index,
+            &mut checker,
+            &request.task_text,
+            &terms,
+            &explicit_files,
+        )?;
     }
 
     let total_tokens = packer.items.iter().map(|item| item.tokens).sum();
@@ -738,14 +738,14 @@ fn add_retrieved(
         }
         let path = chunk.path.clone();
         let alone = BTreeMap::from([(chunk.ordinal, chunk.clone())]);
-        if !try_select(packer, &mut files, chunk, candidate.score) {
-            if let Some(source) = file_source(&path, lines) {
-                let cost = render_file(packer, &path, &alone)
-                    .iter()
-                    .map(|(_, _, tokens)| tokens)
-                    .sum();
-                packer.drop_item(source, DropReason::Budget, Some(cost));
-            }
+        if !try_select(packer, &mut files, chunk, candidate.score)
+            && let Some(source) = file_source(&path, lines)
+        {
+            let cost = render_file(packer, &path, &alone)
+                .iter()
+                .map(|(_, _, tokens)| tokens)
+                .sum();
+            packer.drop_item(source, DropReason::Budget, Some(cost));
         }
     }
 
