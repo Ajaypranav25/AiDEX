@@ -19,7 +19,13 @@ These properties are requirements from the product specification, not current im
 - Secret names, kinds, consumer policies, and values are encrypted at rest. Tampering, truncation, swapped or foreign records, missing headers, unknown versions, and symlinked paths are explicit errors; nothing falls back to plaintext or to an empty vault. Interrupted writes leave the previous committed state readable.
 - Values leave the vault only when the broker resolves a scoped, expiring, revocable handle for a consumer the secret's policy names (`provider:`, `mcp:`, `process:`, `git:`). Model prompts, agents, sessions, logs, and shell environments can never be consumers. Handle issuance and resolution are in-process Rust APIs (`VaultService`), not IPC methods. Lock, idle auto-lock (30 min default), and daemon restart invalidate every handle.
 - There is no online lockout for an offline drive: passphrase strength is the protection against offline guessing. A lost passphrase without a recovery key is unrecoverable; encrypted backups protect against drive loss, not credential loss.
-- Not yet done: independent cryptographic review (required before release), memory locking, zeroization of IPC request buffers, whole-vault rollback detection, audit events, phone factor, and host-trust policies.
+- `vault.init|unlock|lock` record drive-wide `vault.unlocked`/`vault.locked` events (vault id only). Not yet done: independent cryptographic review (required before release), memory locking, zeroization of IPC request buffers, whole-vault rollback detection, audit events for secret changes and handle grants, phone factor, and host-trust policies.
+
+## Sessions (`crates/sessions`)
+
+- Session records must reference credentials by vault handle or `SecretRef`, never by value. As defence in depth every persisted text field (titles, messages, tool inputs and summaries, failure reasons, checkpoint labels and payloads, UTF-8 artifacts) passes through `aidex_events::redact_text` before it is written; binary artifacts are stored unchanged, and pattern-based redaction cannot recognise arbitrary secrets.
+- Approvals are referenced with the intent fingerprint they approve, are never carried into a branch, and pending ones are cancelled when a session is interrupted; a resume lists them as needing a new decision.
+- Host fingerprints are salted per drive (`private_config/host-salt`), never store the hostname, and read no hardware identifiers. The session database is not encrypted at rest.
 
 ## Process sandbox
 

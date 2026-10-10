@@ -11,6 +11,7 @@ pub mod doctor;
 pub mod drive;
 pub mod events;
 pub mod omp;
+pub mod session;
 pub mod vault;
 pub mod workspace;
 
@@ -33,5 +34,6 @@ pub fn dispatch(command: Option<Commands>, output: Output) -> Result<Exit, CliEr
         Some(Commands::Doctor) => doctor::run(output),
         Some(Commands::Vault { command }) => vault::run(command, output),
         Some(Commands::Workspace(args)) => workspace::run(args, output),
+        Some(Commands::Session(args)) => session::run(args, output),
     }
 }
