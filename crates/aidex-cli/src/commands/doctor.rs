@@ -1,7 +1,8 @@
 //! `aidex doctor`: host, active drive, daemon, and Oh My Pi diagnostics.
 //!
-//! Exits 0 only when the drive is healthy and Oh My Pi is available; the
-//! daemon check is informational.
+//! Exits 0 only when the drive is healthy, Oh My Pi is available, and an installed
+//! bundle (if any) verifies; the daemon check is informational. `integrity` reports
+//! the installed bundle's version, signer key id, verification, and SBOM.
 
 use crate::{
     commands::{
@@ -9,12 +10,15 @@ use crate::{
         daemon::CLIENT_NAME,
         drive::{DriveReport, print_status, print_unavailable},
         omp::install_hint,
+        update::{local_integrity, print_integrity},
     },
     exit::{CliError, Exit},
     output::Output,
 };
+use aidex_bundle::VerifyScope;
 use aidex_drive::{resolve_root, status as drive_status};
 use aidex_host::HostInfo;
+use aidex_updater::IntegrityReport;
 use aidexd::{
     Client,
     methods::daemon::{DaemonStatus, STATUS},
@@ -56,6 +60,9 @@ struct DoctorReport {
     drive: DriveCheck,
     daemon: DaemonCheck,
     oh_my_pi: AgentRuntime,
+    /// The installed bundle for this host (critical files and signature, as the
+    /// launcher checks them); `null` without an active drive.
+    integrity: Option<IntegrityReport>,
 }
 
 pub fn run(output: Output) -> Result<Exit, CliError> {
@@ -122,8 +129,15 @@ pub fn run(output: Output) -> Result<Exit, CliError> {
         }
     };
     let runtime = oh_my_pi();
+    let integrity = root
+        .as_ref()
+        .ok()
+        .map(|root| local_integrity(root, VerifyScope::Critical, false));
+    let integrity_ok = integrity
+        .as_ref()
+        .is_none_or(|report| !report.installed || report.verified);
     let report = DoctorReport {
-        ok: drive.ok && runtime.available,
+        ok: drive.ok && runtime.available && integrity_ok,
         cli_version: env!("CARGO_PKG_VERSION"),
         host: HostReport {
             os: host.os,
@@ -133,6 +147,7 @@ pub fn run(output: Output) -> Result<Exit, CliError> {
         drive,
         daemon,
         oh_my_pi: runtime,
+        integrity,
     };
     output.emit(&report, || {
         println!("AiDEX CLI {}", report.cli_version);
@@ -141,6 +156,9 @@ pub fn run(output: Output) -> Result<Exit, CliError> {
             println!("Working directory: {}", current_dir.display());
         }
         human_drive();
+        if let Some(integrity) = &report.integrity {
+            print_integrity(integrity);
+        }
         match (report.daemon.running, report.daemon.pid) {
             (true, Some(pid)) => println!("Daemon: running (pid {pid})"),
             _ => println!("Daemon: not running"),

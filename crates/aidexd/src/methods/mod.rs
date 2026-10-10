@@ -18,6 +18,7 @@ pub mod native_history;
 pub mod native_view;
 pub mod sessions;
 pub mod settings;
+pub mod update;
 pub mod vault;
 pub mod workspace;
 pub mod workspace_live;
@@ -73,6 +74,7 @@ pub(crate) fn register_all(
     memory::register(router, services)?;
     models::register(router, services)?;
     sessions::register(router, services)?;
+    update::register(router, services)?;
     vault::register(router, services)?;
     workspace::register(router, services)?;
     Ok(())

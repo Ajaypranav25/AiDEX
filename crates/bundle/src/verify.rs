@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     BundleError, BundleManifest, DocumentError, IntegrityProblem, MANIFEST_FILE_NAME,
@@ -19,7 +19,7 @@ use crate::{
 };
 
 /// Which files [`verify_bundle`] hashes.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum VerifyScope {
     /// Critical roles (launcher, cli, daemon, helper, runtime), and `bin/` must hold
@@ -194,7 +194,8 @@ fn verify_file(bundle_dir: &Path, file: &BundleFile) -> Result<(), BundleError> 
 }
 
 /// Walk `relative` under `bundle_dir` and fail on any link, or on any regular file
-/// that is not listed (`bundle.json` at the top is allowed). With `recurse` false,
+/// that is not listed (`bundle.json` and `bundle.sig` at the top are allowed; the
+/// signature is checked separately). With `recurse` false,
 /// subdirectories are themselves treated as unlisted entries.
 fn reject_unlisted(
     bundle_dir: &Path,
@@ -257,8 +258,12 @@ fn reject_unlisted(
                 IntegrityProblem::Unlisted,
             ));
         }
-        let is_manifest = relative.is_empty() && fold(&child) == MANIFEST_FILE_NAME;
-        if !is_manifest && (name.to_str().is_none() || !listed.contains(&fold(&child))) {
+        let is_reserved = relative.is_empty()
+            && matches!(
+                fold(&child).as_str(),
+                MANIFEST_FILE_NAME | crate::SIGNATURE_FILE_NAME
+            );
+        if !is_reserved && (name.to_str().is_none() || !listed.contains(&fold(&child))) {
             return Err(BundleError::integrity(
                 bundle_dir,
                 child,

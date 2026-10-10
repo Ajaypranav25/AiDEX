@@ -18,11 +18,16 @@ fn a_background_install_reports_success_only_after_a_verified_pointer_switch() {
     assert!(finished.report.is_some());
     let paths = DrivePaths::open(drive.path()).unwrap();
     assert_eq!(
-        resolve_active(&paths, Target::host().unwrap(), VerifyScope::All)
-            .unwrap()
-            .bundle
-            .manifest
-            .version,
+        resolve_active(
+            &paths,
+            Target::host().unwrap(),
+            VerifyScope::All,
+            &common::unsigned()
+        )
+        .unwrap()
+        .bundle
+        .manifest
+        .version,
         "0.1.0"
     );
     assert!(drive.path().join(".aidex/runtime/install-jobs").is_dir());

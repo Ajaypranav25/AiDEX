@@ -24,6 +24,7 @@ members = [
     "crates/tools",
     "crates/harness",
     "crates/storage",
+    "crates/updater",
     "crates/vault",
     "crates/workspace",
 ]

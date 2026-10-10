@@ -1,4 +1,4 @@
-//! `aidex-packager`: build, install, and smoke-test portable AiDEX bundles.
+//! `aidex-packager`: build, sign, verify, install, and smoke-test portable AiDEX bundles.
 //!
 //! A developer/CI tool, never shipped inside a bundle. It drives `cargo` and `git`,
 //! collects license metadata from `cargo metadata`, and uses `aidex-bundle` for the
@@ -10,6 +10,8 @@ mod error;
 mod install;
 mod licenses;
 mod output;
+mod sbom;
+mod signing;
 mod smoke;
 mod workspace;
 
@@ -29,6 +31,15 @@ fn main() -> ExitCode {
         }
         Command::Smoke(args) => {
             smoke::run(args).and_then(|report| output::smoke(&report, cli.json))
+        }
+        Command::Keygen(args) => {
+            signing::keygen(args).and_then(|report| output::keygen(&report, cli.json))
+        }
+        Command::Sign(args) => {
+            signing::sign(args).and_then(|report| output::sign(&report, cli.json))
+        }
+        Command::Verify(args) => {
+            signing::verify(args).and_then(|report| output::verify(&report, cli.json))
         }
     };
     match result {

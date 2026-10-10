@@ -70,6 +70,9 @@ pub struct DaemonOptions {
     pub poll_interval: Duration,
     /// Defaults to `root.is_dir()`; a `false` result stops the daemon.
     pub drive_present: DriveProbe,
+    /// Updater trust store and self-test; `None` uses the built-in trust store and
+    /// the process self-test (tests inject run-time keys here).
+    pub updater: Option<aidex_updater::UpdaterConfig>,
 }
 
 impl Default for DaemonOptions {
@@ -78,6 +81,7 @@ impl Default for DaemonOptions {
             transport: TransportConfig::default(),
             poll_interval: Duration::from_millis(50),
             drive_present: Arc::new(|root: &Path| root.is_dir()),
+            updater: None,
         }
     }
 }
@@ -201,8 +205,10 @@ impl Daemon {
             return Err(DaemonError::DriveUnavailable(root.to_path_buf()));
         }
         let shutdown = ShutdownSignal::new();
-        let services =
-            Arc::new(Services::open(root, shutdown.clone()).map_err(DaemonError::Services)?);
+        let services = Arc::new(
+            Services::open_with(root, shutdown.clone(), options.updater.clone())
+                .map_err(DaemonError::Services)?,
+        );
         let mut router = Router::new();
         methods::register_all(&mut router, &services).map_err(DaemonError::Router)?;
         Ok(Self {
@@ -248,6 +254,9 @@ impl Daemon {
             token,
         };
         endpoint::publish(&self.root, &endpoint).map_err(DaemonError::Endpoint)?;
+        // This daemon now owns the drive: finish or roll back an interrupted update
+        // before serving (outcome and failures are events and `update.status`).
+        self.services.recover_updates();
         let events = self.services.events().clone();
         let started = EventKind::DaemonStarted {
             pid: self.services.pid(),

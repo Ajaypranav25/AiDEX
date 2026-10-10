@@ -9,7 +9,7 @@ use std::{
 use flate2::{Compression, GzBuilder, read::GzDecoder};
 use tar::{Archive, Builder, EntryType, Header};
 
-use super::{Extractor, Member};
+use super::{Extractor, Member, unsafe_entry};
 use crate::BundleError;
 
 pub(super) fn write(
@@ -86,9 +86,12 @@ pub(super) fn extract(archive: &Path, sink: &mut Extractor) -> Result<(), Bundle
                 sink.file(&name, size, &mut entry)?;
             }
             other => {
-                return Err(BundleError::Archive(format!(
-                    "`{name}` has unsupported entry type {other:?}; links and special files are not allowed in bundles"
-                )));
+                return Err(unsafe_entry(
+                    &name,
+                    format!(
+                        "unsupported entry type {other:?}; links and special files are not allowed in bundles"
+                    ),
+                ));
             }
         }
     }

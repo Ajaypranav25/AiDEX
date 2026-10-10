@@ -9,6 +9,7 @@ on:
       - "crates/bundle/**"
       - "crates/launcher/**"
       - "crates/packager/**"
+      - "crates/updater/**"
       - "portable/packaging/**"
       - ".github/workflows/package.yml"
   workflow_dispatch:
@@ -36,12 +37,15 @@ jobs:
           - os: windows-latest
             target: windows-x64
             triple: x86_64-pc-windows-msvc
+            archive: zip
           - os: ubuntu-latest
             target: linux-x64
             triple: x86_64-unknown-linux-musl
+            archive: tar.gz
           - os: macos-latest
             target: macos-arm64
             triple: aarch64-apple-darwin
+            archive: tar.gz
     defaults:
       run:
         shell: bash
@@ -61,17 +65,44 @@ jobs:
         with:
           key: package-${{ matrix.target }}
 
-      - name: Build bundle
-        run: cargo run --locked -p aidex-packager -- build --target ${{ matrix.target }} --out dist
+      # An ephemeral key, generated in this job and gone with its runner: it proves the
+      # signing and verification path, nothing more. It is not a release key and its
+      # secret half is never uploaded. Releases are signed with the protected release key
+      # (portable/packaging/README.md#signing-keys); no signing secret is used here.
+      - name: Generate an ephemeral CI signing key
+        run: cargo run --locked -p aidex-packager -- keygen --name ci-ephemeral --out "$RUNNER_TEMP/aidex-keys"
 
-      # Installs the archive into a fresh developer drive under the runner temp
+      # The CI key is baked into these binaries (AIDEX_BUILD_TRUSTED_KEYS) so the launcher
+      # and CLI accept the bundle this job signs. Release builds trust release keys only.
+      - name: Build bundle
+        run: |
+          cargo run --locked -p aidex-packager -- build --target ${{ matrix.target }} --out dist \
+            --trust-key "$RUNNER_TEMP/aidex-keys/ci-ephemeral.pub.json"
+
+      - name: Sign bundle
+        run: |
+          cargo run --locked -p aidex-packager -- sign \
+            --key "$RUNNER_TEMP/aidex-keys/ci-ephemeral.key" \
+            dist/aidex-*-${{ matrix.target }}.${{ matrix.archive }}
+          cp "$RUNNER_TEMP/aidex-keys/ci-ephemeral.pub.json" dist/
+
+      - name: Verify signature, checksums, and SBOM
+        run: |
+          cargo run --locked -p aidex-packager -- --json verify \
+            --trust-key dist/ci-ephemeral.pub.json \
+            dist/aidex-*-${{ matrix.target }}.${{ matrix.archive }} > dist/verify-${{ matrix.target }}.json
+          cat dist/verify-${{ matrix.target }}.json
+
+      # Installs the signed archive into a fresh developer drive under the runner temp
       # directory, runs AiDEX.exe / ./aidex (--launcher-verify, --version, doctor --json,
-      # daemon start/status/stop), and fails on new entries in the user's home,
+      # update verify, daemon start/status/stop) and requires the bundled CLI to report
+      # the same signer and a valid SBOM; fails on new entries in the user's home,
       # config, data, and cache directories or on unexpected names at the drive root.
       - name: Smoke-test bundle
         run: |
           cargo run --locked -p aidex-packager -- --json smoke \
-            --archive dist/aidex-*-${{ matrix.target }}.* \
+            --archive dist/aidex-*-${{ matrix.target }}.${{ matrix.archive }} \
+            --trust-key dist/ci-ephemeral.pub.json \
             --work "$RUNNER_TEMP/aidex-smoke" > dist/smoke-${{ matrix.target }}.json
           cat dist/smoke-${{ matrix.target }}.json
 
@@ -81,6 +112,9 @@ jobs:
           path: |
             dist/*.zip
             dist/*.tar.gz
+            dist/*.cdx.json
             dist/SHA256SUMS
+            dist/ci-ephemeral.pub.json
+            dist/verify-${{ matrix.target }}.json
             dist/smoke-${{ matrix.target }}.json
           if-no-files-found: error

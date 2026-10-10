@@ -2,9 +2,11 @@
 //! that the launcher, CLI, and daemon run from it without leaving host residue.
 //!
 //! Steps: check the archive against `SHA256SUMS` (when present) → initialize
-//! `<work>/drive` (removable check skipped) → snapshot host directories → install →
+//! `<work>/drive` (removable check skipped) → snapshot host directories → install
+//! (signature checked against the built-in keys plus `--trust-key`) →
 //! run the drive-root entry with `--launcher-verify`, `--version`, `doctor --json`,
-//! `daemon start`, `daemon status --json`, `daemon stop` → compare snapshots → check
+//! `update verify`, `daemon start`, `daemon status --json`, `daemon stop` → compare
+//! snapshots → check
 //! that the drive root holds only AiDEX-owned names.
 
 mod process;
@@ -18,7 +20,8 @@ use std::{
 };
 
 use aidex_bundle::{
-    InstallReport, InstallSource, SHA256SUMS_FILE_NAME, Sha256Sums, Target, install,
+    InstallReport, InstallSource, SHA256SUMS_FILE_NAME, Sha256Sums, SignatureState, Target,
+    install_signed,
     layout::{PREVIOUS_SUFFIX, UNIX_ROOT_LAUNCHER, WINDOWS_ROOT_LAUNCHER},
     sha256_file,
 };
@@ -26,7 +29,7 @@ use aidex_drive::{DriveLayout, InitOptions, MANIFEST_FILE_NAME, init_with};
 use serde::Serialize;
 use serde_json::Value;
 
-use crate::{cli::SmokeArgs, error::PackagerError};
+use crate::{cli::SmokeArgs, error::PackagerError, signing::policy};
 use process::Ran;
 
 #[derive(Debug, Serialize)]
@@ -45,6 +48,10 @@ pub struct DoctorSummary {
     pub drive_ok: Option<bool>,
     pub drive_error: Option<String>,
     pub oh_my_pi_available: Option<bool>,
+    /// The bundled CLI's own integrity report (`doctor --json` → `integrity`).
+    pub integrity_verified: Option<bool>,
+    pub signer_key_id: Option<String>,
+    pub sbom_valid: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -73,6 +80,7 @@ pub fn run(args: &SmokeArgs) -> Result<SmokeReport, PackagerError> {
         )
     })?;
     let checksum = check_sums(&args.archive, &archive_sha256)?;
+    let policy = policy(&args.trust.trust_key, args.trust.allow_unsigned)?;
 
     fs::create_dir_all(&args.work).map_err(|error| {
         PackagerError::io(
@@ -106,7 +114,12 @@ pub fn run(args: &SmokeArgs) -> Result<SmokeReport, PackagerError> {
     let before = residue::Snapshot::take(&watched);
 
     let started = Instant::now();
-    let report = install(&InstallSource::from_path(&args.archive)?, &drive)?;
+    let report = install_signed(
+        &InstallSource::from_path(&args.archive)?,
+        &drive,
+        &policy,
+        &mut |_| Ok(()),
+    )?;
     let install_ms = started.elapsed().as_millis();
     progress(&format!(
         "installed {} into {} ({install_ms} ms)",
@@ -128,10 +141,18 @@ pub fn run(args: &SmokeArgs) -> Result<SmokeReport, PackagerError> {
     });
 
     let mut commands = Vec::new();
-    let mut step = |arguments: &[&str]| step(&entry, arguments, &work, timeout, &mut commands);
+    // Unsigned bundles run only with the launcher's explicit host-side opt-in.
+    let env: Vec<(&str, &str)> = if args.trust.allow_unsigned {
+        vec![("AIDEX_ALLOW_UNSIGNED", "1")]
+    } else {
+        Vec::new()
+    };
+    let mut step =
+        |arguments: &[&str]| step(&entry, arguments, &work, &env, timeout, &mut commands);
     let verify = step(&["--launcher-verify"])?;
     let version = step(&["--version"])?;
     let doctor = step(&["doctor", "--json"])?;
+    let integrity = step(&["--json", "update", "verify"])?;
     // Always try to stop the daemon, even when starting or querying it failed.
     let start = step(&["daemon", "start"]);
     let daemon_status = step(&["daemon", "status", "--json"]);
@@ -180,7 +201,36 @@ pub fn run(args: &SmokeArgs) -> Result<SmokeReport, PackagerError> {
         drive_ok: doctor_json["drive"]["ok"].as_bool(),
         drive_error: doctor_json["drive"]["error"].as_str().map(str::to_owned),
         oh_my_pi_available: doctor_json["oh_my_pi"]["available"].as_bool(),
+        integrity_verified: doctor_json["integrity"]["verified"].as_bool(),
+        signer_key_id: doctor_json["integrity"]["signer_key_id"]
+            .as_str()
+            .map(str::to_owned),
+        sbom_valid: doctor_json["integrity"]["sbom"]["valid"].as_bool(),
     };
+    // The bundled CLI must confirm what the installer verified: same signer, valid SBOM.
+    let expected_signer = match &report.signature {
+        Some(SignatureState::Verified { key_id, .. }) => Some(key_id.clone()),
+        _ => None,
+    };
+    if doctor.integrity_verified != Some(true)
+        || doctor.signer_key_id != expected_signer
+        || doctor.sbom_valid != Some(true)
+    {
+        return Err(PackagerError::new(format!(
+            "the bundled CLI does not report a verified installation (signer {:?}, expected {expected_signer:?}): {}",
+            doctor.signer_key_id, doctor_json["integrity"]
+        )));
+    }
+    // The bundled CLI re-verifies every file and the signature (`update verify`).
+    let verified_install = expect(integrity, &[0])?.json()?;
+    if verified_install["verified"] != true
+        || verified_install["scope"] != "all"
+        || verified_install["signer_key_id"].as_str() != expected_signer.as_deref()
+    {
+        return Err(PackagerError::new(format!(
+            "unexpected `update verify` report: {verified_install}"
+        )));
+    }
     expect(start, &[0])?;
     let status_json = expect(daemon_status, &[0])?.json()?;
     check_daemon(&status_json, &drive, &report.version)?;
@@ -225,10 +275,11 @@ fn step(
     entry: &Path,
     arguments: &[&str],
     cwd: &Path,
+    env: &[(&str, &str)],
     timeout: Duration,
     commands: &mut Vec<Ran>,
 ) -> Result<usize, PackagerError> {
-    let ran = process::run(entry, arguments, cwd, timeout)?;
+    let ran = process::run(entry, arguments, cwd, env, timeout)?;
     progress(&format!(
         "{} {} -> exit {} ({} ms)",
         entry.display(),
