@@ -1,10 +1,3 @@
-.root {
-  display: flex;
-  flex-direction: column;
-  gap: var(--aidex-space-2);
-  width: 100%;
-}
-
 .field {
   display: flex;
   align-items: center;
@@ -22,7 +15,7 @@
 
 .field:focus-within {
   border-color: var(--aidex-color-accent-border);
-  box-shadow: 0 0 0 3px rgb(26 140 255 / 0.18);
+  box-shadow: 0 0 0 3px var(--aidex-color-accent-ring);
 }
 
 .invalid,
@@ -38,6 +31,15 @@
 .rounded {
   min-height: 52px;
   border-radius: var(--aidex-radius-lg);
+}
+
+.md {
+  min-height: 44px;
+  border-radius: var(--aidex-radius-md);
+}
+
+.md .input {
+  height: 40px;
 }
 
 .pill {
@@ -101,23 +103,4 @@
   display: inline-flex;
   flex: none;
   padding-right: var(--aidex-space-1);
-}
-
-.error {
-  margin: 0;
-  padding-left: var(--aidex-space-1);
-  color: var(--aidex-color-danger);
-  font-size: var(--aidex-text-sm);
-}
-
-.visuallyHidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  margin: -1px;
-  padding: 0;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-  border: 0;
 }

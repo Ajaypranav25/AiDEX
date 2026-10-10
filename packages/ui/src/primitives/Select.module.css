@@ -1,0 +1,70 @@
+.inline {
+  flex: none;
+  width: auto;
+}
+
+.control {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.select {
+  width: 100%;
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--aidex-color-text);
+  font-size: var(--aidex-text-md);
+  cursor: pointer;
+  transition:
+    border-color var(--aidex-duration-fast) var(--aidex-ease),
+    background-color var(--aidex-duration-fast) var(--aidex-ease);
+}
+
+/* Dark option lists on platforms that honor it. */
+.select option {
+  background: var(--aidex-color-surface-raised);
+  color: var(--aidex-color-text);
+}
+
+.field .select {
+  min-height: 44px;
+  padding: 0 var(--aidex-space-10) 0 var(--aidex-space-4);
+  border-color: var(--aidex-color-border);
+  border-radius: var(--aidex-radius-md);
+  background: var(--aidex-color-surface-raised);
+}
+
+.field .select:hover {
+  border-color: var(--aidex-color-border-strong);
+}
+
+.ghost .select {
+  width: auto;
+  min-height: 34px;
+  padding: 0 var(--aidex-space-8) 0 var(--aidex-space-2);
+  border-radius: var(--aidex-radius-sm);
+  color: var(--aidex-color-text-secondary);
+  font-size: 13px;
+}
+
+.ghost .select:hover {
+  background: var(--aidex-color-surface-hover);
+  color: var(--aidex-color-text);
+}
+
+.chevron {
+  position: absolute;
+  right: var(--aidex-space-3);
+  width: 16px;
+  height: 16px;
+  color: var(--aidex-color-text-muted);
+  pointer-events: none;
+}
+
+.ghost .chevron {
+  right: var(--aidex-space-2);
+  width: 14px;
+  height: 14px;
+}

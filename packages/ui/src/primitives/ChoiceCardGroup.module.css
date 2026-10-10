@@ -1,0 +1,174 @@
+.group {
+  min-width: 0;
+  container-type: inline-size;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.legend {
+  margin-bottom: var(--aidex-space-3);
+  padding: 0;
+}
+
+.options {
+  display: grid;
+  gap: var(--aidex-space-3);
+}
+
+.columns1 {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.columns2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.columns3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.card {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--aidex-space-4);
+  padding: var(--aidex-space-4) var(--aidex-space-5);
+  border: 1px solid var(--aidex-color-border-subtle);
+  border-radius: var(--aidex-radius-lg);
+  background: var(--aidex-color-surface);
+  cursor: pointer;
+  transition:
+    border-color var(--aidex-duration-fast) var(--aidex-ease),
+    background-color var(--aidex-duration-fast) var(--aidex-ease);
+}
+
+.card:hover {
+  border-color: var(--aidex-color-border-strong);
+}
+
+.checked,
+.checked:hover {
+  border-color: var(--aidex-color-accent-border);
+  background: var(--aidex-color-accent-soft);
+}
+
+.card:has(.radio:focus-visible) {
+  outline: 2px solid var(--aidex-color-focus);
+  outline-offset: 2px;
+}
+
+.disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.radio {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin: 2px 0 0;
+  appearance: none;
+  border: 1.5px solid var(--aidex-color-border-strong);
+  border-radius: var(--aidex-radius-full);
+  outline: none;
+  background: var(--aidex-color-surface-raised);
+  cursor: inherit;
+}
+
+.radio:checked {
+  border: 5px solid var(--aidex-color-accent);
+  background: var(--aidex-color-text);
+}
+
+.icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--aidex-color-text-secondary);
+}
+
+.checked .icon {
+  color: var(--aidex-color-accent);
+}
+
+.icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--aidex-space-1);
+  min-width: 0;
+}
+
+.title {
+  color: var(--aidex-color-text);
+  font-size: var(--aidex-text-md);
+  font-weight: 600;
+}
+
+.description {
+  color: var(--aidex-color-text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.meta {
+  flex: none;
+  color: var(--aidex-color-text-muted);
+  font-size: 13px;
+}
+
+/* In narrow multi-column cards the meta moves under the text instead of squeezing it. */
+.columns2 .card,
+.columns3 .card {
+  flex-wrap: wrap;
+}
+
+.columns2 .meta,
+.columns3 .meta {
+  order: 3;
+  flex-basis: 100%;
+  padding-left: calc(18px + var(--aidex-space-4));
+}
+
+.columns2 .text,
+.columns3 .text {
+  flex-basis: 0;
+}
+
+/* Stack multi-column cards when the group is too narrow for their text. */
+@container (max-width: 640px) {
+  .columns2,
+  .columns3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Rows: a ruled list (shared with CheckboxGroup) instead of bordered cards. */
+.rows .options {
+  gap: 0;
+  border-top: 1px solid var(--aidex-color-border-subtle);
+}
+
+.rows .card,
+.rows .checked,
+.rows .checked:hover {
+  align-items: center;
+  padding: var(--aidex-space-4) var(--aidex-space-1);
+  border: 0;
+  border-bottom: 1px solid var(--aidex-color-border-subtle);
+  border-radius: 0;
+  background: transparent;
+}
+
+.rows .card:hover {
+  background: color-mix(in srgb, var(--aidex-color-text) 3%, transparent);
+}
+
+.rows .meta {
+  white-space: nowrap;
+}

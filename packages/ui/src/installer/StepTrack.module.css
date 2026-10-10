@@ -1,0 +1,118 @@
+.track {
+  display: grid;
+  gap: var(--aidex-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  user-select: none;
+}
+
+.step {
+  position: relative;
+  min-width: 0;
+}
+
+/* Connector to the next step, drawn behind the count circles. */
+.step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 14px;
+  right: var(--aidex-space-2);
+  left: 36px;
+  height: 1px;
+  background: var(--aidex-color-border);
+}
+
+.complete:not(:last-child)::after {
+  background: var(--aidex-color-accent-subtle-border);
+}
+
+.target {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--aidex-space-2);
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--aidex-color-text-muted);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+button.target {
+  cursor: pointer;
+}
+
+button.target:hover {
+  color: var(--aidex-color-text);
+}
+
+.count {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--aidex-color-border-strong);
+  border-radius: var(--aidex-radius-full);
+  background: var(--aidex-color-surface-strong);
+  color: var(--aidex-color-text-secondary);
+  font-size: var(--aidex-text-xs);
+  font-variant-numeric: tabular-nums;
+  transition: background-color var(--aidex-duration-fast) var(--aidex-ease);
+}
+
+.count svg {
+  width: 14px;
+  height: 14px;
+}
+
+.current .target {
+  color: var(--aidex-color-text);
+  font-weight: 600;
+}
+
+.current .count {
+  border-color: var(--aidex-color-accent);
+  background: var(--aidex-color-accent);
+  color: var(--aidex-color-on-accent);
+}
+
+.complete .count {
+  border-color: var(--aidex-color-accent-subtle-border);
+  background: var(--aidex-color-accent-soft);
+  color: var(--aidex-color-accent);
+}
+
+.label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (max-width: 520px) {
+  .target {
+    align-items: center;
+    font-size: 11px;
+  }
+
+  .step:not(:last-child)::after {
+    left: calc(50% + 18px);
+    right: calc(-50% + 18px);
+  }
+}

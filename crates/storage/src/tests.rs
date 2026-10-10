@@ -63,6 +63,26 @@ fn rejects_a_selected_root_that_is_a_symlink() {
 
 #[cfg(unix)]
 #[test]
+fn accepts_a_real_root_beneath_a_symlinked_host_ancestor() {
+    use std::os::unix::fs::symlink;
+
+    // Mirrors macOS, where temporary directories live beneath `/var -> /private/var`.
+    let target = tempdir().unwrap();
+    let link_parent = tempdir().unwrap();
+    let ancestor = link_parent.path().join("host-alias");
+    symlink(target.path(), &ancestor).unwrap();
+
+    let store = FileStore::open(ancestor.join("drive")).unwrap();
+    store.put("profiles/default", b"value").unwrap();
+    assert!(target.path().join("drive").join("state.sqlite3").exists());
+    assert_eq!(
+        store.root(),
+        fs::canonicalize(target.path().join("drive")).unwrap()
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn rejects_traversal_and_managed_symlink_escape() {
     use std::os::unix::fs::symlink;
 

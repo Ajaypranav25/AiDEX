@@ -2,6 +2,8 @@ import { useRef, useState } from "react";
 import { Composer } from "@aidex/ui/components";
 import { CodeIcon, FileTextIcon, LightbulbIcon, MessageSquareIcon } from "@aidex/ui/icons";
 import { Button, Container, Heading, SegmentedControl, Stack, Text } from "@aidex/ui/primitives";
+import { useNavigation } from "../../app/providers/navigation";
+import { usePreferences } from "../../app/providers/preferences";
 
 type Mode = "chat" | "agent";
 
@@ -28,6 +30,14 @@ export function HomePage({ autoFocus = false }: Props) {
   const [mode, setMode] = useState<Mode>("chat");
   const [draft, setDraft] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  const { navigate } = useNavigation();
+  const { setPendingPrompt } = usePreferences();
+
+  // The chat or agent screen picks the prompt up on arrival.
+  const submit = (prompt: string) => {
+    setPendingPrompt(prompt.trim());
+    navigate({ page: mode === "agent" ? "agent" : "chat" });
+  };
 
   // Frames whatever is already typed instead of discarding it.
   const applySuggestion = (prompt: string) => {
@@ -56,6 +66,7 @@ export function HomePage({ autoFocus = false }: Props) {
               placeholder={placeholderByMode[mode]}
               value={draft}
               onValueChange={setDraft}
+              onSubmit={submit}
               textareaRef={composerRef}
               autoFocus={autoFocus}
             />

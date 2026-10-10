@@ -18,9 +18,14 @@ pub(super) fn validate_key(key: &str) -> Result<(), StoreError> {
     Ok(())
 }
 
-/// Reject symlinks in every existing component before following or creating a selected root.
-pub(super) fn reject_symlink_components(path: &Path) -> Result<(), StoreError> {
+/// Return the components of `path` that do not exist yet and would be created for it.
+///
+/// Ancestors that already exist belong to the host (for example macOS `/var` →
+/// `/private/var`) and are resolved by the operating system; only the selected root and
+/// the directories AiDEX creates beneath them are required to be real directories.
+pub(super) fn missing_components(path: &Path) -> Result<Vec<PathBuf>, StoreError> {
     let mut current = PathBuf::new();
+    let mut missing = Vec::new();
     for component in path.components() {
         match component {
             Component::CurDir => continue,
@@ -30,13 +35,23 @@ pub(super) fn reject_symlink_components(path: &Path) -> Result<(), StoreError> {
             }
         }
         match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                return Err(StoreError::InvalidKey);
-            }
             Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => missing.push(current.clone()),
             Err(error) => return Err(error.into()),
         }
+    }
+    Ok(missing)
+}
+
+/// Reject a selected root that is itself a symlink, or any directory created for it that
+/// turned out to be a symlink (a concurrent replacement), before the root is followed.
+pub(super) fn reject_symlinked_root(root: &Path, created: &[PathBuf]) -> Result<(), StoreError> {
+    for path in created
+        .iter()
+        .map(PathBuf::as_path)
+        .chain(std::iter::once(root))
+    {
+        reject_symlink_if_exists(path)?;
     }
     Ok(())
 }

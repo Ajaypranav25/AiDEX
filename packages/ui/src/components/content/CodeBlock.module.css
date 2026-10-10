@@ -1,0 +1,60 @@
+.block {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--aidex-color-border);
+  border-radius: var(--aidex-radius-md);
+  background: var(--aidex-color-surface);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--aidex-space-3);
+  min-height: 40px;
+  padding: var(--aidex-space-1) var(--aidex-space-2) var(--aidex-space-1) var(--aidex-space-4);
+  border-bottom: 1px solid var(--aidex-color-border-subtle);
+  background: var(--aidex-color-surface-raised);
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--aidex-color-text-secondary);
+  font-size: var(--aidex-text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.language {
+  flex: none;
+  color: var(--aidex-color-text-muted);
+  font-family: var(--aidex-font-mono);
+  font-size: var(--aidex-text-xs);
+}
+
+.actions {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--aidex-space-1);
+  margin-left: auto;
+}
+
+.pre {
+  margin: 0;
+  padding: var(--aidex-space-4) var(--aidex-space-5);
+  overflow-x: auto;
+  color: var(--aidex-color-text);
+  font: var(--aidex-text-xs) / 1.85 var(--aidex-font-mono);
+  tab-size: 2;
+}
+
+.pre:focus-visible {
+  outline-offset: -2px;
+}
+
+.pre code {
+  font: inherit;
+}

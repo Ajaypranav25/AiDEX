@@ -1,0 +1,121 @@
+.diff {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--aidex-color-border);
+  border-radius: var(--aidex-radius-md);
+  background: var(--aidex-color-diff-bg);
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--aidex-space-2) var(--aidex-space-3);
+  min-height: 44px;
+  padding: var(--aidex-space-1) var(--aidex-space-2) var(--aidex-space-1) var(--aidex-space-4);
+  border-bottom: 1px solid var(--aidex-color-border-subtle);
+  background: var(--aidex-color-surface-raised);
+}
+
+.fileIcon {
+  display: inline-flex;
+  flex: none;
+  color: var(--aidex-color-text-muted);
+}
+
+.fileIcon svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Grows to push the controls right, and shrinks (with an ellipsis) before the controls wrap. */
+.fileName {
+  flex: 1 1 12ch;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--aidex-color-text);
+  font-family: var(--aidex-font-mono);
+  font-size: var(--aidex-text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stats {
+  display: inline-flex;
+  flex: none;
+  gap: var(--aidex-space-2);
+  font-family: var(--aidex-font-mono);
+  font-size: var(--aidex-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.added {
+  color: var(--aidex-color-diff-addition);
+}
+
+.removed {
+  color: var(--aidex-color-diff-deletion);
+}
+
+.controls {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--aidex-space-2);
+  margin-left: auto;
+}
+
+.actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--aidex-space-1);
+}
+
+.body {
+  min-width: 0;
+}
+
+.placeholder {
+  display: flex;
+  align-items: flex-start;
+  min-height: var(--code-diff-placeholder-height, 0);
+}
+
+.status {
+  margin: 0;
+  padding: var(--aidex-space-3) var(--aidex-space-4);
+  color: var(--aidex-color-text-muted);
+  font-size: var(--aidex-text-xs);
+}
+
+/*
+ * The `@pierre/diffs` host element. Custom properties inherit into its shadow root, and declarations on the host
+ * outrank the theme's `:host` rules, so these map the library's palette and type onto AiDEX tokens.
+ */
+.surface {
+  --diffs-font-family: var(--aidex-font-mono);
+  --diffs-header-font-family: var(--aidex-font-sans);
+  --diffs-font-size: var(--aidex-text-xs);
+  --diffs-line-height: 20px;
+  --diffs-tab-size: 2;
+  /* Show code exactly as written: no ligatures turning `!==` or `=>` into single glyphs. */
+  --diffs-font-features: "liga" 0, "calt" 0;
+  /* Lines wrap, so no horizontal scrollbar needs reserved space. */
+  --diffs-scrollbar-gutter-override: 0px;
+  --diffs-bg: var(--aidex-color-diff-bg);
+  --diffs-dark-bg: var(--aidex-color-diff-bg);
+  --diffs-fg: var(--aidex-color-text-secondary);
+  --diffs-addition-color-override: var(--aidex-color-diff-addition);
+  --diffs-deletion-color-override: var(--aidex-color-diff-deletion);
+  --diffs-modified-color-override: var(--aidex-color-accent);
+  --diffs-bg-addition-override: var(--aidex-color-diff-addition-bg);
+  --diffs-bg-deletion-override: var(--aidex-color-diff-deletion-bg);
+  --diffs-bg-addition-emphasis-override: var(--aidex-color-diff-addition-emphasis);
+  --diffs-bg-deletion-emphasis-override: var(--aidex-color-diff-deletion-emphasis);
+  --diffs-bg-separator-override: var(--aidex-color-surface-raised);
+  --diffs-fg-number-override: var(--aidex-color-text-muted);
+  display: block;
+  padding-block: var(--aidex-space-2);
+  background: var(--aidex-color-diff-bg);
+}

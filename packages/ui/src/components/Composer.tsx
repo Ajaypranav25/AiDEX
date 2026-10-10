@@ -1,6 +1,6 @@
 "use client";
 
-import type { FormEvent, KeyboardEvent, MouseEvent, Ref } from "react";
+import type { FormEvent, KeyboardEvent, MouseEvent, ReactNode, Ref } from "react";
 import { ArrowUpIcon, PaperclipIcon } from "../icons/actions";
 import { IconButton } from "../primitives/IconButton";
 import { cx } from "../utils/cx";
@@ -21,6 +21,14 @@ export type ComposerProps = {
   disabled?: boolean;
   autoFocus?: boolean;
   textareaRef?: Ref<HTMLTextAreaElement>;
+  /** Content above the text, e.g. attached-file chips. */
+  attachments?: ReactNode;
+  /** Controls after the attach button, e.g. a Chat/Agent switch. */
+  toolbarStart?: ReactNode;
+  /** Controls before the send button, e.g. a model picker. */
+  toolbarEnd?: ReactNode;
+  /** `compact` is a single-line composer docked under a page. */
+  size?: "default" | "compact";
   className?: string;
 };
 
@@ -37,6 +45,10 @@ export function Composer({
   disabled = false,
   autoFocus = false,
   textareaRef,
+  attachments,
+  toolbarStart,
+  toolbarEnd,
+  size = "default",
   className,
 }: ComposerProps) {
   const canSubmit = onSubmit !== undefined && !disabled && value.trim().length > 0;
@@ -66,38 +78,49 @@ export function Composer({
   };
 
   return (
-    <form className={cx(styles.composer, disabled && styles.disabled, className)} onSubmit={handleSubmit} onMouseDown={focusField}>
+    <form
+      className={cx(styles.composer, size === "compact" && styles.compact, disabled && styles.disabled, className)}
+      onSubmit={handleSubmit}
+      onMouseDown={focusField}
+    >
+      {attachments ? <div className={styles.attachments}>{attachments}</div> : null}
       <textarea
         ref={textareaRef}
         className={styles.field}
         value={value}
         placeholder={placeholder}
         aria-label={label}
-        rows={2}
+        rows={size === "compact" ? 1 : 2}
         disabled={disabled}
         autoFocus={autoFocus}
         onChange={(event) => onValueChange(event.target.value)}
         onKeyDown={handleKeyDown}
       />
       <div className={styles.toolbar} onMouseDown={focusField}>
-        <IconButton
-          label={attachLabel}
-          icon={<PaperclipIcon />}
-          variant="soft"
-          shape="circle"
-          size="lg"
-          disabled={disabled || !onAttach}
-          onClick={onAttach}
-        />
-        <IconButton
-          type="submit"
-          label={submitLabel}
-          icon={<ArrowUpIcon />}
-          variant={canSubmit ? "primary" : "solid"}
-          shape="circle"
-          size="lg"
-          disabled={!canSubmit}
-        />
+        <div className={styles.group}>
+          <IconButton
+            label={attachLabel}
+            icon={<PaperclipIcon />}
+            variant="soft"
+            shape="circle"
+            size={size === "compact" ? "md" : "lg"}
+            disabled={disabled || !onAttach}
+            onClick={onAttach}
+          />
+          {toolbarStart}
+        </div>
+        <div className={styles.group}>
+          {toolbarEnd}
+          <IconButton
+            type="submit"
+            label={submitLabel}
+            icon={<ArrowUpIcon />}
+            variant={canSubmit ? "primary" : "solid"}
+            shape="circle"
+            size={size === "compact" ? "md" : "lg"}
+            disabled={!canSubmit}
+          />
+        </div>
       </div>
     </form>
   );

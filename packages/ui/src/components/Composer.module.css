@@ -19,7 +19,7 @@
 
 .composer:focus-within {
   border-color: var(--aidex-color-accent-border);
-  box-shadow: 0 0 0 3px rgb(26 140 255 / 0.18);
+  box-shadow: 0 0 0 3px var(--aidex-color-accent-ring);
 }
 
 .disabled {
@@ -50,4 +50,27 @@
   align-items: center;
   justify-content: space-between;
   margin-left: calc(-1 * var(--aidex-space-2));
+}
+
+.attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--aidex-space-2);
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  gap: var(--aidex-space-3);
+  min-width: 0;
+}
+
+.compact {
+  gap: var(--aidex-space-1);
+  padding: var(--aidex-space-3) var(--aidex-space-3) var(--aidex-space-3) var(--aidex-space-5);
+  border-radius: var(--aidex-radius-xl);
+}
+
+.compact .field {
+  min-height: 1.6em;
 }

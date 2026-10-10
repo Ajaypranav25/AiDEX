@@ -1,0 +1,76 @@
+.picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--aidex-space-2);
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.swatch {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border: 2px solid transparent;
+  border-radius: var(--aidex-radius-full);
+  cursor: pointer;
+  transition: border-color var(--aidex-duration-fast) var(--aidex-ease);
+}
+
+.swatch:hover {
+  border-color: var(--aidex-color-border-strong);
+}
+
+.checked,
+.checked:hover {
+  border-color: var(--aidex-color-text);
+}
+
+.swatch:has(:focus-visible) {
+  outline: 2px solid var(--aidex-color-focus);
+  outline-offset: 2px;
+}
+
+.radio {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  opacity: 0;
+  cursor: inherit;
+}
+
+.chip {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--aidex-radius-full);
+}
+
+.check {
+  width: 14px;
+  height: 14px;
+  color: var(--aidex-color-on-accent);
+}
+
+.color {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--aidex-radius-full);
+  background: none;
+  cursor: pointer;
+}
+
+.color::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.color::-webkit-color-swatch {
+  border: 1px solid var(--aidex-color-border-strong);
+  border-radius: var(--aidex-radius-full);
+}

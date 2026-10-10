@@ -9,7 +9,8 @@ use crate::{
     StoreError,
     migration::{import_legacy_files, migrate},
     paths::{
-        create_managed_dir, reject_symlink_components, reject_symlink_if_exists, validate_key,
+        create_managed_dir, missing_components, reject_symlink_if_exists, reject_symlinked_root,
+        validate_key,
     },
 };
 
@@ -25,9 +26,10 @@ impl FileStore {
     /// Open or initialize a store beneath `root`. Existing schemas are migrated atomically.
     pub fn open(root: impl Into<PathBuf>) -> Result<Self, StoreError> {
         let requested_root = root.into();
-        reject_symlink_components(&requested_root)?;
+        let created = missing_components(&requested_root)?;
+        reject_symlinked_root(&requested_root, &[])?;
         fs::create_dir_all(&requested_root)?;
-        reject_symlink_components(&requested_root)?;
+        reject_symlinked_root(&requested_root, &created)?;
         let root = fs::canonicalize(&requested_root)?;
         let artifacts = root.join("artifacts");
         create_managed_dir(&artifacts)?;

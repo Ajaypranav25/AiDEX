@@ -1,0 +1,20 @@
+.frame {
+  display: flex;
+  flex-direction: column;
+  gap: var(--aidex-space-8);
+  width: 100%;
+  margin-inline: auto;
+  padding: var(--aidex-space-8) var(--aidex-space-6) var(--aidex-space-12);
+}
+
+.narrow {
+  max-width: 908px;
+}
+
+.default {
+  max-width: 1148px;
+}
+
+.wide {
+  max-width: 1328px;
+}

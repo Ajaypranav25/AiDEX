@@ -1,0 +1,103 @@
+.list {
+  display: flex;
+  align-items: center;
+  overflow-x: auto;
+  scrollbar-width: none;
+  user-select: none;
+}
+
+.tab {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--aidex-space-2);
+  border: 0;
+  background: transparent;
+  color: var(--aidex-color-text-muted);
+  font-size: var(--aidex-text-md);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--aidex-duration-fast) var(--aidex-ease),
+    color var(--aidex-duration-fast) var(--aidex-ease);
+}
+
+.tab:hover {
+  color: var(--aidex-color-text);
+}
+
+.icon {
+  display: inline-flex;
+}
+
+.icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.count {
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: var(--aidex-radius-full);
+  background: var(--aidex-color-surface-strong);
+  color: var(--aidex-color-text-secondary);
+  font-size: var(--aidex-text-xs);
+  text-align: center;
+}
+
+/* Pill: compact view switches inside a page. */
+.pill {
+  gap: var(--aidex-space-1);
+}
+
+.pill .tab {
+  min-height: 36px;
+  padding: 0 var(--aidex-space-3);
+  border-radius: var(--aidex-radius-sm);
+}
+
+.pill .tab:hover {
+  background: var(--aidex-color-surface-hover);
+}
+
+.pill .selected,
+.pill .selected:hover {
+  background: var(--aidex-color-surface-strong);
+  color: var(--aidex-color-text);
+}
+
+/* Underline: page sections, with the accent marking the current one. */
+.underline {
+  gap: var(--aidex-space-6);
+  border-bottom: 1px solid var(--aidex-color-border-subtle);
+}
+
+.underline .tab {
+  position: relative;
+  min-height: 46px;
+  padding: 0 1px;
+}
+
+.underline .selected {
+  color: var(--aidex-color-text);
+}
+
+.underline .selected::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--aidex-color-accent);
+}
+
+.underline .selected .count {
+  background: var(--aidex-color-accent-soft);
+  color: var(--aidex-color-accent);
+}
+
+.panel:focus-visible {
+  outline-offset: 6px;
+}

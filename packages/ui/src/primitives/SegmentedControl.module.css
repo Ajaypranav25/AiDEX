@@ -34,3 +34,10 @@
   background: var(--aidex-color-accent-soft);
   color: var(--aidex-color-accent);
 }
+
+.sm .option {
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 var(--aidex-space-4);
+  font-size: 13px;
+}

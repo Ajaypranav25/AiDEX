@@ -9,17 +9,25 @@
     "./components": "./src/components/index.ts",
     "./desktop": "./src/desktop/index.ts",
     "./icons": "./src/icons/index.ts",
+    "./installer": "./src/installer/index.ts",
     "./primitives": "./src/primitives/index.ts",
-    "./styles.css": "./src/styles.css"
+    "./styles.css": "./src/styles.css",
+    "./themes": "./src/themes/index.ts"
   },
   "scripts": {
     "check": "tsc --noEmit"
   },
+  "dependencies": {
+    "@pierre/diffs": "^1.5.2"
+  },
   "peerDependencies": {
-    "react": "^19.1.0"
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
   },
   "devDependencies": {
     "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.7",
+    "react-dom": "^19.1.0",
     "typescript": "~5.8.3"
   }
 }
