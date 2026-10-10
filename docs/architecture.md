@@ -14,8 +14,9 @@ crates/aidex-cli (`aidex`)
                                                                               ▼
 crates/aidexd (`aidexd`)
    ├── transport: handshake, Router (`<domain>.<verb>`), bounded streams
-   └── Services ── crates/core, drive, events, sessions, storage
-        └── events: typed catalog, one cursor per drive, replay + push stream
+   └── Services ── crates/core, drive, events, sessions, storage, workspace, vault
+        ├── events: typed catalog, one cursor per drive, replay + push stream
+        └── sessions: durable sessions, checkpoints, startup recovery, resume plans
 
 crates/policy (`aidex-policy`)
    └── pure policy evaluation; not yet wired into the daemon (broker work, #17)
@@ -25,6 +26,8 @@ apps/desktop, apps/installer
 ```
 
 Every important state transition is a typed `aidex-events` event (`protocol/events/README.md`). Domain crates emit through the `EventSink` trait; the daemon owns the drive's durable log (`private_sessions/events.sqlite3`) and serves it to every client as `events.replay` and the `events.subscribe` push stream, which resumes after a client's last acknowledged cursor without duplicates or silent gaps.
+
+Sessions are durable drive state (`aidex-sessions`, `private_sessions/sessions.sqlite3` plus content-addressed blobs). Logical state (messages, tool calls, approvals, artifacts, and hash-verified checkpoints) is portable across restarts, drive moves, and hosts; host-bound state (processes, approval prompts, model memory) is never serialized. At startup the daemon interrupts sessions that were active, marks running tool calls lost, and records event gaps explicitly; `session.resume_plan` reports what a resume restores and what must be recreated. Continuing a session is the native harness's job (#19).
 
 The desktop and installer are independent Tauri v2 projects. Their Rust shells own desktop integration only; domain services belong in the Rust workspace. `crates/aidex-cli` owns the first Rust command surface and treats Oh My Pi as an external agent runtime, not as AiDEX core. `protocol/` is the intended source of frontend/backend contracts. The daemon IPC transport (framing, handshake, error codes, method naming) is defined by `crates/aidexd`'s Rust types and specified in `protocol/commands/README.md`; frontends use `aidexd::Client` or follow that document. Until generation and compatibility checks exist, no other handwritten duplicate contract should be treated as canonical.
 
