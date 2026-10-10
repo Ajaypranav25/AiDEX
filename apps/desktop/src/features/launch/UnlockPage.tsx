@@ -1,66 +1,69 @@
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef } from "react";
 import { Brand, MediaItem } from "@aidex/ui/components";
 import { FocusLayout } from "@aidex/ui/desktop";
-import { ArrowRightIcon, HardDriveIcon, KeyIcon, LockIcon } from "@aidex/ui/icons";
-import {
-  Button,
-  Card,
-  Container,
-  Divider,
-  IconBadge,
-  PasswordField,
-  Stack,
-  StatusIndicator,
-  Text,
-} from "@aidex/ui/primitives";
-import { detectedDrive } from "../../lib/placeholders";
+import { ArrowRightIcon, HardDriveIcon, LockIcon, LockOpenIcon } from "@aidex/ui/icons";
+import { Button, Card, Container, Heading, IconBadge, Stack, StatusIndicator, Text } from "@aidex/ui/primitives";
+import { removableLabels } from "@aidex/client/dto/drive";
+import { ErrorKind } from "@aidex/client/errors";
+import { formatBytes } from "@aidex/client/format";
+import { callUntyped } from "@aidex/client/rpc";
+import { useAidexStatus } from "../../hooks/useAidexStatus";
+import { useBridgeQuery } from "../../hooks/useBridgeQuery";
+import { useDriveReport } from "../../hooks/useCoreReports";
+import { CoreStatusNotice } from "../system/CoreStatusNotice";
+import { driveSourceLabels } from "../system/labels";
 
-type Method = "password" | "recoveryKey";
+type Props = { onContinue: () => void };
 
-type Props = { onUnlock: () => void };
+type VaultView = { title: string; description: string; tone: "success" | "warning" | "neutral"; label: string };
 
-const copyByMethod = {
-  password: {
-    noun: "password",
-    FieldIcon: LockIcon,
-    switchLabel: "Use recovery key",
-    SwitchIcon: KeyIcon,
-    autoComplete: "current-password",
-  },
-  recoveryKey: {
-    noun: "recovery key",
-    FieldIcon: KeyIcon,
-    switchLabel: "Use password",
-    SwitchIcon: LockIcon,
-    autoComplete: "off",
-  },
-} as const;
+/**
+ * Drive and vault check before the workspace. The vault backend (crates/vault, issue #13) is not
+ * part of this build, so this page reports that honestly instead of asking for a password it
+ * cannot verify. `UnlockForm` holds the password UI for when the vault reports a locked state.
+ */
+export function UnlockPage({ onContinue }: Props) {
+  const { status, connectionKey, daemonRunning } = useAidexStatus();
+  const drive = useDriveReport();
+  const vault = useBridgeQuery(() => callUntyped("vault.status"), `vault|${connectionKey}`, daemonRunning);
+  const headingRef = useRef<HTMLHeadingElement>(null);
 
-export function UnlockPage({ onUnlock }: Props) {
-  const [method, setMethod] = useState<Method>("password");
-  const [secret, setSecret] = useState("");
-  const [error, setError] = useState<string>();
-  const fieldRef = useRef<HTMLInputElement>(null);
-  const copy = copyByMethod[method];
+  useEffect(() => headingRef.current?.focus(), []);
 
-  const switchMethod = () => {
-    setSecret("");
-    setError(undefined);
-    setMethod(method === "password" ? "recoveryKey" : "password");
-  };
+  const resolved = status?.drive.state === "resolved" ? status.drive : null;
+  const volume = drive.data?.volume ?? null;
+  const driveTitle = volume?.label ?? resolved?.root ?? "No drive selected";
+  const driveDetail = resolved
+    ? [resolved.root, volume ? removableLabels[volume.removable] : null, volume ? formatBytes(volume.total_bytes) : null, driveSourceLabels[resolved.source]]
+        .filter(Boolean)
+        .join(" · ")
+    : "Screens show sample data until a drive is chosen.";
 
-  // No encrypted vault exists yet, so unlocking only advances the UI.
-  // The secret is cleared here and is never stored, logged, or sent anywhere.
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!secret) {
-      setError(`Enter your ${copy.noun} to continue.`);
-      fieldRef.current?.focus();
-      return;
-    }
-    setSecret("");
-    onUnlock();
-  };
+  const vaultView: VaultView = !daemonRunning
+    ? {
+        title: "Vault status unavailable",
+        description: "AiDEX Core is not running, so the vault on this drive cannot be checked. Nothing is unlocked.",
+        tone: "neutral",
+        label: "Unknown",
+      }
+    : vault.error?.kind === ErrorKind.methodNotFound
+      ? {
+          title: "Vault not set up on this drive",
+          description:
+            "This AiDEX build has no encrypted vault yet, so there is nothing to unlock and no password is asked for. AiDEX stores no secrets until the vault is installed.",
+          tone: "warning",
+          label: "Not set up",
+        }
+      : vault.data !== undefined
+        ? {
+            title: "Vault found",
+            description: "Unlocking from the desktop arrives with the vault update; this build does not unlock it.",
+            tone: "neutral",
+            label: "Locked",
+          }
+        : vault.error
+          ? { title: "Vault status unavailable", description: vault.error.message, tone: "neutral", label: "Unknown" }
+          : { title: "Checking the vault…", description: "Asking AiDEX Core about this drive's vault.", tone: "neutral", label: "Checking" };
 
   return (
     <FocusLayout>
@@ -68,57 +71,36 @@ export function UnlockPage({ onUnlock }: Props) {
         <Stack gap={10}>
           <Stack gap={2} align="center">
             <Brand size="xl" layout="stacked" />
+            <Heading ref={headingRef} tabIndex={-1} level={1} size="title" align="center">
+              Drive and vault
+            </Heading>
             <Text variant="lead" tone="secondary" align="center">
-              Your encrypted AI workspace
+              Your portable AI workspace
             </Text>
           </Stack>
-          <Stack gap={8}>
+          <Stack gap={6}>
             <Card padding="md">
               <MediaItem
                 media={<IconBadge icon={<HardDriveIcon />} />}
-                title={detectedDrive.name}
-                description={detectedDrive.description}
-                trailing={<StatusIndicator tone="success" label="Detected" />}
+                title={driveTitle}
+                description={driveDetail}
+                trailing={<StatusIndicator tone={resolved ? "success" : "warning"} label={resolved ? "Detected" : "No drive"} />}
               />
             </Card>
+            {resolved ? <CoreStatusNotice requires="daemon" /> : null}
             <Card>
-              <form onSubmit={handleSubmit} noValidate>
-                <Stack gap={7}>
-                  <MediaItem
-                    media={<IconBadge tone="accent" icon={<LockIcon />} />}
-                    title="Unlock your workspace"
-                    titleLevel={1}
-                    description={`Enter your ${copy.noun} to access your encrypted AiDEX workspace.`}
-                  />
-                  <Stack gap={4}>
-                    <PasswordField
-                      key={method}
-                      ref={fieldRef}
-                      label={`Workspace ${copy.noun}`}
-                      labelVisibility="hidden"
-                      placeholder={`Enter your ${copy.noun}`}
-                      leadingIcon={<copy.FieldIcon />}
-                      revealLabel={`Show ${copy.noun}`}
-                      autoComplete={copy.autoComplete}
-                      autoFocus
-                      required
-                      value={secret}
-                      error={error}
-                      onChange={(event) => {
-                        setSecret(event.target.value);
-                        setError(undefined);
-                      }}
-                    />
-                    <Button type="submit" variant="tonal" size="lg" align="center" fullWidth trailing={<ArrowRightIcon />}>
-                      Unlock Workspace
-                    </Button>
-                    <Divider label="or" />
-                    <Button variant="outline" size="lg" align="center" fullWidth icon={<copy.SwitchIcon />} onClick={switchMethod}>
-                      {copy.switchLabel}
-                    </Button>
-                  </Stack>
-                </Stack>
-              </form>
+              <Stack gap={7}>
+                <MediaItem
+                  media={<IconBadge tone="accent" icon={vaultView.label === "Locked" ? <LockIcon /> : <LockOpenIcon />} />}
+                  title={vaultView.title}
+                  titleLevel={2}
+                  description={vaultView.description}
+                  trailing={<StatusIndicator tone={vaultView.tone} label={vaultView.label} />}
+                />
+                <Button variant="tonal" size="lg" align="center" fullWidth trailing={<ArrowRightIcon />} onClick={onContinue}>
+                  Continue
+                </Button>
+              </Stack>
             </Card>
           </Stack>
         </Stack>
