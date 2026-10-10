@@ -202,6 +202,21 @@ impl Broker {
         Ok(report)
     }
 
+    /// Terminate every managed process tree and refuse new launches (daemon
+    /// shutdown or drive removal). Returns how many trees were terminated.
+    pub fn shutdown_processes(&self, drive_removed: bool) -> usize {
+        let reason = if drive_removed {
+            StopReason::DriveRemoved
+        } else {
+            StopReason::DaemonShutdown
+        };
+        for call in self.active().values() {
+            call.cancel.cancel();
+        }
+        self.launcher.withdraw_all();
+        self.sandbox().registry().shutdown(reason).terminated.len()
+    }
+
     /// Lift an emergency stop: new submissions are accepted and the process
     /// registry accepts launches again. Cancelled approvals stay cancelled.
     /// Returns `false` when no stop was in effect.
