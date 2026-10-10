@@ -5,10 +5,10 @@
 //! are added here as fields constructed in [`Services::open`]; their JSON-RPC
 //! adapters live in `methods/<domain>.rs`.
 
-use crate::{endpoint, lifecycle::ShutdownSignal, methods::events::event_error_code};
+use crate::{endpoint, lifecycle::ShutdownSignal};
 use aidex_core::ServiceErrorCode;
 use aidex_drive::DrivePaths;
-use aidex_events::EventLog;
+use aidex_events::{EventLog, RetentionPolicy};
 use aidex_vault::{VaultService, VaultServiceConfig};
 use aidex_workspace::WorkspaceRegistry;
 use std::{
@@ -18,10 +18,28 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// Event database, relative to the drive's `.aidex/runtime` directory.
-pub const EVENT_FILE: &str = "events.sqlite";
-/// Events retained per workspace before the oldest expire.
-pub const EVENT_RETENTION: u64 = 10_000;
+/// Event database inside the drive's session directory (`DrivePaths::sessions()`).
+pub const EVENT_FILE: &str = "events.sqlite3";
+/// PR #40's event database inside `.aidex/runtime/`. Superseded: imported once into
+/// [`EVENT_FILE`] when that log is empty, then left untouched and never written.
+pub const LEGACY_EVENT_FILE: &str = "events.sqlite";
+/// Durable events retained before the oldest expire.
+pub const EVENT_RETENTION_EVENTS: u64 = 100_000;
+/// Durable events older than this expire (90 days).
+pub const EVENT_RETENTION_AGE: Duration = Duration::from_secs(90 * 24 * 60 * 60);
+
+/// The daemon's event retention policy.
+pub fn event_retention() -> RetentionPolicy {
+    RetentionPolicy {
+        max_events: Some(EVENT_RETENTION_EVENTS),
+        max_age: Some(EVENT_RETENTION_AGE),
+    }
+}
+
+/// Where the daemon keeps the event log on a drive.
+pub fn event_log_path(paths: &DrivePaths) -> PathBuf {
+    paths.sessions().join(EVENT_FILE)
+}
 
 pub struct Services {
     drive_root: PathBuf,
@@ -56,11 +74,7 @@ impl Services {
             ServicesError::new("daemon", error.code(), error.to_string())
         };
         let runtime = endpoint::ensure_state_dir(drive_root).map_err(state_error)?;
-        let event_path = runtime.join(EVENT_FILE);
-        endpoint::refuse_symlink(&event_path).map_err(state_error)?;
-        let events = EventLog::open(&event_path, EVENT_RETENTION).map_err(|error| {
-            ServicesError::new("events", event_error_code(&error), error.to_string())
-        })?;
+        let events = open_events(&paths, &runtime.join(LEGACY_EVENT_FILE))?;
         let vault_dir = paths
             .ensure_dir(&paths.vault())
             .map_err(|error| ServicesError::new("vault", error.code(), error.to_string()))?;
@@ -103,7 +117,7 @@ impl Services {
         &self.shutdown
     }
 
-    /// Durable, workspace-scoped event log (`aidex-events`).
+    /// The drive's durable event log (`aidex-events`); clone it to get an `EventSink`.
     pub fn events(&self) -> &EventLog {
         &self.events
     }
@@ -118,6 +132,23 @@ impl Services {
     pub fn workspaces(&self) -> &WorkspaceRegistry {
         &self.workspaces
     }
+}
+
+/// Open the drive's event log and import PR #40's superseded log once, if present.
+fn open_events(paths: &DrivePaths, legacy: &Path) -> Result<EventLog, ServicesError> {
+    let events_error = |error: aidex_events::EventError| {
+        ServicesError::new("events", error.code(), error.to_string())
+    };
+    paths
+        .ensure_dir(&paths.sessions())
+        .map_err(|error| ServicesError::new("drive", error.code(), error.to_string()))?;
+    let events = EventLog::open(event_log_path(paths), event_retention()).map_err(events_error)?;
+    endpoint::refuse_symlink(legacy)
+        .map_err(|error| ServicesError::new("events", error.code(), error.to_string()))?;
+    if legacy.is_file() {
+        events.import_legacy(legacy).map_err(events_error)?;
+    }
+    Ok(events)
 }
 
 /// Domain services may hold secrets or handles; never derive `Debug` here.

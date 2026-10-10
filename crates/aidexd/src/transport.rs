@@ -151,16 +151,18 @@ impl Server {
         Ok(self.listener.local_addr()?.port())
     }
 
-    /// Accept until shutdown is requested or `root` disappears, then close
-    /// every connection with an `aidex.closing` notification.
+    /// Accept until shutdown is requested or `root` disappears, run `stopping`,
+    /// then close every connection with an `aidex.closing` notification.
     pub(crate) fn run(
         self,
         root: &Path,
         poll: Duration,
         drive_present: &DriveProbe,
+        stopping: impl FnOnce(&io::Result<StopReason>),
     ) -> io::Result<StopReason> {
         let outcome = self.accept_loop(root, poll, drive_present);
         drop(self.listener);
+        stopping(&outcome);
         let message = match &outcome {
             Ok(StopReason::DriveRemoved) => "the selected drive was removed; daemon is stopping",
             _ => "daemon is stopping",

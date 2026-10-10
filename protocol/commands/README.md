@@ -137,7 +137,9 @@ Domain errors carrying an `aidex_core::ServiceErrorCode` map to -32001..-32006
 | `daemon.status` | none | `{state: "ready"\|"stopping", pid, contract_version, version, drive_root, uptime_ms}` |
 | `daemon.ping` | none | `{pong: true}` |
 | `daemon.stop` | none | `{state: "stopping"}`; then every connection is closed and the endpoint removed |
-| `events.replay` | `{workspace_id, after, limit?}` (`limit` 1-256, default 256) | `{events: [Event...]}` strictly after `after`, ascending |
+| `events.replay` | `{after?, filter?, limit?}` (`after` default 0; `limit` 1-256, default 256) | `{events: [EventEnvelope...], next_cursor, has_more}`: matching events strictly after `after`, ascending; pages are also cut to fit the message limit |
+| `events.latest` | none | `{latest_cursor, oldest_cursor}` (`oldest_cursor` is `null` when nothing is retained) |
+| `events.subscribe` (stream) | `{after?, filter?}` | `{subscription, data: {after, latest_cursor}}`, then `events.event` notifications |
 | `vault.status` | none | `{state: "missing"\|"locked"\|"unlocked"\|"unavailable", vault_id?, secrets?, has_recovery_key?, unlocked_by?, unlocked_at?, idle_lock_secs?, reason?, message?}` |
 | `vault.init` | `{passphrase, recovery?: bool}` | `{state: "unlocked", vault_id, recovery_key?}`; the recovery key is returned only here, once |
 | `vault.unlock` | `{passphrase}` or `{recovery_key}` | `vault.status` result |
@@ -163,5 +165,14 @@ Vault errors carry `data.reason`, the stable `aidex_vault::VaultErrorKind` name 
 
 `Workspace` is `{id, name, kind: {type: host|drive|ephemeral, source?}, root: {type: host|drive, path}, created_at, last_opened_at, path, availability: {state: available|unavailable, reason?}, repository: {vcs, root, is_workspace_root}|null}`. Workspace errors carry `data.reason` (`invalid_path`, `escapes_root`, `symlink_leaf`, `root_unavailable`, `workspace_not_found`, `path_not_found`, `forbidden_location`, `conflict`, `review_changed`, `not_a_change`, `wrong_kind`, `ownership_marker`, `too_large`, ...). A review lists at most 1000 changes and is shrunk to fit one message (`truncated`); `digest` always covers every change, and passing it to `workspace.ephemeral.apply` makes the apply fail with `conflict`/`review_changed` if anything changed since.
 
-`events.replay` ports the contract-v1 `events` request (PR #40). Event push
-streaming (`events.subscribe`) is not implemented yet.
+Event envelopes, filters, and the catalog are specified in
+`protocol/events/README.md`. `events.subscribe` delivers persisted history after
+`after` first, then live events, in cursor order without duplicates or gaps; each
+`events.event` notification's `data` is one envelope. If the stream cannot continue
+without a gap (retention removed undelivered history) the daemon sends one
+`events.error` notification `{reason: "cursor_expired"|"internal", message,
+oldest_available?}` and ends the stream. A client that stops reading is dropped as
+`slow_consumer`; it reconnects and resubscribes after the last cursor it processed.
+An expired cursor is `not_found` with `data: {reason: "cursor_expired", requested,
+oldest_available}`; a cursor the log never assigned is `invalid_params` with
+`data.reason = "cursor_ahead"`; an unknown filter kind is `invalid_params`.

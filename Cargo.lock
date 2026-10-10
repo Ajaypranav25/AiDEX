@@ -76,6 +76,7 @@ dependencies = [
 name = "aidex-events"
 version = "0.1.0"
 dependencies = [
+ "aidex-core",
  "rusqlite",
  "serde",
  "serde_json",
@@ -179,6 +180,7 @@ dependencies = [
  "aidex-vault",
  "aidex-workspace",
  "getrandom",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",

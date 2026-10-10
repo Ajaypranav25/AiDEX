@@ -15,6 +15,7 @@ crates/aidex-cli (`aidex`)
 crates/aidexd (`aidexd`)
    ├── transport: handshake, Router (`<domain>.<verb>`), bounded streams
    └── Services ── crates/core, drive, events, sessions, storage
+        └── events: typed catalog, one cursor per drive, replay + push stream
 
 crates/policy (`aidex-policy`)
    └── pure policy evaluation; not yet wired into the daemon (broker work, #17)
@@ -22,6 +23,8 @@ crates/policy (`aidex-policy`)
 apps/desktop, apps/installer
    └── future clients of the same daemon API
 ```
+
+Every important state transition is a typed `aidex-events` event (`protocol/events/README.md`). Domain crates emit through the `EventSink` trait; the daemon owns the drive's durable log (`private_sessions/events.sqlite3`) and serves it to every client as `events.replay` and the `events.subscribe` push stream, which resumes after a client's last acknowledged cursor without duplicates or silent gaps.
 
 The desktop and installer are independent Tauri v2 projects. Their Rust shells own desktop integration only; domain services belong in the Rust workspace. `crates/aidex-cli` owns the first Rust command surface and treats Oh My Pi as an external agent runtime, not as AiDEX core. `protocol/` is the intended source of frontend/backend contracts. The daemon IPC transport (framing, handshake, error codes, method naming) is defined by `crates/aidexd`'s Rust types and specified in `protocol/commands/README.md`; frontends use `aidexd::Client` or follow that document. Until generation and compatibility checks exist, no other handwritten duplicate contract should be treated as canonical.
 
