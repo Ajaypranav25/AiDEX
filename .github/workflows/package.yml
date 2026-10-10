@@ -1,0 +1,86 @@
+name: Package
+
+on:
+  push:
+    branches: [main]
+  # Pull requests that change packaging inputs prove the bundles before they merge.
+  pull_request:
+    paths:
+      - "crates/bundle/**"
+      - "crates/launcher/**"
+      - "crates/packager/**"
+      - "portable/packaging/**"
+      - ".github/workflows/package.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  bundle:
+    name: Bundle (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: windows-x64
+            triple: x86_64-pc-windows-msvc
+          - os: ubuntu-latest
+            target: linux-x64
+            triple: x86_64-unknown-linux-musl
+          - os: macos-latest
+            target: macos-arm64
+            triple: aarch64-apple-darwin
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.triple }}
+
+      # The bundled SQLite is C code; musl targets need a musl C toolchain.
+      - name: Install musl tools
+        if: matrix.target == 'linux-x64'
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: package-${{ matrix.target }}
+
+      - name: Build bundle
+        run: cargo run --locked -p aidex-packager -- build --target ${{ matrix.target }} --out dist
+
+      # Installs the archive into a fresh developer drive under the runner temp
+      # directory, runs AiDEX.exe / ./aidex (--launcher-verify, --version, doctor --json,
+      # daemon start/status/stop), and fails on new entries in the user's home,
+      # config, data, and cache directories or on unexpected names at the drive root.
+      - name: Smoke-test bundle
+        run: |
+          cargo run --locked -p aidex-packager -- --json smoke \
+            --archive dist/aidex-*-${{ matrix.target }}.* \
+            --work "$RUNNER_TEMP/aidex-smoke" > dist/smoke-${{ matrix.target }}.json
+          cat dist/smoke-${{ matrix.target }}.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aidex-${{ matrix.target }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+            dist/SHA256SUMS
+            dist/smoke-${{ matrix.target }}.json
+          if-no-files-found: error
