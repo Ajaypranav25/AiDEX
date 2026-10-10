@@ -339,9 +339,9 @@ impl TrustStore {
         }
         let mut store = Self::empty();
         for entry in document.keys {
-            let public_key = parse_public_key(&entry.public_key).map_err(&invalid)?;
+            let public_key = parse_public_key(&entry.public_key).map_err(invalid)?;
             let key = TrustedKey::new(&entry.name, public_key, KeySource::Release)
-                .map_err(&invalid)?
+                .map_err(invalid)?
                 .with_validity(entry.not_before, entry.not_after);
             if key.key_id() != entry.key_id {
                 return Err(invalid(format!(
