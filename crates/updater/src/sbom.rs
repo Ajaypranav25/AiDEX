@@ -276,10 +276,10 @@ fn validate_component(component: &Component, refs: &mut BTreeSet<String>) -> Res
     if component.name.trim().is_empty() {
         return Err("name is empty".into());
     }
-    if let Some(bom_ref) = &component.bom_ref {
-        if bom_ref.is_empty() || !refs.insert(bom_ref.clone()) {
-            return Err(format!("bom-ref `{bom_ref}` is empty or not unique"));
-        }
+    if let Some(bom_ref) = &component.bom_ref
+        && (bom_ref.is_empty() || !refs.insert(bom_ref.clone()))
+    {
+        return Err(format!("bom-ref `{bom_ref}` is empty or not unique"));
     }
     if let Some(purl) = &component.purl {
         validate_purl(purl, component)?;

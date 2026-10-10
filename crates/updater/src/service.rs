@@ -208,12 +208,12 @@ impl Updater {
 
     /// Refuse to start while an earlier operation is unfinished.
     pub(crate) fn ensure_no_pending(&self) -> Result<(), UpdateError> {
-        if let Some(journal) = UpdateJournal::load(&self.journal_file())? {
-            if !journal.state.is_terminal() {
-                return Err(UpdateError::RecoveryRequired {
-                    state: journal.state,
-                });
-            }
+        if let Some(journal) = UpdateJournal::load(&self.journal_file())?
+            && !journal.state.is_terminal()
+        {
+            return Err(UpdateError::RecoveryRequired {
+                state: journal.state,
+            });
         }
         Ok(())
     }
@@ -230,16 +230,16 @@ impl Updater {
     ) -> Result<Candidate, UpdateError> {
         let bytes = read_manifest_bytes(dir)?;
         let manifest_sha256 = sha256_hex(&bytes);
-        if let Some(pinned) = pinned {
-            if pinned != manifest_sha256 {
-                return Err(UpdateError::Tampered {
-                    path: aidex_bundle::MANIFEST_FILE_NAME.into(),
-                    problem: aidex_bundle::IntegrityProblem::ManifestPin {
-                        expected: pinned.to_owned(),
-                        actual: manifest_sha256,
-                    },
-                });
-            }
+        if let Some(pinned) = pinned
+            && pinned != manifest_sha256
+        {
+            return Err(UpdateError::Tampered {
+                path: aidex_bundle::MANIFEST_FILE_NAME.into(),
+                problem: aidex_bundle::IntegrityProblem::ManifestPin {
+                    expected: pinned.to_owned(),
+                    actual: manifest_sha256,
+                },
+            });
         }
         let manifest =
             BundleManifest::from_json(&bytes).map_err(|error| BundleError::Manifest {

@@ -38,10 +38,9 @@ fn tear(fixture: &Fixture, checkpoint: Checkpoint) {
         .ok()
         .and_then(|mut entries| entries.next())
         .and_then(Result::ok)
+        && staging.file_type().unwrap().is_dir()
     {
-        if staging.file_type().unwrap().is_dir() {
-            fs::write(staging.path().join("half-written.part"), b"partial").unwrap();
-        }
+        fs::write(staging.path().join("half-written.part"), b"partial").unwrap();
     }
 }
 

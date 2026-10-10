@@ -48,7 +48,7 @@ pub fn is_sha256_hex(value: &str) -> bool {
 
 /// Decode lowercase or uppercase hex; `None` for odd lengths or non-hex digits.
 pub(crate) fn from_hex(text: &str) -> Option<Vec<u8>> {
-    if text.len() % 2 != 0 {
+    if !text.len().is_multiple_of(2) {
         return None;
     }
     let digit = |byte: u8| match byte {

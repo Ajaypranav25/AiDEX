@@ -82,14 +82,14 @@ pub fn integrity_report(
         reason: None,
         error: None,
     };
-    if let Ok(Some(pointer)) = aidex_bundle::CurrentPointer::load(&layout::pointer_path(paths)) {
-        if let Some(entry) = pointer.get(target) {
-            report.installed = true;
-            report.version = Some(entry.version.clone());
-            report.dir = Some(entry.dir.clone());
-            report.manifest_sha256 = Some(entry.manifest_sha256.clone());
-            report.previous = entry.previous.clone();
-        }
+    if let Ok(Some(pointer)) = aidex_bundle::CurrentPointer::load(&layout::pointer_path(paths))
+        && let Some(entry) = pointer.get(target)
+    {
+        report.installed = true;
+        report.version = Some(entry.version.clone());
+        report.dir = Some(entry.dir.clone());
+        report.manifest_sha256 = Some(entry.manifest_sha256.clone());
+        report.previous = entry.previous.clone();
     }
     let policy = match trust.clone().with_drive_revocations(paths) {
         Ok(trust) => SignaturePolicy {

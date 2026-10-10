@@ -194,10 +194,10 @@ impl Updater {
         let candidate = self.verify_dir(&dir, &policy, Some(&to.manifest_sha256), false)?;
         let manifest = candidate.manifest();
         self.place_launchers(&dir, manifest, &mut report.warnings);
-        if journal.operation == JournalOperation::Apply {
-            if let Ok(name) = to.dir_name() {
-                self.copy_provenance(&dir, name, &mut report.warnings);
-            }
+        if journal.operation == JournalOperation::Apply
+            && let Ok(name) = to.dir_name()
+        {
+            self.copy_provenance(&dir, name, &mut report.warnings);
         }
         journal.finish(
             JournalState::Committed,
@@ -229,13 +229,13 @@ impl Updater {
         }
         let removed = self.clean_staging(&mut report.warnings);
         report.removed.extend(removed);
-        if journal.operation == JournalOperation::Apply {
-            if let Ok(Some(pointer)) = self.load_pointer() {
-                let pruned = self.prune(&pointer, journal.id.as_str(), &mut report.warnings);
-                report
-                    .removed
-                    .extend(pruned.into_iter().map(|name| format!("versions/{name}")));
-            }
+        if journal.operation == JournalOperation::Apply
+            && let Ok(Some(pointer)) = self.load_pointer()
+        {
+            let pruned = self.prune(&pointer, journal.id.as_str(), &mut report.warnings);
+            report
+                .removed
+                .extend(pruned.into_iter().map(|name| format!("versions/{name}")));
         }
         report.outcome = RecoveryOutcome::RolledForward;
         report.active = Some(to);
@@ -294,27 +294,26 @@ impl Updater {
                 journal.before.clone()
             }
         };
-        if journal.created_version_dir {
-            if let Some(name) = journal
+        if journal.created_version_dir
+            && let Some(name) = journal
                 .to
                 .as_ref()
                 .and_then(|to| to.dir_name().ok().map(str::to_owned))
-            {
-                let dir = pointer_dir(&name);
-                let referenced = restored.as_ref().is_some_and(|pointer| {
-                    pointer.targets.values().any(|entry| {
-                        entry.dir == dir
-                            || entry
-                                .previous
-                                .as_ref()
-                                .is_some_and(|previous| previous.dir == dir)
-                    })
-                });
-                if !referenced {
-                    match self.remove_version_dir(&name, journal.id.as_str()) {
-                        Ok(()) => report.removed.push(format!("versions/{name}")),
-                        Err(error) => report.warnings.push(error.to_string()),
-                    }
+        {
+            let dir = pointer_dir(&name);
+            let referenced = restored.as_ref().is_some_and(|pointer| {
+                pointer.targets.values().any(|entry| {
+                    entry.dir == dir
+                        || entry
+                            .previous
+                            .as_ref()
+                            .is_some_and(|previous| previous.dir == dir)
+                })
+            });
+            if !referenced {
+                match self.remove_version_dir(&name, journal.id.as_str()) {
+                    Ok(()) => report.removed.push(format!("versions/{name}")),
+                    Err(error) => report.warnings.push(error.to_string()),
                 }
             }
         }

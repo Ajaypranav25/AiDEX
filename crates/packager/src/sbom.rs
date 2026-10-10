@@ -189,14 +189,14 @@ fn crate_component(
     component.version = Some(package.version.clone());
     component.bom_ref = refs.get(package.id.as_str()).cloned();
     component.purl = purl(metadata, package);
-    if let Some(source) = &package.source {
-        if let Some(checksum) = checksums.get(&(
+    if let Some(source) = &package.source
+        && let Some(checksum) = checksums.get(&(
             package.name.clone(),
             package.version.clone(),
             source.clone(),
-        )) {
-            component.hashes = vec![Hash::sha256(checksum.clone())];
-        }
+        ))
+    {
+        component.hashes = vec![Hash::sha256(checksum.clone())];
     }
     let license = if metadata.is_member(package) {
         Some(package.license.clone().unwrap_or_else(|| "MIT".into()))

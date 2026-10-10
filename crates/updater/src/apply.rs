@@ -374,27 +374,27 @@ impl Updater {
             return;
         }
         let mut warnings = Vec::new();
-        if op.journal.state == JournalState::Switching && op.journal.created_version_dir {
-            if let Some(name) = op
+        if op.journal.state == JournalState::Switching
+            && op.journal.created_version_dir
+            && let Some(name) = op
                 .journal
                 .to
                 .as_ref()
                 .and_then(|to| to.dir_name().ok().map(str::to_owned))
+        {
+            let referenced = self.load_pointer().ok().flatten().is_some_and(|pointer| {
+                pointer.targets.values().any(|entry| {
+                    entry.dir == pointer_dir(&name)
+                        || entry
+                            .previous
+                            .as_ref()
+                            .is_some_and(|p| p.dir == pointer_dir(&name))
+                })
+            });
+            if !referenced
+                && let Err(error) = self.remove_version_dir(&name, op.journal.id.as_str())
             {
-                let referenced = self.load_pointer().ok().flatten().is_some_and(|pointer| {
-                    pointer.targets.values().any(|entry| {
-                        entry.dir == pointer_dir(&name)
-                            || entry
-                                .previous
-                                .as_ref()
-                                .is_some_and(|p| p.dir == pointer_dir(&name))
-                    })
-                });
-                if !referenced {
-                    if let Err(error) = self.remove_version_dir(&name, op.journal.id.as_str()) {
-                        warnings.push(error.to_string());
-                    }
-                }
+                warnings.push(error.to_string());
             }
         }
         if let Ok(root) = self.staging_root() {
