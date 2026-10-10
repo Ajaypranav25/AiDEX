@@ -42,3 +42,35 @@ export const ArrowUpIcon = createIcon(
   "ArrowUpIcon",
   <path d="M12 19V5M5.5 11.5 12 5l6.5 6.5" />,
 );
+
+export const ArrowRightIcon = createIcon(
+  "ArrowRightIcon",
+  <path d="M5 12h14M12.5 5.5 19 12l-6.5 6.5" />,
+);
+
+const eyeOutline = "M2.5 12C4.5 8 8 5.5 12 5.5s7.5 2.5 9.5 6.5c-2 4-5.5 6.5-9.5 6.5s-7.5-2.5-9.5-6.5Z";
+
+export const EyeIcon = createIcon(
+  "EyeIcon",
+  <>
+    <path d={eyeOutline} />
+    <circle cx="12" cy="12" r="3" />
+  </>,
+);
+
+export const EyeOffIcon = createIcon(
+  "EyeOffIcon",
+  <>
+    <path d={eyeOutline} />
+    <circle cx="12" cy="12" r="3" />
+    <path d="m4 4 16 16" />
+  </>,
+);
+
+export const CheckCircleIcon = createIcon(
+  "CheckCircleIcon",
+  <>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="m8.5 12.25 2.4 2.4 4.6-4.9" />
+  </>,
+);
