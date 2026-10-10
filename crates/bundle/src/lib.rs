@@ -10,11 +10,13 @@
 mod active;
 #[cfg(feature = "archive")]
 pub mod archive;
+mod catalog;
 mod digest;
 mod entry;
 mod error;
 mod fsutil;
 mod install;
+mod jobs;
 pub mod layout;
 mod manifest;
 mod path;
@@ -24,6 +26,7 @@ mod target;
 mod verify;
 
 pub use active::{ActiveBundle, resolve_active};
+pub use catalog::{BundleCatalog, desktop_catalog};
 pub use digest::{is_sha256_hex, sha256_file, sha256_hex};
 pub use entry::{LAUNCHER_MARKER, is_aidex_launcher, unix_entry_script};
 pub use error::{BundleError, BundleErrorKind, DocumentError, IntegrityProblem};
@@ -31,6 +34,7 @@ pub use install::{
     InstallReport, InstallSource, InstallStep, LauncherPlacement, PlacementAction, install,
     install_with,
 };
+pub use jobs::{InstallJob, InstallJobs, JobState};
 pub use manifest::{
     BundleFile, BundleManifest, FileRole, LicenseEntry, MANIFEST_FILE_NAME,
     MANIFEST_SCHEMA_VERSION, MAX_MANIFEST_BYTES, PRODUCT_NAME, RUNTIME_STATE_PATH, StatePaths,

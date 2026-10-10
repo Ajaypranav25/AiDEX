@@ -408,10 +408,10 @@ impl ApprovalStore {
         };
         let mut changed = Vec::new();
         for id in ids {
-            if update(&tx, &id)? {
-                if let Some(record) = select_one(&tx, &entity(&id)?, now)? {
-                    changed.push(record);
-                }
+            if update(&tx, &id)?
+                && let Some(record) = select_one(&tx, &entity(&id)?, now)?
+            {
+                changed.push(record);
             }
         }
         tx.commit()?;

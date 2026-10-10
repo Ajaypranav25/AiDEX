@@ -2,6 +2,7 @@
 //! router, and the vault-backed credential resolver.
 
 use super::ServicesError;
+use aidex_auth::AuthService;
 use aidex_broker::{Broker, ModelEgress};
 use aidex_core::EntityId;
 use aidex_drive::DrivePaths;
@@ -28,11 +29,19 @@ const CREDENTIAL_HANDLE_TTL: Duration = Duration::from_secs(30);
 /// providers without a broker.
 pub struct VaultCredentials {
     vault: Arc<VaultService>,
+    auth: Option<Arc<AuthService>>,
 }
 
 impl VaultCredentials {
     pub fn new(vault: Arc<VaultService>) -> Self {
-        Self { vault }
+        Self { vault, auth: None }
+    }
+
+    pub fn with_auth(vault: Arc<VaultService>, auth: Arc<AuthService>) -> Self {
+        Self {
+            vault,
+            auth: Some(auth),
+        }
     }
 }
 
@@ -69,6 +78,26 @@ impl CredentialResolver for VaultCredentials {
         provider: &ProviderId,
         secret_name: &str,
     ) -> Result<SecretBytes, CredentialError> {
+        if AuthService::owns_secret(provider.as_str(), secret_name) {
+            let auth = self
+                .auth
+                .as_ref()
+                .ok_or_else(|| CredentialError::Unavailable {
+                    reason: "ChatGPT authentication service is unavailable".into(),
+                })?;
+            let secret = auth
+                .resolve(provider.as_str(), secret_name)
+                .map_err(|error| {
+                    if error == aidex_auth::AuthError::Locked {
+                        CredentialError::Locked
+                    } else {
+                        CredentialError::Unavailable {
+                            reason: error.to_string(),
+                        }
+                    }
+                })?;
+            return Ok(SecretBytes::new(secret.expose().to_vec()));
+        }
         let name = SecretName::new(secret_name).map_err(|_| CredentialError::NotFound {
             secret_name: secret_name.to_owned(),
         })?;
@@ -82,6 +111,36 @@ impl CredentialResolver for VaultCredentials {
         self.vault.revoke_handle(&handle.handle_id);
         let secret = resolved.map_err(|error| credential_error(&error, secret_name))?;
         Ok(SecretBytes::new(secret.expose().to_vec()))
+    }
+}
+
+/// The daemon's provider credentials: account sign-ins owned by
+/// [`AuthService`] (for example a ChatGPT login) resolve through it; every
+/// vault secret goes through the broker's [`ModelEgress`], which evaluates
+/// `secret.use` for `provider:<id>` and records `secret.granted`/`secret.revoked`.
+pub struct BrokeredCredentials {
+    account: VaultCredentials,
+    egress: Arc<ModelEgress>,
+}
+
+impl fmt::Debug for BrokeredCredentials {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("BrokeredCredentials")
+            .finish_non_exhaustive()
+    }
+}
+
+impl CredentialResolver for BrokeredCredentials {
+    fn resolve(
+        &self,
+        provider: &ProviderId,
+        secret_name: &str,
+    ) -> Result<SecretBytes, CredentialError> {
+        if AuthService::owns_secret(provider.as_str(), secret_name) {
+            self.account.resolve(provider, secret_name)
+        } else {
+            self.egress.resolve(provider, secret_name)
+        }
     }
 }
 
@@ -184,6 +243,7 @@ impl ModelObserver for EventsModelObserver {
 
 /// The daemon's model services.
 pub struct ModelServices {
+    auth: Arc<AuthService>,
     registry: Arc<ProviderRegistry>,
     offline: Arc<OfflineMode>,
     router: ModelRouter,
@@ -197,6 +257,7 @@ impl ModelServices {
     /// handles (`secret.use`, `secret.granted`).
     pub fn open(
         paths: &DrivePaths,
+        vault: Arc<VaultService>,
         broker: Arc<Broker>,
         observer: Arc<dyn ModelObserver>,
     ) -> Result<Self, ServicesError> {
@@ -204,20 +265,41 @@ impl ModelServices {
             OfflineMode::load(paths)
                 .map_err(|error| ServicesError::new("network", error.code(), error.to_string()))?,
         );
+        let network = offline.clone();
+        let auth = Arc::new(
+            AuthService::with_network_gate(vault.clone(), Arc::new(move || !network.is_offline()))
+                .map_err(|error| {
+                    ServicesError::new(
+                        "auth",
+                        aidex_core::ServiceErrorCode::Unavailable,
+                        error.to_string(),
+                    )
+                })?,
+        );
         let egress = Arc::new(
             ModelEgress::new(broker)
                 .map_err(|error| ServicesError::new("broker", error.code(), error.to_string()))?
                 .with_offline_switch(Arc::clone(&offline) as _),
         );
-        let registry = ProviderRegistry::load(paths, Arc::clone(&egress) as _, egress as _)
+        let credentials = Arc::new(BrokeredCredentials {
+            account: VaultCredentials::with_auth(vault, auth.clone()),
+            egress: Arc::clone(&egress),
+        });
+        let registry = ProviderRegistry::load(paths, credentials, egress as _)
             .map_err(|error| ServicesError::new("providers", error.code(), error.to_string()))?
             .with_observer(Arc::clone(&observer));
         Ok(Self {
+            auth,
             registry: Arc::new(registry),
             offline,
             router: ModelRouter::new(),
             observer,
         })
+    }
+
+    /// Configured and runtime model providers.
+    pub fn auth(&self) -> &Arc<AuthService> {
+        &self.auth
     }
 
     /// Configured and runtime model providers.
@@ -261,6 +343,34 @@ mod tests {
     use super::*;
     use aidex_events::MemoryEventSink;
     use aidex_providers::{FallbackEvent, ProviderErrorKind};
+
+    #[test]
+    fn oauth_names_never_release_stale_tokens_without_a_valid_auth_profile() {
+        use aidex_vault::{SecretKind, SecretPolicy, SecretString, VaultServiceConfig};
+        let dir = tempfile::tempdir().unwrap();
+        let vault = Arc::new(
+            VaultService::open(dir.path().join("vault"), VaultServiceConfig::default()).unwrap(),
+        );
+        vault
+            .init(&SecretString::new("fixture passphrase only".into()), false)
+            .unwrap();
+        let provider = ProviderId::new("openai").unwrap();
+        vault
+            .put_secret(
+                &SecretName::new("oauth.openai.access").unwrap(),
+                SecretKind::Token,
+                aidex_vault::SecretBytes::new(b"stale-fixture-token".to_vec()),
+                SecretPolicy::new([ConsumerScope::provider("openai").unwrap()]).unwrap(),
+            )
+            .unwrap();
+        let auth = Arc::new(AuthService::new(vault.clone()).unwrap());
+        let credentials = VaultCredentials::with_auth(vault, auth);
+        assert!(
+            credentials
+                .resolve(&provider, "oauth.openai.access")
+                .is_err()
+        );
+    }
 
     #[test]
     fn model_notifications_become_typed_catalog_events() {

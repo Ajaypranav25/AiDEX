@@ -12,6 +12,7 @@ use aidex_policy::Action;
 use aidex_tools::{ToolError, ToolLimits};
 use common::{Fixture, dir_link, file_link, outside_dir};
 use serde_json::{Value, json};
+use sha2::Digest;
 
 fn content(output: &aidex_tools::ToolOutput) -> &Value {
     &output.content
@@ -599,6 +600,23 @@ fn delete_is_explicit_about_directories() {
         "conflict"
     );
     assert!(fixture.path().join("tree/new.txt").exists());
+}
+#[test]
+fn delete_requires_expected_content_when_digest_is_supplied() {
+    let fixture = Fixture::new();
+    fixture.write("file.txt", "keep\n");
+    let bad=fixture.plan("fs.delete",json!({"path":"file.txt","expected_sha256":"0000000000000000000000000000000000000000000000000000000000000000"}));
+    assert!(bad.is_err());
+    assert!(fixture.path().join("file.txt").exists());
+    let expected = format!("{:x}", sha2::Sha256::digest(b"keep\n"));
+    let (ctx, plan) = fixture
+        .plan(
+            "fs.delete",
+            json!({"path":"file.txt","expected_sha256":expected}),
+        )
+        .unwrap();
+    fixture.execute(&ctx, &plan).unwrap();
+    assert!(!fixture.path().join("file.txt").exists());
 }
 
 #[test]

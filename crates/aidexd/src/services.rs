@@ -5,6 +5,7 @@
 //! are added here as fields constructed in [`Services::open`]; their JSON-RPC
 //! adapters live in `methods/<domain>.rs`.
 
+mod inference;
 mod models;
 
 pub use models::{EventsModelObserver, ModelServices, VaultCredentials, model_event_kind};
@@ -62,6 +63,8 @@ pub struct Services {
     sessions: Arc<SessionStore>,
     session_recovery: RecoveryReport,
     context: Arc<ContextService>,
+    native: Arc<aidex_harness::NativeEngine>,
+    inference: Arc<aidex_inference::InferenceService>,
 }
 
 impl Services {
@@ -103,12 +106,28 @@ impl Services {
         // calls and their credentials pass the broker's policy.
         let models = ModelServices::open(
             &paths,
+            Arc::clone(&vault),
             Arc::clone(&broker),
             Arc::new(EventsModelObserver::new(Arc::new(events.clone()))),
         )?;
         let (sessions, session_recovery) = open_sessions(&paths, &events)?;
         let context = ContextService::open(&paths, Arc::new(events.clone()))
             .map_err(|error| ServicesError::new("context", error.code(), error.to_string()))?;
+        let private_sessions = Arc::new(
+            aidex_native_sessions::SessionStore::open(
+                paths.sessions().join("native.sqlite3"),
+                vault.clone(),
+            )
+            .map_err(|e| ServicesError::new("native", ServiceErrorCode::Unavailable, e))?,
+        );
+        let native = aidex_harness::NativeEngine::new(
+            private_sessions,
+            models.registry().clone(),
+            workspaces.clone(),
+            Arc::new(events.clone()),
+            runtime.join("native-processes"),
+        );
+        let inference = inference::open_inference(&paths, &models)?;
         Ok(Self {
             drive_root: drive_root.to_path_buf(),
             paths,
@@ -123,6 +142,8 @@ impl Services {
             sessions: Arc::new(sessions),
             session_recovery,
             context: Arc::new(context),
+            native,
+            inference,
         })
     }
 
@@ -165,8 +186,8 @@ impl Services {
         &self.workspaces
     }
 
-    /// The execution broker (`aidex-broker`): the only path to tool execution,
-    /// approvals, policy settings, and emergency stop.
+    /// The execution broker (`aidex-broker`): tool execution for `tool.*`,
+    /// broker approvals, policy settings, model egress, and emergency stop.
     pub fn broker(&self) -> &Arc<Broker> {
         &self.broker
     }
@@ -190,6 +211,12 @@ impl Services {
     /// (`aidex-context`). Dropping the services cancels running index jobs.
     pub fn context(&self) -> &Arc<ContextService> {
         &self.context
+    }
+    pub fn native(&self) -> &Arc<aidex_harness::NativeEngine> {
+        &self.native
+    }
+    pub fn inference(&self) -> &Arc<aidex_inference::InferenceService> {
+        &self.inference
     }
 }
 

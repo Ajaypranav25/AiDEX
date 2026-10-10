@@ -1,5 +1,18 @@
-import { createContext, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { aidexStatus, selectDrive, startDaemon, stopDaemon } from "@aidex/client/desktop";
+import {
+  createContext,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import {
+  aidexStatus,
+  selectDrive,
+  startDaemon,
+  stopDaemon,
+} from "@aidex/client/desktop";
 import { ErrorKind, toAidexError, type AidexError } from "@aidex/client/errors";
 import type { AidexStatus } from "@aidex/client/dto/status";
 
@@ -34,8 +47,12 @@ export const AidexContext = createContext<AidexConnection | null>(null);
 
 function connectionKeyOf(status: AidexStatus | null): string {
   if (!status) return "pending";
-  const drive = status.drive.state === "resolved" ? status.drive.root : status.drive.state;
-  const daemon = status.daemon.state === "running" ? `running:${status.daemon.status.pid}` : status.daemon.state;
+  const drive =
+    status.drive.state === "resolved" ? status.drive.root : status.drive.state;
+  const daemon =
+    status.daemon.state === "running"
+      ? `running:${status.daemon.status.pid}`
+      : status.daemon.state;
   return `${drive}|${daemon}`;
 }
 
@@ -47,6 +64,7 @@ export function AidexProvider({ children }: { children: ReactNode }) {
   const [pending, setPending] = useState<AidexAction | null>(null);
   const [actionError, setActionError] = useState<AidexError | null>(null);
   const mounted = useRef(true);
+  const autoStarted = useRef<string | null>(null);
 
   const refresh = useCallback(async () => {
     try {
@@ -61,20 +79,23 @@ export function AidexProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const run = useCallback(async (action: AidexAction, job: () => Promise<AidexStatus>) => {
-    setPending(action);
-    setActionError(null);
-    try {
-      const next = await job();
-      if (mounted.current) setStatus(next);
-      return true;
-    } catch (caught) {
-      if (mounted.current) setActionError(toAidexError(caught));
-      return false;
-    } finally {
-      if (mounted.current) setPending(null);
-    }
-  }, []);
+  const run = useCallback(
+    async (action: AidexAction, job: () => Promise<AidexStatus>) => {
+      setPending(action);
+      setActionError(null);
+      try {
+        const next = await job();
+        if (mounted.current) setStatus(next);
+        return true;
+      } catch (caught) {
+        if (mounted.current) setActionError(toAidexError(caught));
+        return false;
+      } finally {
+        if (mounted.current) setPending(null);
+      }
+    },
+    [],
+  );
 
   useEffect(() => {
     mounted.current = true;
@@ -86,6 +107,24 @@ export function AidexProvider({ children }: { children: ReactNode }) {
 
   // Outside the app there is nothing to poll.
   const bridgeMissing = error?.kind === ErrorKind.bridgeUnavailable;
+  useEffect(() => {
+    if (
+      status?.drive.state === "resolved" &&
+      status.daemon.state === "running"
+    ) {
+      autoStarted.current = status.drive.root;
+      return;
+    }
+    if (
+      status?.drive.state !== "resolved" ||
+      status.daemon.state !== "stopped" ||
+      pending
+    )
+      return;
+    if (autoStarted.current === status.drive.root) return;
+    autoStarted.current = status.drive.root;
+    void run("start", startDaemon);
+  }, [status, pending, run]);
   useEffect(() => {
     if (bridgeMissing) return;
     const timer = setInterval(() => void refresh(), POLL_MS);
@@ -108,5 +147,7 @@ export function AidexProvider({ children }: { children: ReactNode }) {
     [status, error, loading, pending, actionError, refresh, run],
   );
 
-  return <AidexContext.Provider value={value}>{children}</AidexContext.Provider>;
+  return (
+    <AidexContext.Provider value={value}>{children}</AidexContext.Provider>
+  );
 }

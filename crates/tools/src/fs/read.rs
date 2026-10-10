@@ -291,9 +291,9 @@ fn read_lines(
 
 /// Drop an incomplete trailing UTF-8 sequence left by a byte-budget cut.
 fn trim_partial_utf8(content: &mut Vec<u8>) {
-    if let Err(error) = std::str::from_utf8(content) {
-        if error.error_len().is_none() {
-            content.truncate(error.valid_up_to());
-        }
+    if let Err(error) = std::str::from_utf8(content)
+        && error.error_len().is_none()
+    {
+        content.truncate(error.valid_up_to());
     }
 }

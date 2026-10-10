@@ -135,7 +135,7 @@ pub(crate) fn collect(
     let mut visited = 0usize;
     for result in builder.build() {
         visited += 1;
-        if visited % 256 == 0 && cancel.is_stopped() {
+        if visited.is_multiple_of(256) && cancel.is_stopped() {
             return Ok(None);
         }
         let Ok(entry) = result else {

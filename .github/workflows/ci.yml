@@ -28,6 +28,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Select runtime fixture interpreter
+        shell: bash
+        run: python -c 'import os, sys; open(os.environ["GITHUB_ENV"], "a").write("AIDEX_TEST_PYTHON=" + sys.executable + "\n")'
+
       # rust-toolchain.toml selects stable with the minimal profile, so the
       # lint components must be installed explicitly.
       - uses: dtolnay/rust-toolchain@stable
@@ -44,6 +52,10 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Test
+        env:
+          # macOS /var is a symlink; use the real runner directory so strict
+          # source-path tests exercise managed paths rather than host aliases.
+          TMPDIR: ${{ runner.temp }}
         run: cargo test --workspace --no-fail-fast
 
   apps:

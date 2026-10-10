@@ -39,6 +39,9 @@ struct DeleteInput {
     /// Delete a non-empty directory and everything beneath it (destructive).
     #[serde(default)]
     recursive: bool,
+    /// Only delete a regular file whose SHA-256 matches this exact expected content.
+    #[serde(default)]
+    expected_sha256: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -172,6 +175,13 @@ impl Tool for FsDelete {
                 path: path.as_str().to_owned(),
             });
         };
+        if input.expected_sha256.is_some() && kind != EntryKind::File {
+            return Err(ToolError::invalid(
+                "expected_sha256",
+                InputError::InvalidValue,
+                "an expected content digest requires a regular file",
+            ));
+        }
         let mut sha256 = None;
         let mut preview = DiffPreview::default();
         let mut state = json!({ "kind": kind, "modified_ns": target.modified_ns.to_string() });
@@ -181,6 +191,16 @@ impl Tool for FsDelete {
             EntryKind::File => {
                 sha256 = hash_file(&absolute)
                     .map_err(|error| ToolError::io("cannot hash the file", error))?;
+                if input.expected_sha256.as_ref().is_some_and(|expected| {
+                    sha256
+                        .as_ref()
+                        .is_none_or(|actual| !expected.eq_ignore_ascii_case(actual))
+                }) {
+                    return Err(ToolError::conflict(
+                        path.as_str(),
+                        "its content does not match the expected digest",
+                    ));
+                }
                 let mut budget = ctx.limits.max_diff_bytes;
                 let file = if target.size <= ctx.limits.max_write_bytes {
                     let bytes = read_capped(&absolute, ctx.limits.max_write_bytes, "the file")?;

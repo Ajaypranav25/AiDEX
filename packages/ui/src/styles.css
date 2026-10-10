@@ -10,6 +10,47 @@ html {
   color-scheme: dark;
 }
 
+html[data-theme="light"] {
+  color-scheme: light;
+  --aidex-color-bg: #f7f8fa;
+  --aidex-color-surface: #ffffff;
+  --aidex-color-surface-raised: #f0f2f5;
+  --aidex-color-surface-hover: #e7ebf0;
+  --aidex-color-surface-strong: #dde3eb;
+  --aidex-color-surface-stronger: #ced6e0;
+  --aidex-color-border-subtle: #e0e5eb;
+  --aidex-color-border: #c4ccd8;
+  --aidex-color-border-strong: #a4afbf;
+  --aidex-color-text: #151a23;
+  --aidex-color-text-secondary: #354359;
+  --aidex-color-text-muted: #56657a;
+  --aidex-color-success: #08794f;
+  --aidex-color-warning: #936010;
+  --aidex-color-danger: #b82940;
+}
+
+html[data-density="compact"] {
+  --aidex-space-3: 10px;
+  --aidex-space-4: 12px;
+  --aidex-space-5: 16px;
+  --aidex-space-6: 20px;
+  --aidex-space-7: 24px;
+  --aidex-space-8: 28px;
+}
+
+html[data-reduce-motion="true"] *,
+html[data-reduce-motion="true"] *::before,
+html[data-reduce-motion="true"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+html[data-keyboard-hints="false"] kbd {
+  display: none;
+}
+
 body {
   margin: 0;
   background: var(--aidex-color-bg);

@@ -21,7 +21,7 @@ The directory structure separates real foundation code from planned product doma
 ## Prerequisites
 
 - Bun 1.3.14+
-- Rust stable toolchain
+- Rust stable toolchain (1.88 or newer)
 - Tauri v2 platform prerequisites only when building the GUI apps
 
 ## Run the CLI

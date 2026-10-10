@@ -73,19 +73,57 @@ impl Client {
     }
 
     pub fn connect_with(drive_root: &Path, client: ClientInfo) -> Result<Self, ClientError> {
+        client.validate().map_err(ClientError::Protocol)?;
+        let summary = endpoint::summarize(drive_root)
+            .map_err(ClientError::from_endpoint)?
+            .ok_or_else(|| {
+                ClientError::from_endpoint(endpoint::EndpointError::Missing(endpoint::state_path(
+                    drive_root,
+                )))
+            })?;
+        if summary.version != CONTRACT_VERSION {
+            return Err(ClientError::from_endpoint(
+                endpoint::EndpointError::Incompatible {
+                    found: summary.version,
+                },
+            ));
+        }
+        let port = summary.port.filter(|port| *port != 0).ok_or_else(|| {
+            ClientError::Protocol("daemon endpoint port is missing or invalid".into())
+        })?;
+        // Removable media carries stale DPAPI blobs between Windows machines.
+        // Probe loopback before unlocking: an absent peer is a stopped daemon,
+        // not a rejection of the current user's credentials.
+        drop(Self::open_stream(port)?);
         let endpoint = endpoint::read(drive_root).map_err(ClientError::from_endpoint)?;
+        if endpoint.port != port || Some(endpoint.pid) != summary.pid {
+            return Err(ClientError::Unavailable(
+                "daemon endpoint changed while connecting; retry".into(),
+            ));
+        }
+        // Open the authenticated connection after DPAPI finishes, so a slow
+        // Windows profile does not consume the server's handshake deadline.
         Self::connect_endpoint(&endpoint, client)
     }
 
     /// Connect to an already-decoded endpoint (in-process daemons and tests).
     pub fn connect_endpoint(endpoint: &Endpoint, client: ClientInfo) -> Result<Self, ClientError> {
         client.validate().map_err(ClientError::Protocol)?;
-        let address = SocketAddr::from(([127, 0, 0, 1], endpoint.port));
-        let stream = TcpStream::connect_timeout(&address, CONNECT_TIMEOUT).map_err(|error| {
+        Self::connect_stream(endpoint, client, Self::open_stream(endpoint.port)?)
+    }
+    fn open_stream(port: u16) -> Result<TcpStream, ClientError> {
+        let address = SocketAddr::from(([127, 0, 0, 1], port));
+        TcpStream::connect_timeout(&address, CONNECT_TIMEOUT).map_err(|error| {
             ClientError::Unavailable(format!(
                 "daemon endpoint {address} is not reachable ({error}); the daemon may have exited"
             ))
-        })?;
+        })
+    }
+    fn connect_stream(
+        endpoint: &Endpoint,
+        client: ClientInfo,
+        stream: TcpStream,
+    ) -> Result<Self, ClientError> {
         stream.set_nodelay(true).map_err(ClientError::Io)?;
         stream
             .set_write_timeout(Some(WRITE_TIMEOUT))
@@ -243,10 +281,10 @@ impl Client {
                 self.closed = true;
                 // Pick up a closing notice the daemon sent before it hung up.
                 while let Ok(item) = self.incoming.try_recv() {
-                    if let Incoming::Message(Message::Notification { method, params }) = item {
-                        if method == CLOSING_NOTIFICATION {
-                            self.record_closing(params.unwrap_or(Value::Null));
-                        }
+                    if let Incoming::Message(Message::Notification { method, params }) = item
+                        && method == CLOSING_NOTIFICATION
+                    {
+                        self.record_closing(params.unwrap_or(Value::Null));
                     }
                 }
                 let disconnected = matches!(

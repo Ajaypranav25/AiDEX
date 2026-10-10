@@ -290,10 +290,10 @@ fn read_loop(reader: &mut LineReader, connection: &Arc<ConnectionShared>, server
         if !connection.outbox.begin_request() {
             return;
         }
-        if let Some(reply) = dispatch(&line, &context, connection, server) {
-            if connection.enqueue(reply, true) == Err(PushError::Full) {
-                connection.overflowed();
-            }
+        if let Some(reply) = dispatch(&line, &context, connection, server)
+            && connection.enqueue(reply, true) == Err(PushError::Full)
+        {
+            connection.overflowed();
         }
         connection.outbox.end_request();
     }

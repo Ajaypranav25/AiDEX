@@ -21,3 +21,9 @@ Live today: `launch` (drive, AiDEX Core, vault create and unlock, host and sandb
 - `remote-sessions`: device pairing and active remote sessions.
 - `settings`: appearance, shortcuts, updates, diagnostics, and drive health and cleanup.
 - `editor`, `tasks`, `terminal`: reserved for later screens.
+
+## Portable chat and project context
+
+Desktop chat opens after vault unlock, with a compact composer and modal controls for mode, model, project context and attachments. New chats have no project context; the globally selected project is not inherited. Project context is explicitly chosen per conversation, or carried by the user's Ask about this file action. The daemon refuses unknown or unavailable project references before saving configuration. An existing conversation can clear its project context while preserving history; checkpoint-bearing conversations retain their original project binding.
+
+Home and search navigation show the live project registry and encrypted conversation summaries. No sample project or session IDs are submitted. Workspace file navigation reads bounded pages, search opens matching file excerpts, and Git/environment panels use real service reports. The compact top bar exposes search, model management, account settings and drive status through accessible icon actions and dialogs.

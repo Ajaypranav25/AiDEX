@@ -161,10 +161,10 @@ Domain errors carrying an `aidex_core::ServiceErrorCode` map to -32001..-32006
 | `tool.list` | none | `{tools: [ToolDescriptor...]}` (`{id, version, description, input_schema, output_schema, risk: {action, base_risk, reads_workspace, writes_workspace, spawns_process, network, destructive, remote_write}, capabilities}`) |
 | `tool.invoke` | `{session, workspace?, tool, input}` (exact session id; `workspace` defaults to the session's) | `BrokerOutcome` as the local user (`origin: user`) |
 | `tool.continue` | `{approval_id}` | `BrokerOutcome` of the approved call (re-planned; single use) |
-| `approval.list` | `{session?, workspace?, state?, limit?}` (`state`: pending\|approved\|denied\|expired\|revoked\|cancelled; `limit` 1-500) | `{approvals: [ApprovalRecord...]}`, newest first |
-| `approval.show` | `{id}` | `ApprovalRecord` |
-| `approval.resolve` | `{id, decision: "approve_once"\|"approve_session"\|"deny"}` | `ApprovalRecord` |
-| `approval.revoke` | `{id, reason?}` | `ApprovalRecord` (state `revoked`) |
+| `broker.approval.list` | `{session?, workspace?, state?, limit?}` (`state`: pending\|approved\|denied\|expired\|revoked\|cancelled; `limit` 1-500) | `{approvals: [ApprovalRecord...]}`, newest first |
+| `broker.approval.show` | `{id}` | `ApprovalRecord` |
+| `broker.approval.resolve` | `{id, decision: "approve_once"\|"approve_session"\|"deny"}` | `ApprovalRecord` |
+| `broker.approval.revoke` | `{id, reason?}` | `ApprovalRecord` (state `revoked`) |
 | `policy.show` | none | `PolicyStatus` |
 | `policy.profile.set` | `{profile: "safe"\|"balanced"\|"autonomous"\|"offline_secure"}` (`offline-secure` accepted) | `PolicyStatus` (persisted; `policy.changed`) |
 | `policy.reload` | none | `PolicyStatus` (policy documents re-read; `policy.changed`) |

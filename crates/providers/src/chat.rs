@@ -41,6 +41,10 @@ pub struct ToolCall {
     /// The arguments exactly as the model produced them (normally a JSON object).
     /// They are untrusted: parse and validate before use.
     pub arguments: String,
+    /// Opaque provider state required to continue the originating tool turn.
+    /// Persist this with the assistant message; do not interpret or alter it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_metadata: Option<Value>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -415,6 +419,7 @@ mod tests {
             Box::new(|r| {
                 let mut message = ChatMessage::user("u");
                 message.tool_calls.push(ToolCall {
+                    provider_metadata: None,
                     id: "1".into(),
                     name: "a".into(),
                     arguments: "{}".into(),

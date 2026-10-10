@@ -197,7 +197,7 @@ impl ProviderRegistry {
             providers.insert(
                 provider.id.clone(),
                 Entry {
-                    provider: Arc::new(registry.build(provider)?),
+                    provider: registry.build(provider)?,
                     origin: ProviderOrigin::Configured,
                 },
             );
@@ -239,13 +239,24 @@ impl ProviderRegistry {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    fn build(&self, config: &ProviderConfig) -> Result<OpenAiCompatibleProvider, RegistryError> {
+    fn build(&self, config: &ProviderConfig) -> Result<Arc<dyn ModelProvider>, RegistryError> {
+        if config.kind != crate::ProviderKind::OpenaiCompatible {
+            return crate::cloud::CloudProvider::new(
+                config,
+                Arc::clone(&self.resolver),
+                Arc::clone(&self.gate),
+                self.options,
+            )
+            .map(|provider| Arc::new(provider) as Arc<dyn ModelProvider>)
+            .map_err(RegistryError::Invalid);
+        }
         OpenAiCompatibleProvider::with_options(
             config,
             Arc::clone(&self.resolver),
             Arc::clone(&self.gate),
             self.options,
         )
+        .map(|provider| Arc::new(provider) as Arc<dyn ModelProvider>)
         .map_err(|error| RegistryError::Invalid(error.0))
     }
 
@@ -274,7 +285,7 @@ impl ProviderRegistry {
         inner.providers.insert(
             descriptor.id.clone(),
             Entry {
-                provider: Arc::new(provider),
+                provider,
                 origin: ProviderOrigin::Configured,
             },
         );
@@ -284,6 +295,55 @@ impl ProviderRegistry {
             provider_kind: descriptor.kind,
             locality: descriptor.locality,
         });
+        Ok(descriptor)
+    }
+
+    /// Remove a configured provider (and the default model if it pointed there).
+    /// Atomically replace account configuration after validating its adapter.
+    pub fn update_provider(
+        &self,
+        config: ProviderConfig,
+    ) -> Result<ProviderDescriptor, RegistryError> {
+        let provider = self.build(&config)?;
+        let descriptor = provider.descriptor().clone();
+        let mut inner = self.write();
+        match inner.providers.get(&config.id).map(|e| e.origin) {
+            None => return Err(RegistryError::NotFound(config.id)),
+            Some(ProviderOrigin::Runtime) => return Err(RegistryError::NotConfigured(config.id)),
+            Some(ProviderOrigin::Configured) => {}
+        }
+        let mut next = inner.config.clone();
+        let position = next
+            .providers
+            .iter()
+            .position(|p| p.id == config.id)
+            .ok_or_else(|| RegistryError::NotConfigured(config.id.clone()))?;
+        next.providers[position] = config;
+        let cleared = next.default_model().is_some_and(|m| {
+            m.provider_id == descriptor.id
+                && !next.providers[position].discover_models
+                && !next.providers[position]
+                    .models
+                    .iter()
+                    .any(|model| model.id == m.model_id)
+        });
+        if cleared {
+            next.default_model = None;
+        }
+        self.persist(&next)?;
+        inner.config = next;
+        inner.providers.insert(
+            descriptor.id.clone(),
+            Entry {
+                provider,
+                origin: ProviderOrigin::Configured,
+            },
+        );
+        drop(inner);
+        if cleared {
+            self.observer
+                .observe(&ModelEvent::DefaultChanged { model: None });
+        }
         Ok(descriptor)
     }
 

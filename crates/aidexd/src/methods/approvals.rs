@@ -1,4 +1,6 @@
-//! `approval.*` methods over the execution broker's approval store.
+//! `broker.approval.*` methods over the execution broker's approval store. (The
+//! native harness's run approvals are `approval.list|respond|arguments` in
+//! `methods/native.rs`; they are a separate store.)
 //!
 //! Every IPC client is the local user (authenticated loopback); remote devices
 //! will resolve approvals through the remote protocol (#29), recorded with their
@@ -21,10 +23,10 @@ use std::sync::Arc;
 
 pub use aidex_broker::approvals::{ApprovalCard, ApprovalRecord, ApprovalState};
 
-pub const LIST: &str = "approval.list";
-pub const SHOW: &str = "approval.show";
-pub const RESOLVE: &str = "approval.resolve";
-pub const REVOKE: &str = "approval.revoke";
+pub const LIST: &str = "broker.approval.list";
+pub const SHOW: &str = "broker.approval.show";
+pub const RESOLVE: &str = "broker.approval.resolve";
+pub const REVOKE: &str = "broker.approval.revoke";
 
 /// Params of `approval.list`.
 #[derive(Deserialize)]

@@ -17,6 +17,64 @@ use serde_json::Value;
 const LAUNCHER: &str = env!("CARGO_BIN_EXE_aidex-launcher");
 const TEST_CLI: &str = env!("CARGO_BIN_EXE_aidex-launcher-test-cli");
 
+#[test]
+fn opening_the_root_launcher_runs_the_verified_desktop_without_cli_arguments() {
+    let drive = common_desktop_drive();
+    let output = drive.run(&[]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        report["executable"],
+        host().executable_name("aidex-desktop")
+    );
+    assert!(report["args"].as_array().unwrap().is_empty());
+    assert!(report["path_first"].as_str().unwrap().ends_with("bin"));
+    let cli = drive.run(&["--version"]);
+    let report: Value = serde_json::from_slice(&cli.stdout).unwrap();
+    assert_eq!(report["executable"], host().executable_name("aidex"));
+}
+
+fn common_desktop_drive() -> Drive {
+    let drive = Drive::new();
+    let source = tempfile::tempdir().unwrap();
+    let dir = source.path().join("bundle");
+    write_bundle(&dir, host(), "0.2.0");
+    fs::create_dir_all(dir.join("desktop")).unwrap();
+    let desktop = format!("desktop/{}", host().executable_name("aidex-desktop"));
+    fs::copy(TEST_CLI, dir.join(&desktop)).unwrap();
+    let (mut manifest, _) = aidex_bundle::read_manifest(&dir).unwrap();
+    manifest
+        .files
+        .push(BundleFile::describe(&dir, &desktop, FileRole::Desktop, true).unwrap());
+    manifest.normalize();
+    fs::write(dir.join(MANIFEST_FILE_NAME), manifest.to_json().unwrap()).unwrap();
+    let report = install(&InstallSource::Directory(dir), drive.path()).unwrap();
+    Drive {
+        bundle_dir: drive.path().join("app").join(report.dir),
+        ..drive
+    }
+}
+
+#[test]
+fn a_modified_desktop_binary_is_refused_before_execution() {
+    let drive = common_desktop_drive();
+    let desktop = drive
+        .bundle_dir
+        .join("desktop")
+        .join(host().executable_name("aidex-desktop"));
+    let mut bytes = fs::read(&desktop).unwrap();
+    bytes[0] ^= 1;
+    fs::write(&desktop, bytes).unwrap();
+    let output = drive.run(&[]);
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("integrity check failed"));
+}
+
 fn host() -> Target {
     Target::host().expect("tests run on a named bundle target")
 }

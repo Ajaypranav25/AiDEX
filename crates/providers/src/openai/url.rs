@@ -38,6 +38,18 @@ impl fmt::Display for InvalidUrl {
 impl std::error::Error for InvalidUrl {}
 
 impl BaseUrl {
+    /// An API whose root has no implicit version segment (AWS Bedrock).
+    pub(crate) fn parse_root(text: &str) -> Result<Self, InvalidUrl> {
+        let mut base = Self::parse(text)?;
+        let rest = text
+            .split_once("://")
+            .map(|(_, rest)| rest)
+            .unwrap_or_default();
+        if !rest.contains('/') || rest.ends_with('/') && rest.matches('/').count() == 1 {
+            base.path.clear();
+        }
+        Ok(base)
+    }
     pub fn parse(text: &str) -> Result<Self, InvalidUrl> {
         if text.len() > MAX_URL {
             return Err(InvalidUrl("longer than 2048 bytes"));

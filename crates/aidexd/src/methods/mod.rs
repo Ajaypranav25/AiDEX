@@ -7,17 +7,24 @@
 //! Add one `pub mod` line and one `register` line below per domain.
 
 pub mod approvals;
+pub mod auth;
 pub mod context;
 pub mod daemon;
 pub mod emergency;
 pub mod events;
+pub mod inference;
 pub mod memory;
 pub mod models;
+pub mod native;
+pub mod native_history;
+pub mod native_view;
 pub mod policy;
 pub mod sessions;
+pub mod settings;
 pub mod tools;
 pub mod vault;
 pub mod workspace;
+pub mod workspace_live;
 
 use crate::{
     errors::RpcError,
@@ -62,6 +69,10 @@ pub(crate) fn register_all(
 ) -> Result<(), RouterError> {
     approvals::register(router, services)?;
     context::register(router, services)?;
+    auth::register(router, services)?;
+    inference::register(router, services)?;
+    native::register(router, services)?;
+    settings::register(router, services)?;
     daemon::register(router, services)?;
     emergency::register(router, services)?;
     events::register(router, services)?;

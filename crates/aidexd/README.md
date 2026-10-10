@@ -8,18 +8,18 @@ uses. Wire format, handshake, error codes, and naming rules:
 
 ## Layout
 
-| Module | Responsibility |
-| --- | --- |
-| `endpoint` | `daemon.json` endpoint file, `Capability` (redacted `Debug`, constant-time `matches`), DPAPI/0600 protection, symlink-checked `.aidex/runtime` |
-| `rpc`, `errors` | JSON-RPC message model, params helpers, the stable `ErrorCode` table, `RpcError` |
-| `handshake` | `aidex.handshake` params/result and server-side validation |
-| `router` | `Router`, `CallContext`, `ClientInfo` |
-| `stream` | `NotificationSink` for subscription methods |
-| `transport` (private) | listener, per-connection reader/writer threads, bounded outbox, shutdown |
-| `services` | `Services`, built once and shared with handlers as `Arc<Services>` |
-| `methods/<domain>` | JSON-RPC adapters: `daemon.*` (status/ping/stop), `events.*` (replay/latest/subscribe), `vault.*` (status/init/unlock/lock/secret.set/secret.list/secret.delete/passphrase.change), `workspace.*` (registry, discovery, ephemeral review/apply/discard over `aidex-workspace`) |
-| `lifecycle` | `Daemon`, `DaemonHandle`, `serve`, `launch`, `stop`, stale-endpoint recovery |
-| `client` | `Client`, `Subscription`, `ClientError` |
+| Module                | Responsibility                                                                                                                                                                                                                                                                 |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `endpoint`            | `daemon.json` endpoint file, `Capability` (redacted `Debug`, constant-time `matches`), DPAPI/0600 protection, symlink-checked `.aidex/runtime`                                                                                                                                 |
+| `rpc`, `errors`       | JSON-RPC message model, params helpers, the stable `ErrorCode` table, `RpcError`                                                                                                                                                                                               |
+| `handshake`           | `aidex.handshake` params/result and server-side validation                                                                                                                                                                                                                     |
+| `router`              | `Router`, `CallContext`, `ClientInfo`                                                                                                                                                                                                                                          |
+| `stream`              | `NotificationSink` for subscription methods                                                                                                                                                                                                                                    |
+| `transport` (private) | listener, per-connection reader/writer threads, bounded outbox, shutdown                                                                                                                                                                                                       |
+| `services`            | `Services`, built once and shared with handlers as `Arc<Services>`                                                                                                                                                                                                             |
+| `methods/<domain>`    | JSON-RPC adapters: `daemon.*` (status/ping/stop), `events.*` (replay/latest/subscribe), `vault.*` (status/init/unlock/lock/secret.set/secret.list/secret.delete/passphrase.change), `workspace.*` (registry, discovery, ephemeral review/apply/discard over `aidex-workspace`) |
+| `lifecycle`           | `Daemon`, `DaemonHandle`, `serve`, `launch`, `stop`, stale-endpoint recovery                                                                                                                                                                                                   |
+| `client`              | `Client`, `Subscription`, `ClientError`                                                                                                                                                                                                                                        |
 
 ## API
 
@@ -81,6 +81,11 @@ handlers without sockets.
   Windows, 0600 on Unix), never logged, and redacted from `Debug`.
 - One daemon per drive (`create_new` endpoint); stale endpoints are removed
   only when provably unreachable; other drive data is never touched.
+  On Windows, clients check loopback reachability before unlocking the temporary
+  DPAPI credential. Moving the drive to another computer therefore lets startup
+  replace an unreachable endpoint with that computer's credential, preserving the
+  portable vault and history. Reachable peers still require authentication and
+  are never replaced on a credential error.
 - Bounded everything: 1 MiB lines, 64 connections, 1024 queued messages /
   16 MiB per connection, 64 subscriptions per connection, 5 s handshake.
   Slow consumers are disconnected instead of buffering without limit.
@@ -90,34 +95,27 @@ handlers without sockets.
 ## Limitations
 
 - Methods: `daemon.status|ping|stop`, `events.replay|latest|subscribe`, `workspace.*`,
-  `vault.*`, `model.*`/`provider.*`/`network.*`, `session.*`, `context.*`,
-  `memory.*`, `rules.show`, and the broker's `tool.list|invoke|continue`,
-  `approval.list|show|resolve|revoke`, `policy.show|profile.set|reload|explain`, and
-  `emergency.stop|resume` exist; every other domain is future work.
+  `vault.*`, `model.*`, `provider.*`, and `network.*` exist, plus the broker's
+  `tool.list|invoke|continue`, `broker.approval.list|show|resolve|revoke`,
+  `policy.show|profile.set|reload|explain`, and `emergency.stop|resume`; additional
+  domains are future work.
 - `Services::broker()` returns the `Arc<aidex_broker::Broker>` composed over the drive
   (approvals in `private_sessions/approvals.sqlite3`, settings in
   `private_config/policy.toml`, documents in `policies/`, sandbox scratch in
   `tmp/broker/`, the helper `aidex-sandbox-exec` next to the daemon, the drive vault).
   A background thread expires due approvals every 500 ms; `session.cancel` also
   cancels the session's calls and approvals; daemon stop and drive removal terminate
-  every managed process. Every IPC client acts as the local user.
+  every managed process. Every IPC client acts as the local user. Remote provider
+  calls pass the broker's `ModelEgress` gate (offline switch, emergency stop,
+  `model.invoke` policy); vault-backed provider credentials go through it too
+  (`secret.use`, audited 30 s handles), while `aidex-auth` account sign-ins resolve
+  through `AuthService` (`BrokeredCredentials`).
 - The event log is `DrivePaths::sessions()/events.sqlite3` (100 000 events, 90
   days). PR #40's `.aidex/runtime/events.sqlite` is superseded: it is imported once,
   read-only, into an empty new log and then left untouched (safe to delete).
   The daemon records `daemon.started` once its endpoint is published and
   `daemon.stopping` before it closes connections (best effort; live subscribers
   may only see it on replay). Each `events.subscribe` stream uses one thread.
-- `Services::models()` returns `ModelServices`: the `ProviderRegistry`
-  (`private_config/providers.toml`; runtime providers such as local inference register
-  through `registry().register(..)`), the `aidex-router` `Router`, and the persisted
-  `OfflineMode`. Remote calls and provider credentials pass the broker's
-  `ModelEgress` (offline switch, emergency stop, `model.invoke` and `secret.use`
-  policy; one audited 30 s handle for `provider:<id>` per request). `VaultCredentials`
-  remains for embedders without a broker.
-  Model notifications (`ModelObserver`) are emitted as typed events through
-  `EventsModelObserver`: `model.selected` and `model.fallback` map to the events v2
-  catalog (global scope); registry, default-model, and network-mode changes have no
-  catalog entry yet and are not recorded.
 - `Services::vault()` returns the drive's `Arc<aidex_vault::VaultService>` (vault in
   `DrivePaths::vault()`, default 30 min idle auto-lock). A damaged vault does not stop
   the daemon; `vault.status` reports it as `unavailable`. Secret handles are issued and
@@ -128,3 +126,39 @@ handlers without sockets.
   same OS user that can read the endpoint file can connect.
 - See `src/transport/README.md` and `src/lifecycle/README.md` for transport and
   lifecycle specifics.
+
+## Provider/model methods
+
+`Services::models()` exposes `ModelServices` with a shared `ProviderRegistry`,
+model router, offline switch and vault credential resolver. Model chat stays an
+internal `ModelProvider` API; desktop messages use the separate `conversation.*`
+and `agent.*` services rather than a raw provider-chat RPC.
+
+| Method             | Parameters                                                                                     | Result                                                                                                           |
+| ------------------ | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `provider.presets` | none                                                                                           | `{presets: [ProviderPreset]}`; stable IDs, protocol kind, endpoint defaults, capabilities and auth/OAuth support |
+| `provider.add`     | `{id, kind?, base_url, secret_name?, locality?, discover_models?, models?}`                    | `ProviderEntry`                                                                                                  |
+| `provider.update`  | same full replacement configuration as add                                                     | `ProviderEntry`; validates/persists before replacing the instance                                                |
+| `provider.remove`  | `{id}`                                                                                         | `{removed}`; clears a default pointing at this account                                                           |
+| `provider.health`  | `{id}`                                                                                         | `{provider_id, status, error?, message?, latency_ms?, checked_at}`                                               |
+| `model.providers`  | none                                                                                           | `{providers: [ProviderEntry]}`                                                                                   |
+| `model.list`       | none                                                                                           | `{models, failures, default_model, network}`                                                                     |
+| `model.route`      | `{task, privacy?, required_context?, needs_tools?, needs_json_schema?, secret_heavy?, model?}` | `{decision, model, network, failures}`                                                                           |
+| `model.use`        | `{provider_id, model_id}`                                                                      | `{default_model, model}`; validates then persists                                                                |
+| `model.default`    | none                                                                                           | `{default_model}`                                                                                                |
+| `network.offline`  | `{enabled}`                                                                                    | `{offline, network}`                                                                                             |
+| `network.status`   | none                                                                                           | `{offline, network}`                                                                                             |
+
+Provider kinds are `openai-compatible`, `openai-responses`, `anthropic`, `gemini`,
+`azure-openai`, and `bedrock`. Runtime local providers also use `llama-cpp` or
+`fake`, which cannot be configured through `provider.add`. `secret_name` names a
+vault secret with consumer `provider:<id>`; keys are set through `vault.secret.set`.
+Credential handles are short-lived, resolved and revoked per call. Health reports
+`auth_required` for missing/locked/rejected credentials. API-key provider presets
+retain `oauth_supported: false`; supported ChatGPT account acquisition is owned
+by the shared `aidex-auth` service and exposed through `auth.*`. Its encrypted
+accounts register OpenAI Responses provider instances after identity verification.
+
+### Standalone desktop conversations
+
+`conversation.create` with omitted or null `workspace_id` creates a project-free chat, even when `workspace.select` has a current project. Explicit references must resolve to registered, available workspace handles. `agent.configuration.set` performs the same validation before persistence and preserves message history. Plan/Agent execution requires a selected project; ordinary Chat does not expose agent tools.
