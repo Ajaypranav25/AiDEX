@@ -202,6 +202,13 @@ Every file write is: write a new `.<name>.<random>.tmp` in the same directory
 - **conflict detection**: before each commit the on-disk header is re-read and must
   match the SHA-256 of the state this session loaded or wrote; otherwise the write
   fails with `Conflict` and the daemon drops the session (unlock again).
+- **ambiguous header commit**: a directory-sync failure after successful header
+  rename returns `CommitUncertain` with the original I/O cause (`kind() == Io`,
+  service code `Unavailable`). Direct callers reconcile the visible header and
+  index and revoke handles; `VaultService` drops the session when its own header
+  is affected, requiring fresh unlock before metadata or values can be read.
+  Newly referenced records are preserved. Ordinary pre-rename I/O errors retain
+  the old session; an uncertain backup commit does not invalidate its source.
 
 Durability limits: Windows provides no directory flush through the Rust standard
 library, and FAT/exFAT (common on removable drives) do not journal metadata, so a

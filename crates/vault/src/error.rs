@@ -170,6 +170,12 @@ pub enum VaultError {
         path: PathBuf,
         source: io::Error,
     },
+    /// A header was renamed into place, but its directory could not be synced.
+    /// The write may be committed; re-unlock before using a service session again.
+    CommitUncertain {
+        path: PathBuf,
+        source: io::Error,
+    },
     /// The operating-system RNG failed; no weaker randomness is substituted.
     Randomness(String),
     /// Key derivation could not run (e.g. invalid parameters for this platform).
@@ -207,7 +213,7 @@ impl VaultError {
             Self::LimitExceeded(_) => VaultErrorKind::LimitExceeded,
             Self::PassphraseRequired => VaultErrorKind::PassphraseRequired,
             Self::UnsafePath(_) => VaultErrorKind::UnsafePath,
-            Self::Io { .. } => VaultErrorKind::Io,
+            Self::Io { .. } | Self::CommitUncertain { .. } => VaultErrorKind::Io,
             Self::Randomness(_) | Self::Kdf(_) | Self::Crypto(_) => VaultErrorKind::Unavailable,
         }
     }
@@ -305,6 +311,11 @@ impl fmt::Display for VaultError {
                 path,
                 source,
             } => write!(f, "cannot {action} `{}`: {source}", path.display()),
+            Self::CommitUncertain { path, source } => write!(
+                f,
+                "vault header `{}` was replaced but durability is uncertain; unlock again: {source}",
+                path.display()
+            ),
             Self::Randomness(reason) => {
                 write!(f, "operating-system randomness is unavailable: {reason}")
             }
@@ -317,7 +328,7 @@ impl fmt::Display for VaultError {
 impl std::error::Error for VaultError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            Self::Io { source, .. } => Some(source),
+            Self::Io { source, .. } | Self::CommitUncertain { source, .. } => Some(source),
             _ => None,
         }
     }
