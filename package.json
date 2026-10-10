@@ -1,0 +1,14 @@
+{
+  "name": "aidex",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "bun@1.3.14",
+  "workspaces": [
+    "apps/desktop",
+    "apps/installer"
+  ],
+  "scripts": {
+    "dev:desktop": "bun run --cwd apps/desktop tauri dev",
+    "dev:installer": "bun run --cwd apps/installer tauri dev"
+  }
+}

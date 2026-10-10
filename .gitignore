@@ -1,0 +1,30 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+
+# JavaScript / Bun / frontend build output
+node_modules/
+.bun/
+dist/
+coverage/
+**/.next/
+**/out/
+*.tsbuildinfo
+
+# Rust / Tauri build output
+target/
+**/src-tauri/target/
+**/src-tauri/gen/schemas/
+
+# Local editor and operating-system state
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
