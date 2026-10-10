@@ -102,17 +102,14 @@ fn calls_proxy_any_method_and_keep_daemon_error_codes() {
 
     let replay = bridge
         .connection
-        .call(
-            root.path(),
-            "events.replay",
-            json!({ "workspace_id": "workspace", "after": 0 }),
-        )
+        .call(root.path(), "events.replay", json!({ "after": 0 }))
         .unwrap();
-    assert_eq!(replay, json!({ "events": [] }));
+    assert!(replay["events"].is_array(), "{replay}");
+    assert_eq!(replay["has_more"], false);
 
     let missing = bridge
         .connection
-        .call(root.path(), "vault.status", Value::Null)
+        .call(root.path(), "nothing.status", Value::Null)
         .unwrap_err();
     assert_eq!(missing.kind, "method_not_found");
     assert_eq!(missing.code, "not_found");

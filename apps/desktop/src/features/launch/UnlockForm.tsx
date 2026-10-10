@@ -8,7 +8,7 @@ export type UnlockMethod = "password" | "recoveryKey";
 type Props = {
   /**
    * Receives the secret once; the field is cleared immediately and the secret is never kept,
-   * logged, or rendered. The vault wave passes it straight to the daemon's unlock method.
+   * logged, or rendered. `UnlockPage` passes it straight to `vault.unlock`.
    */
   onSubmit: (credential: { method: UnlockMethod; secret: string }) => void;
   /** Set while an unlock is being verified. */
@@ -34,10 +34,7 @@ const copyByMethod = {
   },
 } as const;
 
-/**
- * Password or recovery-key entry for an encrypted vault. Not rendered until the vault backend
- * (crates/vault, issue #13) reports a locked vault; `UnlockPage` explains the state until then.
- */
+/** Passphrase or recovery-key entry for a locked vault (`vault.status` reports `locked`). */
 export function UnlockForm({ onSubmit, busy = false, error }: Props) {
   const [method, setMethod] = useState<UnlockMethod>("password");
   const [secret, setSecret] = useState("");
@@ -70,7 +67,7 @@ export function UnlockForm({ onSubmit, busy = false, error }: Props) {
           media={<IconBadge tone="accent" icon={<LockIcon />} />}
           title="Unlock your workspace"
           titleLevel={2}
-          description={`Enter your ${copy.noun} to access your encrypted AiDEX workspace.`}
+          description={`Enter your vault ${copy.noun} to unlock the secrets on this drive.`}
         />
         <Stack gap={4}>
           <PasswordField

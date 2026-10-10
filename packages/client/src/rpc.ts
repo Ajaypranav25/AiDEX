@@ -1,14 +1,24 @@
 import { command, listenTo } from "./bridge";
-import type { DaemonStatus, ReplayBatch, ReplayParams } from "./dto/daemon";
+import type { DaemonStatus, LatestCursor, ReplayPage, ReplayParams } from "./dto/daemon";
+import type { VaultInitParams, VaultInitResult, VaultLockResult, VaultStatus, VaultUnlockParams } from "./dto/vault";
+import type { SelectedWorkspace, WorkspaceList } from "./dto/workspace";
 
 /**
- * Daemon methods that exist today, with their params and results. Add an entry when a backend
- * registers a method (crates/aidexd/src/methods/); `callUntyped` reaches anything else.
+ * Daemon methods the apps use, with their params and results. Add an entry when a screen needs a
+ * method (crates/aidexd/src/methods/); `callUntyped` reaches anything else. Streams such as
+ * `events.subscribe` go through `subscribe`.
  */
 export type RpcMethods = {
   "daemon.status": { params: undefined; result: DaemonStatus };
   "daemon.ping": { params: undefined; result: { pong: true } };
-  "events.replay": { params: ReplayParams; result: ReplayBatch };
+  "events.replay": { params: ReplayParams; result: ReplayPage };
+  "events.latest": { params: undefined; result: LatestCursor };
+  "vault.status": { params: undefined; result: VaultStatus };
+  "vault.init": { params: VaultInitParams; result: VaultInitResult };
+  "vault.unlock": { params: VaultUnlockParams; result: VaultStatus };
+  "vault.lock": { params: undefined; result: VaultLockResult };
+  "workspace.list": { params: undefined; result: WorkspaceList };
+  "workspace.selected": { params: undefined; result: SelectedWorkspace };
 };
 
 export type RpcMethod = keyof RpcMethods;

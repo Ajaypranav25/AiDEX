@@ -2,9 +2,9 @@
 
 Each folder owns one area of the desktop UI: its pages, its contextual sidebar, and its data. Screens are composed only from `@aidex/ui`. Screens whose backend exists read live data through `../hooks` (`useAidexStatus`, `useRpc`, `useBridgeQuery`); the rest keep labelled sample data (the shell badges every page in `samplePages`, `../lib/routes.ts`), and actions that need a missing backend say so with a "Preview" toast. See `../services/README.md` for wiring a new daemon-backed screen.
 
-Live today: `launch` (drive, AiDEX Core, vault state, host and sandbox detection), the Home system status, Settings Diagnostics and Drive, and the Security sandbox capability report.
+Live today: `launch` (drive, AiDEX Core, vault create and unlock, host and sandbox detection), the Home system status with the workspace registry and live events, Settings Diagnostics and Drive, and the Security sandbox capability report.
 
-- `system`: shared live-status pieces: `CoreStatusNotice` (no drive, AiDEX Core stopped with Start, incompatible, outside the app), `RecentEvents` (`events.replay`), and labels for host, sandbox, and drive data.
+- `system`: shared live-status pieces: `CoreStatusNotice` (no drive, AiDEX Core stopped with Start, incompatible, outside the app), `RecentEvents` (`events.latest` + `events.replay`), `LiveEvents` (`events.subscribe`), and labels for host, sandbox, drive, and event data.
 - `launch`: drive selection, drive and vault check, and host/runtime detection, shown before the workspace.
 - `home`: the welcome dashboard, composer, and live system status.
 - `workspace`: workspace list, add or import, overview (files, git, environment, sessions), and context and memory.

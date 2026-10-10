@@ -6,9 +6,11 @@ import { formatBytes, formatDuration } from "@aidex/client/format";
 import { useAidexStatus } from "../../hooks/useAidexStatus";
 import { useDriveReport, useHostProfile, useSandboxCapabilities } from "../../hooks/useCoreReports";
 import { CoreStatusNotice } from "../system/CoreStatusNotice";
+import { LiveEvents } from "../system/LiveEvents";
 import { levelLabel, osLabel } from "../system/labels";
+import { WorkspaceList } from "./WorkspaceList";
 
-/** Live AiDEX Core, drive, and host summary on Home. Hidden outside the app, where nothing is live. */
+/** Live AiDEX Core, drive, host, workspace, and event summary on Home. Outside the app it only explains why nothing is live. */
 export function SystemOverview() {
   const { status, daemon, driveRoot, bridgeMissing } = useAidexStatus();
   const drive = useDriveReport();
@@ -66,6 +68,18 @@ export function SystemOverview() {
           />
           <StatTile label="This computer" value={hostValue} hint={hostHint || undefined} icon={<CpuIcon />} />
         </Grid>
+        {daemon ? (
+          <Grid columns={2} gap={6}>
+            <Stack gap={3}>
+              <SectionHeader title="Workspaces" level={3} />
+              <WorkspaceList />
+            </Stack>
+            <Stack gap={3}>
+              <SectionHeader title="Live activity" level={3} meta="events.subscribe" />
+              <LiveEvents />
+            </Stack>
+          </Grid>
+        ) : null}
       </Stack>
     </section>
   );

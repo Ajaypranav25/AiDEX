@@ -163,26 +163,27 @@ export function DiagnosticsPanel() {
   );
 }
 
-/** Reads a workspace's durable events, like `aidex events --workspace <id>`. */
+/** Reads the newest durable events, like `aidex events tail`. */
 function EventLogReader() {
   const { daemonRunning } = useAidexStatus();
   const [draft, setDraft] = useState("");
-  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
+  // `undefined` until the first read; an empty id reads every event.
+  const [workspaceId, setWorkspaceId] = useState<string | undefined>();
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setWorkspaceId(draft.trim() || null);
+    setWorkspaceId(draft.trim());
   };
 
   return (
     <section>
       <Stack gap={4}>
         <SectionHeader title="Event log" meta="events.replay" />
-        <Text tone="secondary">Durable events are kept per workspace. Enter a workspace id to read its latest events.</Text>
+        <Text tone="secondary">The newest durable events on this drive, optionally for one workspace id (wsp_…).</Text>
         <form onSubmit={submit} noValidate>
           <Stack direction="row" gap={2} align="end">
             <TextField
-              label="Workspace id"
+              label="Workspace id (optional)"
               size="md"
               spellCheck={false}
               autoComplete="off"
@@ -191,12 +192,12 @@ function EventLogReader() {
               hint={daemonRunning ? undefined : "Start AiDEX Core to read events."}
               onChange={(event) => setDraft(event.target.value)}
             />
-            <Button type="submit" variant="outline" size="md" icon={<SearchIcon />} disabled={!daemonRunning || !draft.trim()}>
+            <Button type="submit" variant="outline" size="md" icon={<SearchIcon />} disabled={!daemonRunning}>
               Read events
             </Button>
           </Stack>
         </form>
-        {workspaceId && daemonRunning ? <RecentEvents workspaceId={workspaceId} /> : null}
+        {workspaceId !== undefined && daemonRunning ? <RecentEvents workspaceId={workspaceId || undefined} /> : null}
       </Stack>
     </section>
   );
