@@ -1,4 +1,4 @@
-import { DiffView, EmptyState, KeyValueList, SectionHeader } from "@aidex/ui/components";
+import { CodeDiff, EmptyState, KeyValueList, SectionHeader } from "@aidex/ui/components";
 import { CheckCircleIcon } from "@aidex/ui/icons";
 import { Stack } from "@aidex/ui/primitives";
 import type { SampleCheckpoint } from "./sample";
@@ -22,7 +22,7 @@ export function CheckpointComparison({ checkpoint }: Props) {
           />
         ) : (
           <>
-            <DiffView fileName={diff.fileName} additions={diff.additions} deletions={diff.deletions} lines={diff.lines} />
+            {diff ? <CodeDiff {...diff} /> : null}
             <KeyValueList items={changes.map((change) => ({ label: change.path, value: change.summary }))} />
           </>
         )}

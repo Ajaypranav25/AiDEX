@@ -1,7 +1,10 @@
 // Sample data until AiDEX Core exposes workspace checkpoints, snapshot metadata, and checkpoint diffs.
-import type { DiffLine } from "@aidex/ui/components";
+import type { CodeDiffSource } from "@aidex/ui/components";
 
 export type CheckpointChange = { path: string; summary: string };
+
+/** One file diff from the checkpoint to the current workspace: both versions, or a unified patch. */
+export type CheckpointDiff = { fileName: string } & CodeDiffSource;
 
 export type SampleCheckpoint = {
   id: string;
@@ -14,49 +17,72 @@ export type SampleCheckpoint = {
   model: string;
   /** Files that differ between this checkpoint and the current workspace. */
   changes: readonly CheckpointChange[];
-  /** One representative file diff (checkpoint → current workspace) for the compare view. */
-  diff: { fileName: string; additions: number; deletions: number; lines: readonly DiffLine[] };
+  /** One representative file diff for the compare view; absent when nothing changed. */
+  diff?: CheckpointDiff;
 };
 
-const sessionDiff = {
+const sessionDiff: CheckpointDiff = {
   fileName: "src/auth/session.ts",
-  additions: 3,
-  deletions: 1,
-  lines: [
-    { kind: "context", oldLine: 12, newLine: 12, text: "export async function createSession(user: User) {" },
-    { kind: "del", oldLine: 13, text: "  const token = sign(user.id);" },
-    { kind: "add", newLine: 13, text: "  const token = sign(user.id, { expiresIn: SESSION_TTL });" },
-    { kind: "add", newLine: 14, text: "  await sessions.store(token, user.id);" },
-    { kind: "add", newLine: 15, text: "  audit.log(\"session.created\", { userId: user.id });" },
-    { kind: "context", oldLine: 14, newLine: 16, text: "  return token;" },
-    { kind: "context", oldLine: 15, newLine: 17, text: "}" },
-  ],
-} as const satisfies SampleCheckpoint["diff"];
+  oldCode: `import { sign } from "./tokens";
+import type { User } from "./types";
 
-const packageDiff = {
+export async function createSession(user: User) {
+  const token = sign(user.id);
+  return token;
+}
+`,
+  newCode: `import { audit } from "../audit";
+import { SESSION_TTL, sessions } from "./store";
+import { sign } from "./tokens";
+import type { User } from "./types";
+
+export async function createSession(user: User) {
+  const token = sign(user.id, { expiresIn: SESSION_TTL });
+  await sessions.store(token, user.id);
+  audit.log("session.created", { userId: user.id });
+  return token;
+}
+`,
+};
+
+// A git-style patch, as AiDEX Core will report it for files too large to send whole.
+const packageDiff: CheckpointDiff = {
   fileName: "package.json",
-  additions: 2,
-  deletions: 2,
-  lines: [
-    { kind: "context", oldLine: 18, newLine: 18, text: "  \"dependencies\": {" },
-    { kind: "del", oldLine: 19, text: "    \"jose\": \"^5.2.0\"," },
-    { kind: "del", oldLine: 20, text: "    \"zod\": \"^3.22.4\"" },
-    { kind: "add", newLine: 19, text: "    \"jose\": \"^5.9.6\"," },
-    { kind: "add", newLine: 20, text: "    \"zod\": \"^3.23.8\"" },
-    { kind: "context", oldLine: 21, newLine: 21, text: "  }," },
-  ],
-} as const satisfies SampleCheckpoint["diff"];
+  patch: `diff --git a/package.json b/package.json
+--- a/package.json
++++ b/package.json
+@@ -14,9 +14,9 @@
+     "test": "vitest run",
+     "typecheck": "tsc --noEmit"
+   },
+   "dependencies": {
+-    "jose": "^5.2.0",
+-    "zod": "^3.22.4"
++    "jose": "^5.9.6",
++    "zod": "^3.23.8"
+   },
+   "devDependencies": {
+     "typescript": "~5.8.3"
+`,
+};
 
-const docsDiff = {
+const docsDiff: CheckpointDiff = {
   fileName: "docs/architecture.md",
-  additions: 2,
-  deletions: 0,
-  lines: [
-    { kind: "context", oldLine: 4, newLine: 4, text: "## Runtime" },
-    { kind: "add", newLine: 5, text: "" },
-    { kind: "add", newLine: 6, text: "Agents run inside the drive sandbox and request approval before edits." },
-  ],
-} as const satisfies SampleCheckpoint["diff"];
+  oldCode: `# Architecture
+
+AiDEX runs local models from an encrypted drive.
+
+## Runtime
+`,
+  newCode: `# Architecture
+
+AiDEX runs local models from an encrypted drive.
+
+## Runtime
+
+Agents run inside the drive sandbox and request approval before edits.
+`,
+};
 
 export const sampleCheckpoints: readonly SampleCheckpoint[] = [
   {
@@ -68,7 +94,7 @@ export const sampleCheckpoints: readonly SampleCheckpoint[] = [
     taskState: "Saved after step 3 of 4",
     model: "Qwen2.5 Coder 7B",
     changes: [
-      { path: "src/auth/session.ts", summary: "Modified · +3 −1" },
+      { path: "src/auth/session.ts", summary: "Modified · +5 −1" },
       { path: "src/auth/routes.ts", summary: "Modified · +12 −0" },
       { path: "tests/auth.test.ts", summary: "Added · +48" },
     ],
@@ -85,7 +111,7 @@ export const sampleCheckpoints: readonly SampleCheckpoint[] = [
     changes: [
       { path: "package.json", summary: "Modified · +2 −2" },
       { path: "bun.lock", summary: "Modified · +86 −79" },
-      { path: "src/auth/session.ts", summary: "Modified · +3 −1" },
+      { path: "src/auth/session.ts", summary: "Modified · +5 −1" },
       { path: "src/auth/routes.ts", summary: "Modified · +12 −0" },
       { path: "tests/auth.test.ts", summary: "Added · +48" },
     ],
@@ -102,7 +128,7 @@ export const sampleCheckpoints: readonly SampleCheckpoint[] = [
     changes: [
       { path: "src/views/Login.tsx", summary: "Modified · +21 −6" },
       { path: "src/state/auth.ts", summary: "Modified · +9 −2" },
-      { path: "src/auth/session.ts", summary: "Modified · +3 −1" },
+      { path: "src/auth/session.ts", summary: "Modified · +5 −1" },
     ],
     diff: sessionDiff,
   },
@@ -115,7 +141,6 @@ export const sampleCheckpoints: readonly SampleCheckpoint[] = [
     taskState: "No task in progress",
     model: "Gemma 4",
     changes: [],
-    diff: { fileName: "No file changes", additions: 0, deletions: 0, lines: [] },
   },
   {
     id: "cp-sandbox-docs",

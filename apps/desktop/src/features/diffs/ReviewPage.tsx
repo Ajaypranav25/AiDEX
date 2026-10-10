@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { DiffView, PageHeader, SectionHeader } from "@aidex/ui/components";
+import { CodeDiff, PageHeader, SectionHeader } from "@aidex/ui/components";
 import { PageFrame } from "@aidex/ui/desktop";
 import { CheckIcon, ChevronLeftIcon, ChevronRightIcon, PlayIcon, XIcon } from "@aidex/ui/icons";
 import { Badge, Button, IconButton, Stack, StatusIndicator, Text } from "@aidex/ui/primitives";
@@ -134,13 +134,7 @@ export function ReviewPage() {
               </Stack>
             }
           />
-          <DiffView
-            fileName={file.path}
-            additions={file.additions}
-            deletions={file.deletions}
-            lines={file.lines}
-            actions={fileActions}
-          />
+          <CodeDiff fileName={file.path} oldCode={file.oldCode} newCode={file.newCode} actions={fileActions} />
         </Stack>
       </section>
       <VerificationSection onRunTests={runTests} />
