@@ -30,7 +30,13 @@ bun run dev:cli -- daemon start --drive /path/to/drive
 bun run dev:cli -- daemon status --drive /path/to/drive --json
 bun run dev:cli -- events tail --drive /path/to/drive --follow
 bun run dev:cli -- events show --drive /path/to/drive --after 0 --limit 20
+bun run dev:cli -- vault init --recovery-key --drive /path/to/drive
+bun run dev:cli -- vault set openai --consumer provider:openai --kind api_key --drive /path/to/drive
+bun run dev:cli -- vault list --drive /path/to/drive
+bun run dev:cli -- vault lock --drive /path/to/drive
 bun run dev:cli -- daemon stop --drive /path/to/drive
+bun run dev:cli -- workspace add ~/src/project --name project --drive /path/to/drive
+bun run dev:cli -- workspace ephemeral create project --drive /path/to/drive
 bun run dev:cli -- chat
 bun run dev:cli -- run "Explain this repository"
 bun run login:omp
@@ -44,6 +50,16 @@ bun run login:omp
 
 `aidex events tail [--after N] [--workspace ID] [--session ID] [--kind PREFIX]... [--follow] [--drive PATH]` prints the drive's events strictly after cursor `N` (default 0) and exits; `--kind` takes dotted name prefixes such as `tool` or `approval.created` (see `protocol/events/README.md`). With `--follow` it streams `events.subscribe`; after a daemon restart, a dropped connection, or a slow-consumer disconnect it reconnects with backoff (0.25 s doubling to 5 s) and resumes strictly after the last printed cursor, so no event is printed twice or skipped. A cursor is acknowledged only after its line was flushed. `aidex events show [--after N] [--limit M] [filters]` prints one replay page (`events.replay`, `M` 1-256, default 50) and the cursor to continue from. An expired cursor is a permanent error (exit 8, with a hint naming the oldest retained cursor) rather than a silent gap; an unknown kind prefix or invalid id is exit 2. Human output is one line per event (`cursor  time  name  scope  data`; live-only events show `~cursor`).
 
+`aidex vault init [--recovery-key]`, `unlock [--recovery-key]`, `lock`, `status`, `set <NAME> --consumer <SCOPE>... [--kind KIND]`, `list`, `delete <NAME>`, and `passphrase change` (all with `[--drive PATH]`) manage the drive's encrypted vault through the daemon (`vault.*` methods). Passphrases, recovery keys, and secret values are read from the terminal without echo, or from stdin only with `--passphrase-stdin` (`init`, `unlock`, `passphrase change`: one line each; `passphrase change` reads the old then the new passphrase, or only the new one after a recovery-key unlock) or `--from-stdin` (`set`: all of stdin, one trailing newline removed). They are never accepted as arguments or environment variables; without a terminal and without the flag the command exits 2 before connecting. `init` prints the recovery key once (store it offline); `list` shows names, kinds, consumers, and update times, never values. `--consumer` takes `provider:<id>`, `mcp:<server-id>`, `process:<tool-id>`, or `git:<host>`; model, prompt, agent, session, log, env, and shell scopes are refused (exit 6). A wrong passphrase or a locked vault exits 5; a missing vault or secret exits 8. Secret values are only handed to consumers by the broker through scoped handles; the CLI has no command that prints a stored value.
+`aidex workspace` (alias `aidex project`) manages workspaces through the daemon's `workspace.*` methods; every subcommand accepts `--drive PATH` (default `AIDEX_DRIVE_ROOT`) and `--json`:
+
+- `add <PATH> [--name N]` registers an existing host directory exactly as selected (relative paths resolve against the current directory). The drive root, a directory containing the drive, and AiDEX-managed directories are refused; an already registered root is a conflict (exit 1).
+- `create <NAME>` creates an empty drive workspace under the drive's `workspaces/`; `list` shows every workspace with its availability (a missing host root is reported, never recreated); `show [ID|NAME]` defaults to the selected workspace; `select <ID|NAME>` persists the selection on the drive, so it survives daemon restarts.
+- `remove <ID>` only unregisters; host files are never deleted. `--delete-data` also deletes an AiDEX-created (drive or ephemeral) workspace directory after verifying its ownership marker.
+- `discover <PATH>` reports the enclosing Git repository and nested repositories (bounded scan, links not followed).
+- `ephemeral create <SOURCE>` copies a workspace (honouring `.gitignore`, skipping `.git/` and `.aidex/`, never following links); `ephemeral review <ID>` lists added/modified/deleted files with conflicts and unified diffs; `ephemeral apply <ID> [--path P ...]` re-reviews, shows the changes, asks for confirmation, and applies only the selected non-conflicting files, refusing if the workspace changed since that review (exit 1 when any selected change was skipped or failed); `ephemeral discard <ID>` deletes only the ephemeral directory.
+- `remove --delete-data`, `ephemeral apply`, and `ephemeral discard` need `--yes` or an interactive confirmation; without a terminal (or with `--json`) and without `--yes` they refuse with exit 2 and change nothing. Declining the prompt exits 9.
+
 `aidex` and `aidex chat` open Oh My Pi's interactive terminal UI. AiDEX passes `--approval-mode always-ask`, disables OMP extensions, MCP, LSP, skills, session persistence, and automatic title generation, and requests a limited tool set. OMP still owns its CLI tool lifecycle and approval implementation; this is not an AiDEX sandbox or policy boundary.
 
 `aidex run` is headless, in-memory, and strictly restricts OMP SDK tools to `read`, `grep`, and `glob` (`restrictToolNames: true`). It disables MCP, LSP, extensions, custom tools, and skills. Writes and shell execution are not exposed in this mode.
@@ -53,7 +69,7 @@ Interactive chat uses the user's existing OMP provider credentials. Configure th
 The source-tree `aidex run` adapter is `apps/cli/src/run.ts`. Packaged binaries must ship that script and set `AIDEX_RUNNER`; `AIDEX_BUN` can select a non-default Bun executable.
 ## Machine-readable output
 
-The global `--json` flag makes `init`, `status`, `daemon start|status|stop`, `events show`, `doctor`, and `agent list` print exactly one compact JSON document on stdout. Failures never write to stdout: with `--json` the error is a single JSON line on stderr,
+The global `--json` flag makes `init`, `status`, `daemon start|status|stop`, `events show`, `vault ...`, `workspace ...`, `doctor`, and `agent list` print exactly one compact JSON document on stdout. Failures never write to stdout: with `--json` the error is a single JSON line on stderr,
 
 ```json
 {"error":{"code":"daemon_unavailable","exit_code":3,"message":"daemon not running on /media/aidex: ...","hint":"start it with `aidex daemon start --drive /media/aidex`"}}

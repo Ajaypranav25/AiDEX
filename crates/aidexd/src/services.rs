@@ -9,9 +9,12 @@ use crate::{endpoint, lifecycle::ShutdownSignal};
 use aidex_core::ServiceErrorCode;
 use aidex_drive::DrivePaths;
 use aidex_events::{EventLog, RetentionPolicy};
+use aidex_vault::{VaultService, VaultServiceConfig};
+use aidex_workspace::WorkspaceRegistry;
 use std::{
     fmt,
     path::{Path, PathBuf},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -45,6 +48,8 @@ pub struct Services {
     started_at: Instant,
     shutdown: ShutdownSignal,
     events: EventLog,
+    vault: Arc<VaultService>,
+    workspaces: WorkspaceRegistry,
 }
 
 impl Services {
@@ -70,6 +75,13 @@ impl Services {
         };
         let runtime = endpoint::ensure_state_dir(drive_root).map_err(state_error)?;
         let events = open_events(&paths, &runtime.join(LEGACY_EVENT_FILE))?;
+        let vault_dir = paths
+            .ensure_dir(&paths.vault())
+            .map_err(|error| ServicesError::new("vault", error.code(), error.to_string()))?;
+        let vault = VaultService::open(vault_dir, VaultServiceConfig::default())
+            .map_err(|error| ServicesError::new("vault", error.code(), error.to_string()))?;
+        let workspaces = WorkspaceRegistry::open(&paths)
+            .map_err(|error| ServicesError::new("workspace", error.code(), error.to_string()))?;
         Ok(Self {
             drive_root: drive_root.to_path_buf(),
             paths,
@@ -77,6 +89,8 @@ impl Services {
             started_at: Instant::now(),
             shutdown,
             events,
+            vault: Arc::new(vault),
+            workspaces,
         })
     }
 
@@ -106,6 +120,17 @@ impl Services {
     /// The drive's durable event log (`aidex-events`); clone it to get an `EventSink`.
     pub fn events(&self) -> &EventLog {
         &self.events
+    }
+
+    /// The drive's encrypted vault (`aidex-vault`). Handle issuance/resolution for the
+    /// broker are Rust methods on [`VaultService`]; they are not RPC methods.
+    pub fn vault(&self) -> &Arc<VaultService> {
+        &self.vault
+    }
+
+    /// Workspace registry and confinement (`aidex-workspace`).
+    pub fn workspaces(&self) -> &WorkspaceRegistry {
+        &self.workspaces
     }
 }
 

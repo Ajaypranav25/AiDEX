@@ -11,7 +11,15 @@ AiDEX mediates agent actions rather than trusting model output. The policy and e
 - Verify signed updates and runtime integrity before execution.
 - Describe cleanup limits honestly: AiDEX controls only residue it created, not privileged host telemetry.
 
-These properties are requirements from the product specification, not current implementation claims. No vault, broker, or remote security boundary is production-ready in this foundation; the process sandbox below enforces exactly what its plans state and nothing more.
+These properties are requirements from the product specification, not current implementation claims. No broker or remote security boundary is production-ready in this foundation; the vault below is pending independent security review, and the process sandbox below enforces exactly what its plans state and nothing more.
+
+## Vault (`crates/vault`, status: implemented, independent security review pending)
+
+- Secrets are stored in the drive's `private/vault/` directory, encrypted with a passphrase-derived key hierarchy (Argon2id → key-encryption key → random 256-bit vault master key; HKDF-SHA256 subkeys; XChaCha20-Poly1305 records and index; HMAC-SHA256 header). It does not use any host keychain, so the drive unlocks on any supported host with the passphrase or the optional recovery key. Format, validation order, crash safety, and threat model: `crates/vault/FORMAT.md`.
+- Secret names, kinds, consumer policies, and values are encrypted at rest. Tampering, truncation, swapped or foreign records, missing headers, unknown versions, and symlinked paths are explicit errors; nothing falls back to plaintext or to an empty vault. Interrupted writes leave the previous committed state readable.
+- Values leave the vault only when the broker resolves a scoped, expiring, revocable handle for a consumer the secret's policy names (`provider:`, `mcp:`, `process:`, `git:`). Model prompts, agents, sessions, logs, and shell environments can never be consumers. Handle issuance and resolution are in-process Rust APIs (`VaultService`), not IPC methods. Lock, idle auto-lock (30 min default), and daemon restart invalidate every handle.
+- There is no online lockout for an offline drive: passphrase strength is the protection against offline guessing. A lost passphrase without a recovery key is unrecoverable; encrypted backups protect against drive loss, not credential loss.
+- Not yet done: independent cryptographic review (required before release), memory locking, zeroization of IPC request buffers, whole-vault rollback detection, audit events, phone factor, and host-trust policies.
 
 ## Process sandbox
 
@@ -34,3 +42,7 @@ This is a decision engine only. No execution broker routes or enforces agent act
 ## Event redaction (implemented)
 
 - Events (`aidex-events`) reference secrets by handle and name only. Every free-text event field is passed through `redact_text` (provider tokens, JWTs, bearer/authorization credentials, PEM private keys, URL passwords, password/token/secret/key assignments) and bounded before it is stored or streamed, and an identifier that looks like a credential refuses the event. Redaction is pattern based and is a last line of defence, not a substitute for keeping secret values out of events. The event log is not yet encrypted at rest.
+
+## Workspace confinement
+
+`aidex-workspace` confines workspace-relative paths in-process (for the tools and apply logic that use it). Workspace roots are only directories the user explicitly selected (never the drive, a directory containing it, or AiDEX-managed directories) or directories AiDEX created on the drive. `ConfinedRoot::resolve` rejects traversal, absolute, drive-letter, and UNC paths, alternate data streams, and Windows reserved or aliasing names; it follows a symbolic link or junction only when the resolved target stays inside the root and fails closed on dangling or looping links. Ephemeral copies are applied only after review, per selected file, with conflict detection and a review digest; deletion is limited to marker-verified, AiDEX-created directories, and host data is never deleted. Resolution is a point-in-time check rather than OS-enforced isolation: a process that can modify the workspace concurrently can race it (TOCTOU), and containing untrusted processes is `aidex-sandbox`'s job (not yet wired to workspaces).
