@@ -19,6 +19,29 @@ export type PageId =
   | "remote"
   | "settings";
 
+/**
+ * Pages whose content is still sample data because their backend has not landed (workspaces #11,
+ * sessions #12, models #14/#15, agents #19/#23, extensions #24, remote #29). The shell labels them.
+ * Home, Settings, and Security mix live Core data with labelled samples and say so themselves.
+ */
+export const samplePages: ReadonlySet<PageId> = new Set<PageId>([
+  "workspaces",
+  "workspace-create",
+  "workspace",
+  "chat",
+  "agent",
+  "execution",
+  "review",
+  "history",
+  "checkpoints",
+  "agents",
+  "agent-config",
+  "models",
+  "model",
+  "extensions",
+  "remote",
+]);
+
 /** `tab` selects a section within a page; `id` names the record a page shows (workspace, agent, model). */
 export type Route = { page: PageId; tab?: string; id?: string };
 

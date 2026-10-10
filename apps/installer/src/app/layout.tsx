@@ -3,7 +3,7 @@ import "@aidex/ui/styles.css";
 
 export const metadata: Metadata = {
   title: "AiDEX Setup",
-  description: "Preview the AiDEX portable workspace setup flow. Nothing is written to a drive.",
+  description: "Set up a removable drive for the portable AiDEX workspace.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
