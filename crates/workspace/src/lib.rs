@@ -9,3 +9,16 @@
 //! - Ephemeral workspaces copy a source (honoring `.gitignore`), record a baseline,
 //!   and support review, selective apply with conflict detection, and discard.
 
+
+mod confine;
+mod error;
+mod model;
+mod platform;
+
+pub use confine::{Access, ConfinedRoot, parse_workspace_path};
+pub use error::WorkspaceError;
+pub use model::{
+    MAX_NAME_CHARS, RepositoryInfo, Vcs, WORKSPACE_ID_PREFIX, Workspace, WorkspaceAvailability,
+    WorkspaceKind, WorkspaceRoot, validate_name,
+};
+pub use platform::{display_path, windows_component_issue};
