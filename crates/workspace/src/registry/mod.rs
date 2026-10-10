@@ -384,13 +384,10 @@ impl WorkspaceRegistry {
         if !location.is_absolute() {
             return unavailable("the root was added on a different operating system");
         }
-        let metadata = match &record.root {
-            WorkspaceRoot::Host(_) => fs::metadata(&location),
-            WorkspaceRoot::Drive(_) => fs::symlink_metadata(&location),
-        };
+        let metadata = fs::symlink_metadata(&location);
         match metadata {
             Ok(metadata) if metadata.file_type().is_symlink() => {
-                unavailable("the drive workspace directory was replaced by a link")
+                unavailable("the workspace root directory was replaced by a link")
             }
             Ok(metadata) if metadata.is_dir() => WorkspaceAvailability::Available,
             Ok(_) => unavailable("the root is not a directory"),

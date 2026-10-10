@@ -393,3 +393,43 @@ fn a_drive_workspace_redirected_through_a_link_is_refused() {
         "secret"
     );
 }
+
+#[test]
+fn a_host_root_replaced_by_a_link_is_unavailable_and_never_accessed() {
+    let drive = Drive::new();
+    let registry = drive.registry();
+    let repo = project(&[("root/original.txt", "original")]);
+    let root = repo.path().join("root");
+    let outside = project(&[("secret.txt", "secret"), (".git/HEAD", "ref")]);
+    let workspace = registry.add_host(&root, Some("redirected-host")).unwrap();
+    fs::rename(&root, repo.path().join("original")).unwrap();
+    if !common::dir_link(outside.path(), &root) {
+        return;
+    }
+
+    for current in [
+        registry.get(&workspace.id).unwrap(),
+        registry.list().unwrap().remove(0),
+        drive.registry().get(&workspace.id).unwrap(),
+    ] {
+        assert!(matches!(
+            current.availability,
+            WorkspaceAvailability::Unavailable { .. }
+        ));
+        assert!(current.repository.is_none());
+    }
+    assert!(matches!(
+        registry.confined_root(&workspace.id),
+        Err(WorkspaceError::RootUnavailable { .. })
+    ));
+    assert!(matches!(
+        registry.handle(&workspace.id),
+        Err(WorkspaceError::RootUnavailable { .. })
+    ));
+    assert!(matches!(
+        registry.create_ephemeral(&workspace.id),
+        Err(WorkspaceError::RootUnavailable { .. })
+    ));
+    assert_eq!(fs::read_to_string(outside.path().join("secret.txt")).unwrap(), "secret");
+    assert_eq!(fs::read_to_string(repo.path().join("original/original.txt")).unwrap(), "original");
+}
