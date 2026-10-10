@@ -9,7 +9,7 @@ import type {
   Message,
 } from "@aidex/client/dto/sessions";
 import { useRpc } from "../../hooks/useRpc";
-import { QueryError } from "../system/QueryState";
+import { QueryState } from "../system/QueryState";
 
 export function MessageContent({
   message,
@@ -123,16 +123,25 @@ export function HistoryMessages({ scope }: { scope: HistoryScope }) {
   const history = useRpc("history.list", { ...scope, offset, limit: 20 });
   return (
     <Stack gap={4}>
-      <QueryError query={history} failure="Cannot read the history" />
-      {history.data?.messages
-        .filter((message) => message.role !== "system")
-        .map((message) => (
-          <MessageContent
-            key={message.original_index}
-            message={message}
-            scope={scope}
-          />
-        ))}
+      <QueryState
+        query={history}
+        loading="Loading messages…"
+        failure="Cannot read the history"
+      >
+        {(page) => (
+          <Stack gap={4}>
+            {page.messages
+              .filter((message) => message.role !== "system")
+              .map((message) => (
+                <MessageContent
+                  key={message.original_index}
+                  message={message}
+                  scope={scope}
+                />
+              ))}
+          </Stack>
+        )}
+      </QueryState>
       <Stack direction="row" gap={2}>
         <Button
           variant="outline"

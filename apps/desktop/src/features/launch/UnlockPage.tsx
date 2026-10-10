@@ -127,13 +127,13 @@ export function UnlockPage({ onContinue }: Props) {
     }
     return (
       <QueryState query={vault} loading="Checking the vault…" failure="Cannot read the vault status">
-        {(status) => vaultState(status)}
+        {(vaultStatus) => vaultState(vaultStatus)}
       </QueryState>
     );
   };
 
-  const vaultState = (status: VaultStatus) => {
-    switch (status.state) {
+  const vaultState = (vaultStatus: VaultStatus) => {
+    switch (vaultStatus.state) {
       case "missing":
         return <VaultSetupForm onSubmit={create} busy={busy} error={error} />;
       case "locked":
@@ -144,14 +144,14 @@ export function UnlockPage({ onContinue }: Props) {
             media={<IconBadge tone="accent" icon={<LockOpenIcon />} />}
             title="Vault unlocked"
             titleLevel={2}
-            description={`${status.secrets ?? 0} secrets on this drive. Agents receive handles, never values.`}
+            description={`${vaultStatus.secrets ?? 0} secrets on this drive. Agents receive handles, never values.`}
             trailing={<StatusIndicator tone="success" label="Unlocked" />}
           />
         );
       default:
         return (
           <Notice tone="danger" role="alert">
-            The vault on this drive cannot be used{status.message ? `: ${status.message}` : "."} Nothing was changed.
+            The vault on this drive cannot be used{vaultStatus.message ? `: ${vaultStatus.message}` : "."} Nothing was changed.
           </Notice>
         );
     }

@@ -17,7 +17,7 @@ import type { ProviderAccount, ProviderPreset } from "@aidex/client/dto/models";
 import { useRpc } from "../../hooks/useRpc";
 import { useToast } from "../../app/providers/toast";
 import { useNavigation } from "../../app/providers/navigation";
-import { QueryError } from "../system/QueryState";
+import { QueryState } from "../system/QueryState";
 
 export function ProvidersPanel() {
   const { navigate } = useNavigation();
@@ -253,89 +253,97 @@ export function ProvidersPanel() {
           }
           meta={`${accounts.data?.providers.length ?? 0} accounts`}
         />
-        <QueryError query={accounts} failure="Cannot list provider accounts" />
-        <List>
-          {(accounts.data?.providers ?? []).map((account) => (
-            <ListRow
-              key={account.descriptor.id}
-              media={<IconBadge icon={<CloudIcon />} />}
-              title={account.descriptor.id}
-              subtitle={account.descriptor.base_url ?? account.descriptor.kind}
-              meta={[
-                health[account.descriptor.id] ??
-                  "Configured · live verification pending",
-              ]}
-              trailing={
-                <Stack direction="row" gap={2}>
-                  {account.descriptor.auth.type === "vault_secret" &&
-                  account.descriptor.auth.secret_name.startsWith("oauth.") ? (
-                    <Button
-                      variant="ghost"
-                      disabled={busy}
-                      onClick={() =>
-                        void act(async () => {
-                          if (flowId)
-                            await call("auth.cancel", { flow_id: flowId });
-                          const result = await call("auth.start", {
-                            provider_id: account.descriptor.id,
-                            method: "chatgpt",
-                          });
-                          setFlowId(result.flow_id);
-                          setAuthState("pending");
-                          await call("auth.open", {
-                            authorization_url: result.authorization_url,
-                          });
-                        })
-                      }
-                    >
-                      Reconnect
-                    </Button>
-                  ) : (
-                    <Button
-                      variant="ghost"
-                      disabled={busy}
-                      onClick={() => edit(account)}
-                    >
-                      Edit
-                    </Button>
-                  )}
-                  <Button
-                    variant="outline"
-                    disabled={busy}
-                    onClick={() =>
-                      void act(async () => {
-                        const result = await call("provider.health", {
-                          id: account.descriptor.id,
-                        });
-                        setHealth((current) => ({
-                          ...current,
-                          [account.descriptor.id]:
-                            result.message ?? result.status,
-                        }));
-                      })
+        <QueryState
+          query={accounts}
+          loading="Loading provider accounts…"
+          failure="Cannot list provider accounts"
+        >
+          {({ providers }) =>
+            providers.length === 0 ? (
+              <Text tone="muted">No accounts connected yet.</Text>
+            ) : (
+              <List>
+                {providers.map((account) => (
+                  <ListRow
+                    key={account.descriptor.id}
+                    media={<IconBadge icon={<CloudIcon />} />}
+                    title={account.descriptor.id}
+                    subtitle={account.descriptor.base_url ?? account.descriptor.kind}
+                    meta={[
+                      health[account.descriptor.id] ??
+                        "Configured · live verification pending",
+                    ]}
+                    trailing={
+                      <Stack direction="row" gap={2}>
+                        {account.descriptor.auth.type === "vault_secret" &&
+                        account.descriptor.auth.secret_name.startsWith("oauth.") ? (
+                          <Button
+                            variant="ghost"
+                            disabled={busy}
+                            onClick={() =>
+                              void act(async () => {
+                                if (flowId)
+                                  await call("auth.cancel", { flow_id: flowId });
+                                const result = await call("auth.start", {
+                                  provider_id: account.descriptor.id,
+                                  method: "chatgpt",
+                                });
+                                setFlowId(result.flow_id);
+                                setAuthState("pending");
+                                await call("auth.open", {
+                                  authorization_url: result.authorization_url,
+                                });
+                              })
+                            }
+                          >
+                            Reconnect
+                          </Button>
+                        ) : (
+                          <Button
+                            variant="ghost"
+                            disabled={busy}
+                            onClick={() => edit(account)}
+                          >
+                            Edit
+                          </Button>
+                        )}
+                        <Button
+                          variant="outline"
+                          disabled={busy}
+                          onClick={() =>
+                            void act(async () => {
+                              const result = await call("provider.health", {
+                                id: account.descriptor.id,
+                              });
+                              setHealth((current) => ({
+                                ...current,
+                                [account.descriptor.id]:
+                                  result.message ?? result.status,
+                              }));
+                            })
+                          }
+                        >
+                          Check connection
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          disabled={busy}
+                          onClick={() =>
+                            void act(() =>
+                              call("provider.remove", { id: account.descriptor.id }),
+                            )
+                          }
+                        >
+                          Remove
+                        </Button>
+                      </Stack>
                     }
-                  >
-                    Check connection
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    disabled={busy}
-                    onClick={() =>
-                      void act(() =>
-                        call("provider.remove", { id: account.descriptor.id }),
-                      )
-                    }
-                  >
-                    Remove
-                  </Button>
-                </Stack>
-              }
-            />
-          ))}
-        </List>
-        {!accounts.loading && !accounts.data?.providers.length && (
-          <Text tone="muted">No accounts connected yet.</Text>
-        )}
+                  />
+                ))}
+              </List>
+            )
+          }
+        </QueryState>
       </section>
       <Card padding="md">
         <Stack gap={3}>
@@ -347,16 +355,23 @@ export function ProvidersPanel() {
               {error}
             </Notice>
           )}
-          <QueryError query={presets} failure="Cannot load provider presets" />
-          <Select
-            label="Provider"
-            value={presetId}
-            options={available.map((preset: ProviderPreset) => ({
-              value: preset.id,
-              label: preset.display_name,
-            }))}
-            onChange={(event) => changePreset(event.target.value)}
-          />
+          <QueryState
+            query={presets}
+            loading="Loading providers…"
+            failure="Cannot load provider presets"
+          >
+            {({ presets: options }) => (
+              <Select
+                label="Provider"
+                value={presetId}
+                options={options.map((preset: ProviderPreset) => ({
+                  value: preset.id,
+                  label: preset.display_name,
+                }))}
+                onChange={(event) => changePreset(event.target.value)}
+              />
+            )}
+          </QueryState>
           <TextField
             label="Account ID"
             value={accountId}

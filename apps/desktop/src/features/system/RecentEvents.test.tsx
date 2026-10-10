@@ -46,7 +46,7 @@ describe("RecentEvents", () => {
     expect(entries[1]).toHaveTextContent("vault unlocked");
   });
 
-  it("explains a failure and reads the events after a retry", async () => {
+  it("announces a failure and reads the events after a retry", async () => {
     const user = userEvent.setup();
     vi.mocked(call).mockRejectedValueOnce({
       code: "unavailable",
@@ -54,10 +54,10 @@ describe("RecentEvents", () => {
       message: "AiDEX Core is not running.",
     });
     renderEvents();
-    await screen.findByText("Cannot read events: AiDEX Core is not running.");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Cannot read events: AiDEX Core is not running.");
 
     daemonHasEvents([event(1, "vault.unlocked")]);
-    await user.click(screen.getByRole("button", { name: "Try again" }));
+    await user.click(screen.getByRole("button", { name: "Try again: Cannot read events" }));
 
     expect(await screen.findByText("vault unlocked")).toBeInTheDocument();
   });

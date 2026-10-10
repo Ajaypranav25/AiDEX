@@ -27,15 +27,15 @@ describe("UnlockPage vault status", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Checking the vault…");
   });
 
-  it("explains why the vault status cannot be read and asks again on request", async () => {
+  it("announces why the vault status cannot be read and asks again on request", async () => {
     const user = userEvent.setup();
     vi.mocked(call)
       .mockRejectedValueOnce({ code: "internal", kind: "internal", message: "The vault file is busy." })
       .mockResolvedValueOnce({ state: "locked", vault_id: "vlt_1", has_recovery_key: true });
     renderUnlock();
-    expect(await screen.findByText("Cannot read the vault status: The vault file is busy.")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Cannot read the vault status: The vault file is busy.");
 
-    await user.click(screen.getByRole("button", { name: "Try again" }));
+    await user.click(screen.getByRole("button", { name: "Try again: Cannot read the vault status" }));
 
     expect(await screen.findByLabelText("Workspace password")).toBeInTheDocument();
     expect(screen.queryByText(/Cannot read the vault status/)).not.toBeInTheDocument();
@@ -47,7 +47,7 @@ describe("UnlockPage vault status", () => {
     renderUnlock();
 
     expect(await screen.findByText("Vault not available")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Try again" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Try again/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Continue" })).toBeInTheDocument();
   });
 });

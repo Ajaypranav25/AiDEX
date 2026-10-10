@@ -48,14 +48,15 @@ describe("WorkspaceList", () => {
     expect(rows[1]).toHaveTextContent("Selected");
   });
 
-  it("explains a failure and lists the workspaces after a retry", async () => {
+  it("announces a failure and lists the workspaces after a retry", async () => {
     const user = userEvent.setup();
     vi.mocked(call)
       .mockRejectedValueOnce({ code: "unavailable", kind: ErrorKind.daemonUnavailable, message: "AiDEX Core is not running." })
       .mockResolvedValueOnce({ workspaces: [workspace("wsp_1", "api", null)], selected: null });
     renderList();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Cannot list workspaces: AiDEX Core is not running.");
 
-    await user.click(await screen.findByRole("button", { name: "Try again" }));
+    await user.click(screen.getByRole("button", { name: "Try again: Cannot list workspaces" }));
 
     expect(await screen.findByText("api")).toBeInTheDocument();
     expect(call).toHaveBeenCalledTimes(2);
