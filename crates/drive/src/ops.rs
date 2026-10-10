@@ -12,6 +12,7 @@ use crate::{
     CURRENT_SCHEMA_VERSION, DriveError, DriveManifest, MANIFEST_FILE_NAME, RelativePath,
     StoredManifest,
     migration::migrate_v1_manifest,
+    paths::create_dirs_beneath,
     platform::{available_bytes, is_windows_drive_root, require_removable},
 };
 
@@ -157,50 +158,6 @@ pub(crate) fn initialize_at(root: &Path) -> Result<(), DriveError> {
 
 fn create_owned_dir(root: &Path, relative: &RelativePath) -> Result<(), DriveError> {
     create_dirs_beneath(root, relative.as_str().split('/').map(OsStr::new)).map(drop)
-}
-
-/// Create each missing directory below a trusted `root`, refusing any existing
-/// component that is a symbolic link, junction, or non-directory.
-fn create_dirs_beneath<'a>(
-    root: &Path,
-    segments: impl IntoIterator<Item = &'a OsStr>,
-) -> Result<PathBuf, DriveError> {
-    let mut current = root.to_path_buf();
-    for segment in segments {
-        current.push(segment);
-        let created = match fs::symlink_metadata(&current) {
-            Ok(_) => false,
-            Err(error) if error.kind() == ErrorKind::NotFound => match fs::create_dir(&current) {
-                Ok(()) => true,
-                // A concurrent creator won the race; inspect what it created.
-                Err(error) if error.kind() == ErrorKind::AlreadyExists => false,
-                Err(error) => {
-                    return Err(DriveError::Io(format!(
-                        "cannot create AiDEX directory `{}`: {error}",
-                        current.display()
-                    )));
-                }
-            },
-            Err(error) => {
-                return Err(DriveError::Io(format!(
-                    "cannot inspect AiDEX directory `{}`: {error}",
-                    current.display()
-                )));
-            }
-        };
-        if !created {
-            let metadata = fs::symlink_metadata(&current).map_err(|error| {
-                DriveError::Io(format!(
-                    "cannot inspect AiDEX directory `{}`: {error}",
-                    current.display()
-                ))
-            })?;
-            if !metadata.is_dir() || metadata.file_type().is_symlink() {
-                return Err(DriveError::UnsafeComponent(current));
-            }
-        }
-    }
-    Ok(current)
 }
 
 fn status_at(

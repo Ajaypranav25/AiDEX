@@ -24,6 +24,8 @@ pub enum DriveError {
     MigrationConflict(PathBuf),
     /// Migration stopped before completion; the reason says what was preserved.
     MigrationFailed(String),
+    /// The path is outside the drive or not beneath a declared drive directory.
+    UnmanagedPath(PathBuf),
     /// A path component is a symbolic link, junction, or non-directory.
     UnsafeComponent(PathBuf),
 }
@@ -32,7 +34,9 @@ impl DriveError {
     /// Stable service code for API mapping.
     pub fn code(&self) -> ServiceErrorCode {
         match self {
-            Self::InvalidRoot(_) | Self::NotRemovable(_) => ServiceErrorCode::InvalidArgument,
+            Self::InvalidRoot(_) | Self::NotRemovable(_) | Self::UnmanagedPath(_) => {
+                ServiceErrorCode::InvalidArgument
+            }
             Self::MissingManifest(_) => ServiceErrorCode::NotFound,
             Self::ReadOnly(_) | Self::UnsafeComponent(_) => ServiceErrorCode::PermissionDenied,
             Self::CorruptManifest(..) | Self::MigrationConflict(_) => ServiceErrorCode::Conflict,
@@ -80,6 +84,11 @@ impl fmt::Display for DriveError {
                 backup.display()
             ),
             Self::MigrationFailed(reason) => write!(f, "manifest migration failed: {reason}"),
+            Self::UnmanagedPath(path) => write!(
+                f,
+                "refusing to use `{}`: it is not a declared AiDEX drive directory or beneath one",
+                path.display()
+            ),
             Self::UnsafeComponent(path) => write!(
                 f,
                 "refusing to use non-directory or symbolic link `{}`",
