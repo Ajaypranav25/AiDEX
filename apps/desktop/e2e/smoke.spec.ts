@@ -108,3 +108,26 @@ test("back and forward walk the visited screens by button, keyboard, and mouse",
 
   expect(errors).toEqual([]);
 });
+
+test("history shortcuts work from Home's empty composer and spare a typed draft", async ({ page }) => {
+  const errors = collectErrors(page);
+  await enterWorkspace(page);
+  const composer = page.getByRole("textbox", { name: "Message" });
+  await rail(page).getByRole("button", { name: "Home" }).click();
+  await rail(page).getByRole("button", { name: "Settings" }).click();
+
+  await page.keyboard.press("Alt+ArrowLeft");
+  await expect(page.getByRole("heading", { level: 1, name: "Welcome to AiDEX" })).toBeVisible();
+  await expect(composer).toBeFocused();
+
+  await page.keyboard.press("Alt+ArrowRight");
+  await expect(topBar(page)).toContainText("Settings");
+
+  await page.keyboard.press("Alt+ArrowLeft");
+  await composer.fill("Plan the vault migration");
+  await page.keyboard.press("Alt+ArrowRight");
+  await page.locator("body").dispatchEvent("mouseup", { button: 4 });
+
+  await expect(composer).toHaveValue("Plan the vault migration");
+  expect(errors).toEqual([]);
+});
