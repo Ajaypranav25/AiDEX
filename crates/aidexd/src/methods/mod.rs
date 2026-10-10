@@ -10,6 +10,7 @@ pub mod daemon;
 pub mod events;
 pub mod models;
 pub mod sessions;
+pub mod update;
 pub mod vault;
 pub mod workspace;
 
@@ -58,6 +59,7 @@ pub(crate) fn register_all(
     events::register(router, services)?;
     models::register(router, services)?;
     sessions::register(router, services)?;
+    update::register(router, services)?;
     vault::register(router, services)?;
     workspace::register(router, services)?;
     Ok(())
