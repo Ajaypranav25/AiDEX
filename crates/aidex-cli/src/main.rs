@@ -1,3 +1,4 @@
+use aidex_drive::{init as init_drive, resolve_root, status as drive_status};
 use aidex_host::HostInfo;
 use clap::{Args, Parser, Subcommand};
 use std::{
@@ -49,8 +50,88 @@ enum Commands {
         #[command(subcommand)]
         command: AgentCommands,
     },
-    /// Check host information and Oh My Pi availability.
+    /// Initialize AiDEX-owned directories on a removable drive.
+    Init {
+        /// Removable drive root (must already exist).
+        #[arg(long, value_name = "DRIVE_PATH")]
+        drive: PathBuf,
+    },
+    /// Report active drive health without changing it.
+    Status {
+        /// Drive root; defaults to AIDEX_DRIVE_ROOT from the portable launcher.
+        #[arg(long, value_name = "DRIVE_PATH")]
+        drive: Option<PathBuf>,
+    },
+    /// Check host information, drive health, and Oh My Pi availability.
     Doctor,
+}
+
+fn drive_init(path: &Path) -> ExitCode {
+    match init_drive(path) {
+        Ok(status) => {
+            print_drive_status(
+                &status.root,
+                status.schema_version,
+                status.writable,
+                status.free_bytes,
+            );
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("aidex init: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn drive_health(path: Option<&Path>) -> ExitCode {
+    let root = match resolve_root(path) {
+        Ok(root) => root,
+        Err(error) => {
+            eprintln!("aidex status: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    match drive_status(&root) {
+        Ok(status) => {
+            print_drive_status(
+                &status.root,
+                status.schema_version,
+                status.writable,
+                status.free_bytes,
+            );
+            if status.writable {
+                ExitCode::SUCCESS
+            } else {
+                ExitCode::FAILURE
+            }
+        }
+        Err(error) => {
+            print_drive_error(&root, &error);
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn print_drive_status(root: &Path, schema: Option<u32>, writable: bool, free: Option<u64>) {
+    println!("Drive root: {}", root.display());
+    println!(
+        "Schema version: {}",
+        schema.map_or_else(|| "unavailable".into(), |version| version.to_string())
+    );
+    println!("Writable: {}", if writable { "yes" } else { "no" });
+    println!(
+        "Free space: {}",
+        free.map_or_else(|| "unavailable".into(), |bytes| format!("{bytes} bytes"))
+    );
+}
+
+fn print_drive_error(root: &Path, error: &dyn std::fmt::Display) {
+    println!("Drive root: {}", root.display());
+    println!("Schema version: unavailable");
+    println!("Writable: unknown");
+    println!("Free space: unavailable");
+    eprintln!("aidex status: {error}");
 }
 
 #[derive(Debug, Subcommand)]
@@ -66,6 +147,8 @@ fn main() -> ExitCode {
         Some(Commands::Agent {
             command: AgentCommands::List,
         }) => list_agents(),
+        Some(Commands::Init { drive }) => drive_init(&drive),
+        Some(Commands::Status { drive }) => drive_health(drive.as_deref()),
         Some(Commands::Doctor) => doctor(),
         None => launch_omp(&SessionOptions::default(), &[]),
     }
@@ -176,16 +259,42 @@ fn doctor() -> ExitCode {
         println!("Working directory: {}", current_dir.display());
     }
 
-    match omp_version() {
+    let drive_ok = match resolve_root(None) {
+        Ok(root) => match drive_status(&root) {
+            Ok(status) => {
+                print_drive_status(
+                    &status.root,
+                    status.schema_version,
+                    status.writable,
+                    status.free_bytes,
+                );
+                status.writable
+            }
+            Err(error) => {
+                print_drive_error(&root, &error);
+                false
+            }
+        },
+        Err(error) => {
+            eprintln!("Drive: unavailable ({error})");
+            false
+        }
+    };
+    let runtime_ok = match omp_version() {
         Ok(version) => {
             println!("Oh My Pi: available ({version})");
-            ExitCode::SUCCESS
+            true
         }
         Err(error) => {
             println!("Oh My Pi: unavailable ({error})");
             print_runtime_install_hint();
-            ExitCode::FAILURE
+            false
         }
+    };
+    if drive_ok && runtime_ok {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::FAILURE
     }
 }
 
