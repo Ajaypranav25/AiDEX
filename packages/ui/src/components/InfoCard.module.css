@@ -1,0 +1,55 @@
+.card {
+  display: grid;
+  grid-template-areas:
+    "icon status"
+    "body body";
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: var(--aidex-space-5) var(--aidex-space-3);
+}
+
+.icon {
+  display: inline-flex;
+  grid-area: icon;
+  color: var(--aidex-color-text);
+}
+
+.icon svg {
+  width: 36px;
+  height: 36px;
+}
+
+.status {
+  display: inline-flex;
+  grid-area: status;
+}
+
+.body {
+  display: flex;
+  grid-area: body;
+  flex-direction: column;
+  gap: var(--aidex-space-1);
+  margin: 0;
+}
+
+.label {
+  color: var(--aidex-color-text);
+  font-size: var(--aidex-text-lg);
+  font-weight: 600;
+}
+
+.value,
+.detail {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.value {
+  color: var(--aidex-color-text);
+  font-size: var(--aidex-text-lg);
+}
+
+.detail {
+  color: var(--aidex-color-text-muted);
+  font-size: var(--aidex-text-md);
+}

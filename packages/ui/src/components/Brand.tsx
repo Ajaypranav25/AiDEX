@@ -5,13 +5,15 @@ import styles from "./Brand.module.css";
 
 export type BrandProps = Omit<ComponentPropsWithRef<"span">, "children"> & {
   name?: string;
-  size?: "md" | "lg";
+  size?: "md" | "lg" | "xl";
+  /** `stacked` places the wordmark under the mark, for splash and launch screens. */
+  layout?: "inline" | "stacked";
 };
 
 /** Logo mark with the product wordmark. */
-export function Brand({ name = "AiDEX", size = "lg", className, ...props }: BrandProps) {
+export function Brand({ name = "AiDEX", size = "lg", layout = "inline", className, ...props }: BrandProps) {
   return (
-    <span className={cx(styles.brand, styles[size], className)} {...props}>
+    <span className={cx(styles.brand, styles[size], styles[layout], className)} {...props}>
       <LogoMark className={styles.mark} />
       <span className={styles.wordmark}>{name}</span>
     </span>
