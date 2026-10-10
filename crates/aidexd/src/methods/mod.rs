@@ -8,6 +8,7 @@
 
 pub mod daemon;
 pub mod events;
+pub mod sessions;
 pub mod vault;
 pub mod workspace;
 
@@ -24,6 +25,7 @@ pub(crate) fn register_all(
 ) -> Result<(), RouterError> {
     daemon::register(router, services)?;
     events::register(router, services)?;
+    sessions::register(router, services)?;
     vault::register(router, services)?;
     workspace::register(router, services)?;
     Ok(())

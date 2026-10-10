@@ -187,6 +187,7 @@ dependencies = [
  "aidex-drive",
  "aidex-events",
  "aidex-host",
+ "aidex-sessions",
  "aidex-vault",
  "aidex-workspace",
  "getrandom",
