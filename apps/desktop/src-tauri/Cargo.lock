@@ -89,6 +89,28 @@ name = "aidex-host"
 version = "0.1.0"
 dependencies = [
  "serde",
+ "sysinfo",
+]
+
+[[package]]
+name = "aidex-inference"
+version = "0.1.0"
+dependencies = [
+ "aidex-core",
+ "aidex-drive",
+ "aidex-events",
+ "aidex-host",
+ "aidex-providers",
+ "aidex-sandbox",
+ "flate2",
+ "getrandom 0.3.4",
+ "serde",
+ "serde_json",
+ "sha2",
+ "toml 0.8.2",
+ "ureq",
+ "zeroize",
+ "zip",
 ]
 
 [[package]]
@@ -191,8 +213,10 @@ dependencies = [
  "aidex-drive",
  "aidex-events",
  "aidex-host",
+ "aidex-inference",
  "aidex-providers",
  "aidex-router",
+ "aidex-sandbox",
  "aidex-sessions",
  "aidex-vault",
  "aidex-workspace",
@@ -230,6 +254,15 @@ name = "anyhow"
 version = "1.0.104"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
+
+[[package]]
+name = "arbitrary"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3bc62ac97cc33321f50863d514c3bc38a453947a8f9e781137e47c7401020aed"
+dependencies = [
+ "derive_arbitrary",
+]
 
 [[package]]
 name = "argon2"
@@ -825,6 +858,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
 dependencies = [
  "serde_core",
+]
+
+[[package]]
+name = "derive_arbitrary"
+version = "1.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b034bd7d5f032402a2479444dcc6f74e36a03f31854d41680fb240ef682a1ac"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 3.0.7",
 ]
 
 [[package]]
@@ -5174,6 +5218,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.7",
+]
+
+[[package]]
+name = "zip"
+version = "4.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "caa8cd6af31c3b31c6631b8f483848b91589021b28fffe50adada48d4f4d2ed1"
+dependencies = [
+ "arbitrary",
+ "crc32fast",
+ "flate2",
+ "indexmap 2.14.2",
+ "memchr",
 ]
 
 [[package]]
