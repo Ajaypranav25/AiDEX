@@ -1,5 +1,7 @@
 //! Versioned, loopback-only daemon protocol. Its random endpoint capability is
-//! user-protected at rest on Windows and mode 0600 on Unix.
+//! Events are replayed from the durable log on each bounded request; polling by
+//! acknowledged cursor avoids a read/subscribe handoff race across disconnects.
+use aidex_events::{Event, EventLog, MAX_BATCH};
 use serde::{Deserialize, Serialize};
 
 use std::{
@@ -17,8 +19,10 @@ use std::process::Command;
 pub const CONTRACT_VERSION: u32 = 1;
 const STATE_DIR: &str = ".aidex/runtime";
 const STATE_FILE: &str = "daemon.json";
+const EVENT_FILE: &str = "events.sqlite";
 const MAX_REQUEST_BYTES: u64 = 4096;
-
+const MAX_RESPONSE_BYTES: u64 = 1024 * 1024;
+const MAX_EVENT_BATCH: usize = MAX_BATCH;
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Endpoint {
@@ -34,6 +38,12 @@ struct Request {
     version: u32,
     token: String,
     command: String,
+    #[serde(default)]
+    workspace_id: Option<String>,
+    #[serde(default)]
+    after: Option<u64>,
+    #[serde(default)]
+    limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -44,6 +54,20 @@ struct Response {
     state: String,
     error: Option<String>,
 }
+
+#[derive(Debug)]
+pub enum EventRequestError {
+    Unavailable(String),
+    Rejected(String),
+}
+impl std::fmt::Display for EventRequestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unavailable(message) | Self::Rejected(message) => f.write_str(message),
+        }
+    }
+}
+impl std::error::Error for EventRequestError {}
 
 pub fn state_path(root: &Path) -> PathBuf {
     root.join(STATE_DIR).join(STATE_FILE)
@@ -132,35 +156,79 @@ fn unprotect_token(token: &str) -> Result<String, String> {
 }
 
 pub fn request(root: &Path, command: &str) -> Result<String, String> {
-    let endpoint = read_endpoint(root)?;
+    request_raw(
+        root,
+        Request {
+            version: CONTRACT_VERSION,
+            token: String::new(),
+            command: command.to_owned(),
+            workspace_id: None,
+            after: None,
+            limit: None,
+        },
+    )
+    .map(|response| response.state)
+    .map_err(|error| error.to_string())
+}
+
+/// Fetch one bounded replay batch after the caller's last acknowledged cursor.
+pub fn request_events(
+    root: &Path,
+    workspace_id: &str,
+    after: u64,
+    limit: usize,
+) -> Result<Vec<Event>, EventRequestError> {
+    if limit == 0 || limit > MAX_EVENT_BATCH {
+        return Err(EventRequestError::Rejected(format!(
+            "event batch limit must be between 1 and {MAX_EVENT_BATCH}"
+        )));
+    }
+    let response = request_raw(
+        root,
+        Request {
+            version: CONTRACT_VERSION,
+            token: String::new(),
+            command: "events".to_owned(),
+            workspace_id: Some(workspace_id.to_owned()),
+            after: Some(after),
+            limit: Some(limit),
+        },
+    )?;
+    serde_json::from_str(&response.state)
+        .map_err(|e| EventRequestError::Rejected(format!("invalid event batch: {e}")))
+}
+
+fn request_raw(root: &Path, mut request: Request) -> Result<Response, EventRequestError> {
+    let endpoint = read_endpoint(root).map_err(EventRequestError::Unavailable)?;
+    request.token = endpoint.token;
     let mut stream = TcpStream::connect(("127.0.0.1", endpoint.port))
-        .map_err(|e| format!("daemon is not reachable: {e}"))?;
+        .map_err(|e| EventRequestError::Unavailable(format!("daemon is not reachable: {e}")))?;
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
-        .map_err(|e| e.to_string())?;
-    let request = Request {
-        version: CONTRACT_VERSION,
-        token: endpoint.token,
-        command: command.to_owned(),
-    };
-    serde_json::to_writer(&mut stream, &request).map_err(|e| e.to_string())?;
-    stream.write_all(b"\n").map_err(|e| e.to_string())?;
+        .map_err(|e| EventRequestError::Unavailable(e.to_string()))?;
+    serde_json::to_writer(&mut stream, &request)
+        .map_err(|e| EventRequestError::Unavailable(e.to_string()))?;
+    stream
+        .write_all(b"\n")
+        .map_err(|e| EventRequestError::Unavailable(e.to_string()))?;
     stream
         .shutdown(Shutdown::Write)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| EventRequestError::Unavailable(e.to_string()))?;
     let mut line = String::new();
     BufReader::new(stream)
-        .take(MAX_REQUEST_BYTES)
+        .take(MAX_RESPONSE_BYTES)
         .read_line(&mut line)
-        .map_err(|e| e.to_string())?;
-    let response: Response =
-        serde_json::from_str(&line).map_err(|e| format!("invalid daemon response: {e}"))?;
+        .map_err(|e| EventRequestError::Unavailable(e.to_string()))?;
+    let response: Response = serde_json::from_str(&line)
+        .map_err(|e| EventRequestError::Rejected(format!("invalid daemon response: {e}")))?;
     if response.version != CONTRACT_VERSION || !response.ok {
-        return Err(response
-            .error
-            .unwrap_or_else(|| "daemon rejected request".into()));
+        return Err(EventRequestError::Rejected(
+            response
+                .error
+                .unwrap_or_else(|| "daemon rejected request".into()),
+        ));
     }
-    Ok(response.state)
+    Ok(response)
 }
 
 /// Refuse a live instance and remove only an endpoint proven unreachable.
@@ -185,8 +253,16 @@ pub fn serve(root: &Path) -> Result<(), String> {
     if !root.is_dir() {
         return Err("selected drive is unavailable".into());
     }
+    let state_dir = root.join(".aidex");
+    ensure_not_symlink(&state_dir)?;
+    fs::create_dir_all(&state_dir)
+        .map_err(|e| format!("cannot create daemon state directory: {e}"))?;
     let dir = root.join(STATE_DIR);
+    ensure_not_symlink(&dir)?;
     fs::create_dir_all(&dir).map_err(|e| format!("cannot create daemon state directory: {e}"))?;
+    let event_path = dir.join(EVENT_FILE);
+    ensure_not_symlink(&event_path)?;
+    let event_log = EventLog::open(&event_path, 10_000).map_err(|e| e.to_string())?;
     let endpoint_file = state_path(root);
     let listener = TcpListener::bind(("127.0.0.1", 0))
         .map_err(|e| format!("cannot bind daemon endpoint: {e}"))?;
@@ -229,7 +305,7 @@ pub fn serve(root: &Path) -> Result<(), String> {
     let stopping = AtomicBool::new(false);
     while !stopping.load(Ordering::Relaxed) && root.is_dir() {
         match listener.accept() {
-            Ok((mut stream, _)) => handle(&mut stream, &endpoint, &stopping),
+            Ok((mut stream, _)) => handle(&mut stream, &endpoint, &stopping, &event_log),
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 std::thread::sleep(Duration::from_millis(50))
             }
@@ -244,7 +320,12 @@ pub fn serve(root: &Path) -> Result<(), String> {
     }
 }
 
-fn handle(stream: &mut TcpStream, endpoint: &Endpoint, stopping: &AtomicBool) {
+fn handle(
+    stream: &mut TcpStream,
+    endpoint: &Endpoint,
+    stopping: &AtomicBool,
+    event_log: &EventLog,
+) {
     let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
     let input = stream.try_clone();
     let parsed = input.ok().and_then(|s| {
@@ -261,6 +342,28 @@ fn handle(stream: &mut TcpStream, endpoint: &Endpoint, stopping: &AtomicBool) {
             error("incompatible contract version")
         }
         Some(request) if request.token != endpoint.token => error("unauthorized client"),
+        Some(request) if request.command == "events" => {
+            match (
+                request.workspace_id.as_deref(),
+                request.after,
+                request.limit,
+            ) {
+                (Some(workspace), Some(cursor), Some(limit))
+                    if (1..=MAX_EVENT_BATCH).contains(&limit) =>
+                {
+                    match event_log.read_after(workspace, cursor, limit) {
+                        Ok(events) => match serde_json::to_string(&events) {
+                            Ok(body) => success(&body),
+                            Err(encoding_error) => {
+                                error(&format!("cannot encode event batch: {encoding_error}"))
+                            }
+                        },
+                        Err(event_error) => error(&event_error.to_string()),
+                    }
+                }
+                _ => error("invalid event query"),
+            }
+        }
         Some(request) if request.command == "handshake" => success("ready"),
         Some(request) if request.command == "status" => success("ready"),
         Some(request) if request.command == "stop" => {
@@ -293,6 +396,17 @@ fn error(message: &str) -> Response {
     }
 }
 
+fn ensure_not_symlink(path: &Path) -> Result<(), String> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => Err(format!(
+            "managed daemon path is a symlink: {}",
+            path.display()
+        )),
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("cannot inspect managed daemon path: {error}")),
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,6 +423,7 @@ mod tests {
         );
         assert!(!root.exists());
     }
+    #[cfg(not(windows))]
     #[test]
     fn daemon_stops_after_the_selected_drive_is_removed() {
         let root = std::env::temp_dir().join(format!("aidexd-removal-{}", std::process::id()));
@@ -376,6 +491,8 @@ mod tests {
     }
     #[test]
     fn protocol_rejects_unauthorized_malformed_and_incompatible_requests() {
+        let directory = tempfile::tempdir().unwrap();
+        let event_log = EventLog::open(directory.path().join("events.sqlite"), 20).unwrap();
         let endpoint = Endpoint {
             version: CONTRACT_VERSION,
             pid: 1,
@@ -400,7 +517,7 @@ mod tests {
             client.write_all(json.as_bytes()).unwrap();
             client.write_all(b"\n").unwrap();
             client.shutdown(Shutdown::Write).unwrap();
-            handle(&mut server, &endpoint, &AtomicBool::new(false));
+            handle(&mut server, &endpoint, &AtomicBool::new(false), &event_log);
             let mut response_line = String::new();
             BufReader::new(client)
                 .read_line(&mut response_line)
@@ -410,6 +527,113 @@ mod tests {
             assert_eq!(response.error.as_deref(), Some(expected));
         }
         assert!(TcpStream::connect(("127.0.0.1", 0)).is_err());
+    }
+
+    #[test]
+    fn expired_event_cursor_is_a_permanent_replay_error() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let state_dir = root.join(STATE_DIR);
+        fs::create_dir_all(&state_dir).unwrap();
+        let event_log = EventLog::open(state_dir.join(EVENT_FILE), 1).unwrap();
+        for task_id in ["first", "second"] {
+            event_log
+                .publish(
+                    "workspace",
+                    None,
+                    aidex_events::EventKind::TaskStarted {
+                        task_id: task_id.into(),
+                    },
+                )
+                .unwrap();
+        }
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let endpoint = Endpoint {
+            version: CONTRACT_VERSION,
+            pid: std::process::id(),
+            port: listener.local_addr().unwrap().port(),
+            token: "c".repeat(64),
+        };
+        fs::write(state_path(root), encode_endpoint(&endpoint).unwrap()).unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            handle(&mut stream, &endpoint, &AtomicBool::new(false), &event_log);
+        });
+
+        let error = request_events(root, "workspace", 0, 1).unwrap_err();
+        assert!(matches!(
+            error,
+            EventRequestError::Rejected(message) if message.contains("expired")
+        ));
+        server.join().unwrap();
+    }
+
+    #[test]
+    fn authenticated_ipc_replays_from_last_acknowledged_cursor() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        fs::create_dir_all(root.join(STATE_DIR)).unwrap();
+        {
+            let log = EventLog::open(root.join(STATE_DIR).join(EVENT_FILE), 20).unwrap();
+            log.publish(
+                "workspace",
+                Some("session".into()),
+                aidex_events::EventKind::SessionStarted,
+            )
+            .unwrap();
+            log.publish(
+                "workspace",
+                Some("session".into()),
+                aidex_events::EventKind::SessionFinished,
+            )
+            .unwrap();
+        }
+        let daemon_root = root.to_path_buf();
+        let daemon = std::thread::spawn(move || serve(&daemon_root));
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let first_batch = loop {
+            match request_events(root, "workspace", 0, 1) {
+                Ok(events) => break events,
+                Err(_) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(error) => panic!("daemon did not serve event replay: {error}"),
+            }
+        };
+        assert_eq!(first_batch.len(), 1);
+        assert_eq!(first_batch[0].sequence, 1);
+        let next = request_events(root, "workspace", first_batch[0].sequence, 1).unwrap();
+        assert_eq!(next.len(), 1);
+        assert_eq!(next[0].sequence, 2);
+        assert!(
+            request_events(root, "workspace", next[0].sequence, 1)
+                .unwrap()
+                .is_empty()
+        );
+        request(root, "stop").unwrap();
+        daemon.join().unwrap().unwrap();
+
+        let daemon_root = root.to_path_buf();
+        let restarted_daemon = std::thread::spawn(move || serve(&daemon_root));
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let replay = loop {
+            match request_events(root, "workspace", 0, 2) {
+                Ok(events) => break events,
+                Err(_) if std::time::Instant::now() < deadline => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(error) => panic!("restarted daemon did not replay events: {error}"),
+            }
+        };
+        assert_eq!(
+            replay
+                .iter()
+                .map(|event| event.sequence)
+                .collect::<Vec<_>>(),
+            [1, 2]
+        );
+        request(root, "stop").unwrap();
+        restarted_daemon.join().unwrap().unwrap();
     }
 
     fn tcp_pair() -> (TcpStream, TcpStream) {

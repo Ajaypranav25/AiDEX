@@ -1,4 +1,5 @@
 use aidex_drive::{init as init_drive, resolve_root, status as drive_status};
+use aidex_events::{Event, MAX_BATCH};
 use aidex_host::HostInfo;
 use clap::{Args, Parser, Subcommand};
 use std::{
@@ -66,6 +67,21 @@ enum Commands {
     Daemon {
         #[command(subcommand)]
         command: DaemonCommands,
+    },
+    /// Stream durable workspace events, reconnecting from the last printed cursor.
+    Events {
+        /// Workspace whose events to read.
+        #[arg(long)]
+        workspace: String,
+        /// Last successfully emitted event sequence.
+        #[arg(long, default_value_t = 0)]
+        after: u64,
+        /// Drive root; defaults to AIDEX_DRIVE_ROOT from the portable launcher.
+        #[arg(long)]
+        drive: Option<PathBuf>,
+        /// Continue polling and reconnect after daemon outages.
+        #[arg(long)]
+        follow: bool,
     },
     /// Check host information, drive health, and Oh My Pi availability.
     Doctor,
@@ -212,6 +228,62 @@ fn daemon_command(command: DaemonCommands) -> ExitCode {
     }
 }
 
+fn events_command(
+    workspace: &str,
+    mut cursor: u64,
+    drive: Option<&Path>,
+    follow: bool,
+) -> ExitCode {
+    let root = match resolve_root(drive) {
+        Ok(root) => root,
+        Err(error) => {
+            eprintln!("aidex events: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    let stdout = std::io::stdout();
+    let mut output = stdout.lock();
+    loop {
+        match aidexd::server::request_events(&root, workspace, cursor, MAX_BATCH) {
+            Ok(events) => {
+                let empty = events.is_empty();
+                if let Err(error) = emit_events(&events, &mut output, &mut cursor) {
+                    eprintln!("aidex events: cannot emit event: {error}");
+                    return ExitCode::FAILURE;
+                }
+                if !follow {
+                    return ExitCode::SUCCESS;
+                }
+                if empty {
+                    std::thread::sleep(std::time::Duration::from_millis(250));
+                }
+            }
+            Err(aidexd::server::EventRequestError::Unavailable(error)) if follow => {
+                eprintln!("aidex events: reconnecting after error: {error}");
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+            Err(error) => {
+                eprintln!("aidex events: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+}
+
+fn emit_events<W: std::io::Write>(
+    events: &[Event],
+    output: &mut W,
+    acknowledged: &mut u64,
+) -> std::io::Result<()> {
+    for event in events {
+        serde_json::to_writer(&mut *output, event).map_err(std::io::Error::other)?;
+        output.write_all(b"\n")?;
+        output.flush()?;
+        *acknowledged = event.sequence;
+    }
+    Ok(())
+}
+
 fn main() -> ExitCode {
     match Cli::parse().command {
         Some(Commands::Chat { options, prompt }) => launch_omp(&options, &prompt),
@@ -222,6 +294,12 @@ fn main() -> ExitCode {
         Some(Commands::Init { drive }) => drive_init(&drive),
         Some(Commands::Status { drive }) => drive_health(drive.as_deref()),
         Some(Commands::Daemon { command }) => daemon_command(command),
+        Some(Commands::Events {
+            workspace,
+            after,
+            drive,
+            follow,
+        }) => events_command(&workspace, after, drive.as_deref(), follow),
         Some(Commands::Doctor) => doctor(),
         None => launch_omp(&SessionOptions::default(), &[]),
     }
@@ -419,4 +497,85 @@ fn print_runtime_install_hint() {
 
 fn exit_code(code: Option<i32>) -> ExitCode {
     ExitCode::from(code.unwrap_or(1).clamp(0, u8::MAX as i32) as u8)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aidex_events::{EVENT_VERSION, EventKind};
+
+    struct TestWriter {
+        bytes: Vec<u8>,
+        flushes: usize,
+        fail_flush: Option<usize>,
+    }
+
+    impl std::io::Write for TestWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.bytes.extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            self.flushes += 1;
+            if self.fail_flush == Some(self.flushes) {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::BrokenPipe,
+                    "consumer disconnected",
+                ))
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    fn event(sequence: u64) -> Event {
+        Event {
+            version: EVENT_VERSION,
+            sequence,
+            workspace_id: "workspace".into(),
+            session_id: Some("session".into()),
+            kind: EventKind::SessionStarted,
+        }
+    }
+
+    #[test]
+    fn cli_acknowledges_only_successfully_flushed_events() {
+        let events = [event(4), event(5)];
+        let mut writer = TestWriter {
+            bytes: Vec::new(),
+            flushes: 0,
+            fail_flush: Some(2),
+        };
+        let mut cursor = 3;
+
+        assert!(emit_events(&events, &mut writer, &mut cursor).is_err());
+        assert_eq!(cursor, 4);
+        let lines = std::str::from_utf8(&writer.bytes)
+            .unwrap()
+            .lines()
+            .collect::<Vec<_>>();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(serde_json::from_str::<Event>(lines[0]).unwrap().sequence, 4);
+    }
+
+    #[test]
+    fn cli_replay_batch_advances_cursor_in_event_order() {
+        let events = [event(1), event(2), event(3)];
+        let mut writer = TestWriter {
+            bytes: Vec::new(),
+            flushes: 0,
+            fail_flush: None,
+        };
+        let mut cursor = 0;
+
+        emit_events(&events, &mut writer, &mut cursor).unwrap();
+
+        assert_eq!(cursor, 3);
+        let emitted = std::str::from_utf8(&writer.bytes)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<Event>(line).unwrap().sequence)
+            .collect::<Vec<_>>();
+        assert_eq!(emitted, [1, 2, 3]);
+    }
 }
