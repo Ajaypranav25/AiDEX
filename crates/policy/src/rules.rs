@@ -114,10 +114,10 @@ impl Rule {
             }
             _ => {}
         }
-        if let (Some(min), Some(max)) = (self.when.min_risk, self.when.max_risk) {
-            if min > max {
-                return Err(format!("rule `{}` has min_risk above max_risk", self.id));
-            }
+        if let (Some(min), Some(max)) = (self.when.min_risk, self.when.max_risk)
+            && min > max
+        {
+            return Err(format!("rule `{}` has min_risk above max_risk", self.id));
         }
         Ok(())
     }

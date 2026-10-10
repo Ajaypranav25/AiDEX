@@ -1,0 +1,125 @@
+//! Injection contract for separately owned external agent adapters.
+//! Resume metadata is private protocol state, never authentication material.
+use crate::{Mode, PermissionMode};
+use aidex_core::CancelToken;
+use aidex_providers::ChatMessage;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RuntimeDescriptor {
+    pub id: String,
+    pub name: String,
+    pub modes: Vec<Mode>,
+    pub permission_modes: Vec<PermissionMode>,
+    pub supports_resume: bool,
+    pub supports_approvals: bool,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RuntimeWorkspace {
+    pub workspace_id: String,
+    pub root: String,
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeOperation {
+    Start,
+    Resume,
+    Approval,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RuntimeApprovalDecision {
+    pub request_id: String,
+    pub approved: bool,
+    pub fingerprint: String,
+    pub runtime_ref: Value,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RuntimeRequest {
+    pub session_id: String,
+    pub run_id: String,
+    pub parent_run_id: Option<String>,
+    pub operation: RuntimeOperation,
+    pub mode: Mode,
+    pub workspace: Option<RuntimeWorkspace>,
+    pub permission_mode: PermissionMode,
+    pub instructions: String,
+    pub model: Option<String>,
+    pub messages: Vec<ChatMessage>,
+    pub max_steps: u32,
+    pub max_tokens: u32,
+    pub runtime_ref: Option<Value>,
+    pub approvals: Vec<RuntimeApprovalDecision>,
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeToolStatus {
+    Requested,
+    Started,
+    Completed,
+    Failed,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum RuntimeEvent {
+    TextDelta {
+        text: String,
+    },
+    ToolProgress {
+        call_id: String,
+        tool_name: String,
+        status: RuntimeToolStatus,
+        summary: String,
+    },
+    ApprovalRequest {
+        request_id: String,
+        tool_name: String,
+        arguments: Value,
+        summary: String,
+        runtime_ref: Value,
+    },
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuntimeControl {
+    Continue,
+    Pause,
+}
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeStatus {
+    Completed,
+    WaitingApproval,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RuntimeResponse {
+    pub status: RuntimeStatus,
+    pub runtime_ref: Option<Value>,
+    pub message: Option<ChatMessage>,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RuntimeError {
+    pub code: String,
+    pub message: String,
+}
+impl std::fmt::Display for RuntimeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.code, self.message)
+    }
+}
+impl std::error::Error for RuntimeError {}
+
+/// Implementations must validate declared modes/permissions/model support, use
+/// the selected confined root, honor cancellation with managed process-tree
+/// termination, and pause BEFORE the requested effect when callback returns Pause.
+/// A paused response must provide an opaque resume reference; Approval/Resume
+/// operations continue that reference and must never blindly replay an old effect.
+pub trait RuntimeExecutor: Send + Sync {
+    fn descriptor(&self) -> RuntimeDescriptor;
+    fn validate(&self, request: &RuntimeRequest) -> Result<(), RuntimeError>;
+    fn execute(
+        &self,
+        request: &RuntimeRequest,
+        on_event: &mut dyn FnMut(&RuntimeEvent) -> RuntimeControl,
+        cancel: &CancelToken,
+    ) -> Result<RuntimeResponse, RuntimeError>;
+}

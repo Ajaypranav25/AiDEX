@@ -208,6 +208,7 @@ pub fn run(args: ProviderArgs, output: Output) -> Result<Exit, CliError> {
                     aidex_providers::HealthStatus::Ready => "ready",
                     aidex_providers::HealthStatus::Unavailable => "unavailable",
                     aidex_providers::HealthStatus::Refused => "refused",
+                    aidex_providers::HealthStatus::AuthRequired => "auth_required",
                 };
                 match (health.latency_ms, &health.message) {
                     (Some(ms), _) => println!("{}: {status} ({ms} ms)", result.provider_id),

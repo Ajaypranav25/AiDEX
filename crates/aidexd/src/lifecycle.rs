@@ -261,6 +261,8 @@ impl Daemon {
                 error.to_string(),
             )));
         }
+        let native = self.services.native().clone();
+        let inference = self.services.inference().clone();
         drop(self.services);
         let root = self.root.clone();
         let options = self.options;
@@ -271,7 +273,11 @@ impl Daemon {
                     &root,
                     options.poll_interval,
                     &options.drive_present,
-                    |outcome| record_stopping(&events, outcome),
+                    |outcome| {
+                        native.shutdown();
+                        let _ = inference.stop();
+                        record_stopping(&events, outcome);
+                    },
                 );
                 let cleanup = endpoint::remove(&root);
                 match (outcome, cleanup) {
@@ -392,16 +398,15 @@ pub fn recover_stale_endpoint(root: &Path) -> Result<Recovery, DaemonError> {
     else {
         return Ok(Recovery::NoEndpoint);
     };
-    if summary.version == CONTRACT_VERSION {
-        if let Ok(endpoint) = endpoint::read(root) {
-            if Client::connect_endpoint(&endpoint, lifecycle_client()).is_ok() {
-                return Err(DaemonError::AlreadyRunning { pid: endpoint.pid });
-            }
-        }
-    }
     if let Some(port) = summary.port.filter(|port| *port != 0) {
         let address = SocketAddr::from(([127, 0, 0, 1], port));
         if TcpStream::connect_timeout(&address, PROBE_TIMEOUT).is_ok() {
+            if summary.version == CONTRACT_VERSION
+                && let Ok(endpoint) = endpoint::read(root)
+                && Client::connect_endpoint(&endpoint, lifecycle_client()).is_ok()
+            {
+                return Err(DaemonError::AlreadyRunning { pid: endpoint.pid });
+            }
             let detail = if summary.version == CONTRACT_VERSION {
                 "it is responding but did not accept this user's capability".to_owned()
             } else {

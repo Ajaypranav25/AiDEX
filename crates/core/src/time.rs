@@ -179,7 +179,7 @@ fn parse_timestamp(s: &str) -> Option<(i64, u32)> {
 }
 
 fn days_in_month(year: u32, month: u32) -> u32 {
-    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let leap = year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
     match month {
         2 if leap => 29,
         2 => 28,

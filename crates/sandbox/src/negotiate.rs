@@ -141,16 +141,15 @@ fn push_unique(mounts: &mut Vec<Mount>, mount: Mount) {
 }
 
 fn validate_options(request: &SandboxRequest) -> Result<(), SandboxError> {
-    if let NetworkMode::Allowlist(domains) = &request.network {
-        if domains.is_empty()
+    if let NetworkMode::Allowlist(domains) = &request.network
+        && (domains.is_empty()
             || domains
                 .iter()
-                .any(|domain| domain.is_empty() || domain.chars().any(char::is_whitespace))
-        {
-            return Err(SandboxError::invalid(
-                "network allowlist must list non-empty domains without whitespace",
-            ));
-        }
+                .any(|domain| domain.is_empty() || domain.chars().any(char::is_whitespace)))
+    {
+        return Err(SandboxError::invalid(
+            "network allowlist must list non-empty domains without whitespace",
+        ));
     }
     let limits = &request.limits;
     if limits.max_processes == Some(0) {

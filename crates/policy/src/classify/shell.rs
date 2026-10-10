@@ -201,10 +201,10 @@ impl Accumulator {
     /// Record a destination; hosts that cannot be classified are ignored, which
     /// leaves the network effect without a known target (treated as unknown).
     pub(crate) fn target(&mut self, host: &str, port: u16) {
-        if let Ok(target) = classify_network(host, port) {
-            if !self.targets.contains(&target) {
-                self.targets.push(target);
-            }
+        if let Ok(target) = classify_network(host, port)
+            && !self.targets.contains(&target)
+        {
+            self.targets.push(target);
         }
     }
 

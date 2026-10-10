@@ -273,3 +273,61 @@ fn symlinked_runtime_directories_are_refused() {
         Err(DaemonError::Services(_))
     ));
 }
+
+#[cfg(windows)]
+#[test]
+fn stale_foreign_dpapi_credentials_are_unavailable_and_recreated_without_touching_data() {
+    let root = common::temp_drive();
+    let sentinel = root.path().join("preserve-history-and-vault.txt");
+    fs::write(&sentinel, b"preserve").unwrap();
+    write_endpoint(
+        root.path(),
+        &format!(
+            r#"{{"version":2,"pid":9,"port":{},"token":"AQIDBA=="}}"#,
+            unused_port()
+        ),
+    );
+    let client = Client::connect(root.path(), "portable-test");
+    assert!(
+        matches!(client, Err(ClientError::Unavailable(_))),
+        "dead endpoint must be detected before DPAPI unprotect: {client:?}"
+    );
+    assert_eq!(
+        lifecycle::recover_stale_endpoint(root.path()).unwrap(),
+        Recovery::RemovedStale
+    );
+    assert_eq!(fs::read(&sentinel).unwrap(), b"preserve");
+    let daemon = start(root.path(), options(), |_| {});
+    Client::connect(root.path(), "portable-test")
+        .unwrap()
+        .call("daemon.ping", Value::Null)
+        .unwrap();
+    daemon.stop();
+    daemon.wait().unwrap();
+}
+#[cfg(windows)]
+#[test]
+fn reachable_peer_with_foreign_dpapi_is_never_granted_access_or_replaced() {
+    let root = common::temp_drive();
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    write_endpoint(
+        root.path(),
+        &format!(
+            r#"{{"version":2,"pid":9,"port":{},"token":"AQIDBA=="}}"#,
+            listener.local_addr().unwrap().port()
+        ),
+    );
+    let before = fs::read(endpoint::state_path(root.path())).unwrap();
+    let error = Client::connect(root.path(), "portable-test").unwrap_err();
+    assert!(matches!(error, ClientError::Unauthorized(_)));
+    let message = error.to_string();
+    assert!(message.contains("temporary Core credential"));
+    for forbidden in ["AQIDBA==", "At line:", "CategoryInfo", "Exception calling"] {
+        assert!(!message.contains(forbidden), "unsafe diagnostic: {message}");
+    }
+    assert!(matches!(
+        lifecycle::recover_stale_endpoint(root.path()),
+        Err(DaemonError::EndpointBusy(_))
+    ));
+    assert_eq!(fs::read(endpoint::state_path(root.path())).unwrap(), before);
+}

@@ -339,7 +339,7 @@ mod protection {
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                script,
+                &format!("$ErrorActionPreference = 'Stop'; {script}"),
             ])
             .env("AIDEX_DAEMON_TOKEN", input)
             .creation_flags(CREATE_NO_WINDOW)
@@ -351,8 +351,7 @@ mod protection {
             })?;
         if !output.status.success() {
             return Err(EndpointError::Protection(format!(
-                "cannot {action} daemon credential with Windows DPAPI: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
+                "cannot {action} the temporary Core credential for this Windows login; restart Core on this computer"
             )));
         }
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())

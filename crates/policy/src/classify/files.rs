@@ -195,10 +195,12 @@ fn dd(args: &[String], ctx: &mut Ctx<'_>) {
             } else {
                 ctx.raise(ShellRisk::Medium, "writes a file with dd");
             }
-        } else if let Some(source) = arg.strip_prefix("if=") {
-            if is_block_device(source) && !source.contains("zero") && !source.contains("random") {
-                ctx.raise(ShellRisk::High, "reads a raw block device");
-            }
+        } else if let Some(source) = arg.strip_prefix("if=")
+            && is_block_device(source)
+            && !source.contains("zero")
+            && !source.contains("random")
+        {
+            ctx.raise(ShellRisk::High, "reads a raw block device");
         }
     }
     if !output {
@@ -415,15 +417,14 @@ pub(super) fn is_root_like(path: &str) -> bool {
         return true;
     }
     let parts: Vec<&str> = stripped.split('/').collect();
-    if let [drive, top] = parts.as_slice() {
-        if is_drive(drive)
-            && matches!(
-                *top,
-                "windows" | "users" | "program files" | "program files (x86)" | "programdata"
-            )
-        {
-            return true;
-        }
+    if let [drive, top] = parts.as_slice()
+        && is_drive(drive)
+        && matches!(
+            *top,
+            "windows" | "users" | "program files" | "program files (x86)" | "programdata"
+        )
+    {
+        return true;
     }
     if let Some((first, rest)) = parts.split_first() {
         // Immediate children of a home directory (`~/Documents`).

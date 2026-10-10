@@ -214,11 +214,11 @@ impl WorkspaceRegistry {
     pub fn find(&self, reference: &str) -> Result<Workspace, WorkspaceError> {
         let reference = reference.trim();
         let connection = self.connection();
-        if let Ok(id) = EntityId::new(reference) {
-            if let Some(record) = db::get(&connection, &id)? {
-                drop(connection);
-                return Ok(self.view(record));
-            }
+        if let Ok(id) = EntityId::new(reference)
+            && let Some(record) = db::get(&connection, &id)?
+        {
+            drop(connection);
+            return Ok(self.view(record));
         }
         let record = db::by_name(&connection, &name_key(reference))?;
         drop(connection);

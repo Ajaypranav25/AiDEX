@@ -260,10 +260,10 @@ pub(crate) fn verify_unchanged(
     if planned.kind != current.kind {
         return Err(ToolError::conflict(shown, "its type changed"));
     }
-    if let (Some(expected), Some(bytes)) = (&planned.sha256, current_bytes) {
-        if *expected != sha256_hex(bytes) {
-            return Err(ToolError::conflict(shown, "its content changed"));
-        }
+    if let (Some(expected), Some(bytes)) = (&planned.sha256, current_bytes)
+        && *expected != sha256_hex(bytes)
+    {
+        return Err(ToolError::conflict(shown, "its content changed"));
     }
     Ok(())
 }

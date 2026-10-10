@@ -12,6 +12,8 @@ const MAX_TEXT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_TOOL_CALLS: usize = 64;
 /// Largest arguments string accepted for one tool call.
 const MAX_ARGUMENT_BYTES: usize = 1024 * 1024;
+/// Data accumulated across individually legal SSE lines before dispatch.
+const MAX_EVENT_BYTES: usize = 1024 * 1024;
 
 /// Incremental SSE parser (WHATWG event-stream rules for the `data` field).
 #[derive(Debug, Default)]
@@ -22,23 +24,36 @@ pub(crate) struct SseDecoder {
 
 impl SseDecoder {
     /// Feed one line; returns the event payload completed by a blank line.
-    pub fn push_line(&mut self, line: &str) -> Option<String> {
+    pub fn push_line(&mut self, line: &str) -> Result<Option<String>, ProviderError> {
         if line.is_empty() {
-            return self.flush();
+            return Ok(self.flush());
         }
         if line.starts_with(':') {
-            return None;
+            return Ok(None);
         }
         let (field, value) = line.split_once(':').unwrap_or((line, ""));
         if field == "data" {
             let value = value.strip_prefix(' ').unwrap_or(value);
+            if self
+                .data
+                .len()
+                .checked_add(value.len())
+                .and_then(|len| len.checked_add(usize::from(self.has_data)))
+                .is_none_or(|len| len > MAX_EVENT_BYTES)
+            {
+                self.data.clear();
+                self.has_data = false;
+                return Err(ProviderError::Protocol(
+                    "SSE event exceeds the size limit".into(),
+                ));
+            }
             if self.has_data {
                 self.data.push('\n');
             }
             self.data.push_str(value);
             self.has_data = true;
         }
-        None
+        Ok(None)
     }
 
     /// The pending payload at end of stream, if the server omitted the final blank line.
@@ -129,9 +144,8 @@ impl StreamAccumulator {
             self.done = true;
             return Ok(());
         }
-        let chunk: Chunk = serde_json::from_str(payload).map_err(|error| {
-            ProviderError::Protocol(format!("malformed stream chunk ({error})"))
-        })?;
+        let chunk: Chunk = serde_json::from_str(payload)
+            .map_err(|_| ProviderError::Protocol("malformed stream chunk".into()))?;
         if let Some(error) = chunk.error {
             return Err(stream_error(&error));
         }
@@ -245,6 +259,7 @@ impl StreamAccumulator {
                 ));
             }
             tool_calls.push(ToolCall {
+                provider_metadata: None,
                 id: call.id.unwrap_or_else(|| format!("call_{index}")),
                 name: call.name,
                 arguments: call.arguments,
@@ -274,7 +289,11 @@ mod tests {
         let mut decoder = SseDecoder::default();
         let mut events: Vec<String> = stream
             .split('\n')
-            .filter_map(|line| decoder.push_line(line.strip_suffix('\r').unwrap_or(line)))
+            .filter_map(|line| {
+                decoder
+                    .push_line(line.strip_suffix('\r').unwrap_or(line))
+                    .unwrap()
+            })
             .collect();
         events.extend(decoder.flush());
         events
@@ -316,6 +335,7 @@ mod tests {
         assert_eq!(
             response.message.tool_calls,
             [ToolCall {
+                provider_metadata: None,
                 id: "call_a".into(),
                 name: "read_file".into(),
                 arguments: r#"{"path":"a.txt"}"#.into()

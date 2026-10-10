@@ -137,10 +137,10 @@ pub(crate) fn root_key(path: &Path) -> String {
 /// removed when the plain spelling denotes the same file; other platforms are
 /// returned unchanged.
 pub fn display_path(path: &Path) -> PathBuf {
-    if cfg!(windows) {
-        if let Some(simplified) = simplify_verbatim(&path.to_string_lossy()) {
-            return PathBuf::from(simplified);
-        }
+    if cfg!(windows)
+        && let Some(simplified) = simplify_verbatim(&path.to_string_lossy())
+    {
+        return PathBuf::from(simplified);
     }
     path.to_path_buf()
 }

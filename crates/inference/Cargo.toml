@@ -1,0 +1,31 @@
+[package]
+name = "aidex-inference"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+test-fixture = []
+
+[[bin]]
+name = "aidex-inference-fixture"
+path = "tests/support/fixture_server.rs"
+required-features = ["test-fixture"]
+
+[dependencies]
+aidex-core = { path = "../core" }
+aidex-drive = { path = "../drive" }
+aidex-providers = { path = "../providers" }
+aidex-sandbox = { path = "../sandbox" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+fs2 = "0.4"
+ureq = { version = "3.4", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
