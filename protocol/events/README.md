@@ -119,6 +119,8 @@ durable unless marked *ephemeral*.
 | `remote.disconnected` | `device_id: id`, `reason: text?` |
 | `daemon.started` | `pid: u32`, `version: text` |
 | `daemon.stopping` | `reason: requested\|drive_removed` |
+| `emergency.stopped` | `reason: text`, `cancelled_approvals: u64`, `revoked_approvals: u64`, `terminated_processes: u64`, `revoked_handles: u64` |
+| `emergency.resumed` | — |
 | `extension.enabled` / `disabled` | `extension_id: id`, `kind: skill\|mcp\|plugin\|agent` |
 | `legacy.v1` | `record` (a PR #40 kind, e.g. `tool_finished`), `subject_id: id?`, `outcome?`, `decision: approved\|denied\|expired?`, `exit_code: i32?` — imported history only |
 

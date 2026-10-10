@@ -296,6 +296,14 @@ pub fn samples(text: &str) -> Vec<EventKind> {
         EventKind::DaemonStopping {
             reason: DaemonStopReason::Requested,
         },
+        EventKind::EmergencyStopped {
+            reason: t(),
+            cancelled_approvals: 2,
+            revoked_approvals: 1,
+            terminated_processes: 3,
+            revoked_handles: 4,
+        },
+        EventKind::EmergencyResumed {},
         EventKind::ExtensionEnabled {
             extension_id: id("skill_review"),
             kind: ExtensionKind::Skill,
