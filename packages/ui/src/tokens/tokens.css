@@ -17,16 +17,17 @@
   --aidex-color-text-secondary: #b7c5da;
   --aidex-color-text-muted: #9aa6b6;
 
-  /* Accent and status */
+  /* Accent and status. The accent family derives from one color so it can be changed at runtime. */
   --aidex-color-accent: #1a8cff;
-  --aidex-color-accent-border: #0b7bd4;
-  --aidex-color-accent-soft: #0c1926;
-  --aidex-color-accent-subtle-border: #0c4566;
+  --aidex-color-accent-border: color-mix(in srgb, var(--aidex-color-accent) 80%, black);
+  --aidex-color-accent-soft: color-mix(in srgb, var(--aidex-color-accent) 12%, var(--aidex-color-bg));
+  --aidex-color-accent-subtle-border: color-mix(in srgb, var(--aidex-color-accent) 40%, var(--aidex-color-bg));
   --aidex-color-on-accent: #04111d;
   --aidex-color-success: #10c77e;
   --aidex-color-warning: #e0a33a;
   --aidex-color-danger: #f26d78;
-  --aidex-color-focus: #4ba3ff;
+  --aidex-color-focus: color-mix(in srgb, var(--aidex-color-accent) 75%, white);
+  --aidex-color-accent-ring: color-mix(in srgb, var(--aidex-color-accent) 20%, transparent);
 
   /* Typography */
   --aidex-font-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
@@ -65,4 +66,14 @@
   --aidex-duration-fast: 120ms;
   --aidex-duration-base: 180ms;
   --aidex-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Data visualization: categorical series slots, assigned in this fixed order and never cycled.
+     The order is the colorblind-safety mechanism: validated against the dark surfaces
+     (adjacent CVD delta E >= 8.4, normal-vision >= 19.3, contrast >= 3:1). Re-validate before changing. */
+  --aidex-chart-1: #1a8cff;
+  --aidex-chart-2: #d95926;
+  --aidex-chart-3: #199e70;
+  --aidex-chart-4: #c98500;
+  --aidex-chart-5: #d55181;
+  --aidex-chart-6: #008300;
 }

@@ -12,6 +12,10 @@
   max-width: 688px;
 }
 
+.prose {
+  max-width: 838px;
+}
+
 .md {
   max-width: 928px;
 }

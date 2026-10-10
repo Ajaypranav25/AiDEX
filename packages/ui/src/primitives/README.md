@@ -1,3 +1,11 @@
 # UI primitives
 
-Small accessible controls and layout primitives shared across frontends: buttons, icon buttons, text, search, and password fields, segmented controls, keyboard hints, avatars, badges, status indicators, icon badges, progress bars, dividers, cards, `Stack`/`Grid`/`Container` layout, and `Heading`/`Text` typography. Each component keeps its styles in a sibling CSS Module.
+Small accessible controls and layout primitives shared across frontends:
+
+- Actions: `Button`, `IconButton`, `Kbd`.
+- Form fields: `TextField`, `SearchField`, `PasswordField`, `TextArea`, `Select`, `Checkbox`, `Switch`, `SegmentedControl`, `ChoiceCardGroup`, `SwatchPicker`. Labels, hints, and errors share `field.module.css`.
+- Navigation: `Tabs` and `TabPanel`.
+- Display: `Avatar`, `Badge`, `StatusIndicator`, `IconBadge`, `ProgressBar`, `Divider`, `Card`.
+- Layout and type: `Stack`, `Grid`, `Split`, `Container`, `Heading`, `Text`. `Stack` and `Grid` share the token gap scale in `gap.module.css`.
+
+Each component keeps its styles in a sibling CSS Module.
