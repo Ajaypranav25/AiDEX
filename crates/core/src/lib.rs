@@ -208,8 +208,8 @@ impl WorkspacePath {
             || value.len() > 4096
             || value.starts_with('/')
             || value.contains('\\')
-            || value.contains('\0')
             || value.contains(':')
+            || value.chars().any(char::is_control)
             || value
                 .split('/')
                 .any(|part| part.is_empty() || part == "." || part == "..")
@@ -484,6 +484,7 @@ mod tests {
         assert!(serde_json::from_str::<EntityId>("\"bad/id\"").is_err());
         assert!(serde_json::from_str::<WorkspacePath>("\"../outside\"").is_err());
         assert!(serde_json::from_str::<WorkspacePath>("\"C:/outside\"").is_err());
+        assert!(serde_json::from_str::<WorkspacePath>("\"line\\nbreak\"").is_err());
         assert!(serde_json::from_str::<Timestamp>("\"2024-02-30T12:00:00Z\"").is_err());
         assert!(serde_json::from_str::<Timestamp>("\"not-a-time\"").is_err());
     }
