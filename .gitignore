@@ -12,6 +12,8 @@ node_modules/
 .bun/
 dist/
 coverage/
+test-results/
+playwright-report/
 **/.next/
 **/out/
 *.tsbuildinfo

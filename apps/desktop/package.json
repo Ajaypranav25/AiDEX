@@ -6,7 +6,8 @@
     "dev": "next dev --turbopack --hostname 127.0.0.1 --port 3311",
     "build": "next build && tsc --noEmit",
     "tauri": "tauri",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@aidex/client": "workspace:*",
@@ -17,6 +18,7 @@
     "react-dom": "^19.1.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tauri-apps/cli": "^2.8.4",
     "@testing-library/dom": "^10.4.2",
     "@testing-library/jest-dom": "^7.0.1",
