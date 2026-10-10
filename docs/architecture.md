@@ -16,10 +16,15 @@ crates/aidexd (`aidexd`)
    ├── transport: handshake, Router (`<domain>.<verb>`), bounded streams
    └── Services ── crates/core, drive, events, sessions, storage, workspace, vault
         ├── events: typed catalog, one cursor per drive, replay + push stream
-        └── sessions: durable sessions, checkpoints, startup recovery, resume plans
+        ├── sessions: durable sessions, checkpoints, startup recovery, resume plans
+        └── broker: the only path to tool execution, approvals, and model egress
 
-crates/policy (`aidex-policy`)
-   └── pure policy evaluation; not yet wired into the daemon (broker work, #17)
+crates/broker (`aidex-broker`)
+   ├── crates/tools: plan (no side effects) → permit-bound execute
+   ├── crates/policy: pure evaluation of intents built from plan facts
+   ├── approvals: bound cards, SQLite compare-and-set store, session grants
+   ├── crates/sandbox: every tool process (fail closed)
+   └── crates/vault: short-lived secret handles for the child or provider request
 
 crates/launcher (`AiDEX.exe` / `./aidex` on the drive)
    └── crates/bundle: verify app/current.json → bundle.json → binaries, then run `aidex`
@@ -39,7 +44,7 @@ The desktop and installer are independent Tauri v2 projects. Their Rust shells o
 
 ## Rust workspace boundaries
 
-The Rust workspace remains the primary implementation focus. Its first layer is intentionally small: shared core types, portable-drive paths, host capability discovery, events, durable storage/session foundations, the workspace registry and path confinement (`aidex-workspace`: explicitly selected host, drive, and reviewable ephemeral workspaces), the `aidex-sandbox` process isolation library, typed two-phase workspace tools (`aidex-tools`), the encrypted vault (`aidex-vault`), model providers and routing (`aidex-providers`, `aidex-router`: provider registry, OpenAI-compatible streaming provider, offline egress gate, privacy-aware selection with explicit fallback), the `aidexd` process boundary, and the `aidex` CLI. Depend on lower-level shared contracts rather than creating cycles. Future domains listed in the specification—harness, inference, context/memory/indexing, agent adapters, MCP/skills/plugins, broker/policy, identity/approvals/remote, cleanup/updater—must be introduced when there is a real API and consumer, not as empty service crates.
+The Rust workspace remains the primary implementation focus. Its first layer is intentionally small: shared core types, portable-drive paths, host capability discovery, events, durable storage/session foundations, the workspace registry and path confinement (`aidex-workspace`: explicitly selected host, drive, and reviewable ephemeral workspaces), the `aidex-sandbox` process isolation library, typed two-phase workspace tools (`aidex-tools`), the encrypted vault (`aidex-vault`), the execution broker and approvals (`aidex-broker`: the only holder of the tool registry; policy, approvals, sandboxed launches, secret handles, emergency stop), model providers and routing (`aidex-providers`, `aidex-router`: provider registry, OpenAI-compatible streaming provider, offline egress gate, privacy-aware selection with explicit fallback), the `aidexd` process boundary, and the `aidex` CLI. Depend on lower-level shared contracts rather than creating cycles. Future domains listed in the specification—harness, inference, context/memory/indexing, agent adapters, MCP/skills/plugins, identity/remote, cleanup/updater—must be introduced when there is a real API and consumer, not as empty service crates.
 
 ## Portable-drive data is not repository source
 

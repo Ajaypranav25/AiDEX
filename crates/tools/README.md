@@ -2,7 +2,7 @@
 
 Typed, workspace-scoped tools with a two-phase **plan → execute** contract (issue #16; spec §12.2-12.4, §13, §56, §78-79, §91). Every tool validates its input against a closed schema, resolves every path through `aidex_workspace::ConfinedRoot`, reports facts and risk for policy evaluation, previews writes as reviewable diffs, and executes only with a permit bound to the exact plan. Processes (git, shell) run only through a `ProcessLauncher` that the execution broker implements over `aidex-sandbox`.
 
-Depends on `aidex-core`, `aidex-events` (`EventSink`, `redact_text`), `aidex-policy` (`Action`, `ShellCommand`/`classify_shell`, `Intent`), `aidex-sandbox` (launch/exit/output types), and `aidex-workspace` (`ConfinedRoot`). No daemon or CLI wiring yet: the broker (#17) exposes tools.
+Depends on `aidex-core`, `aidex-events` (`EventSink`, `redact_text`), `aidex-policy` (`Action`, `ShellCommand`/`classify_shell`, `Intent`), `aidex-sandbox` (launch/exit/output types), and `aidex-workspace` (`ConfinedRoot`). The execution broker (`aidex-broker`) is the only holder of a registry; the daemon exposes tools through it (`tool.*`).
 
 ## Flow
 
@@ -93,7 +93,7 @@ pub trait ProcessLauncher: Send + Sync {
 
 ## Limitations
 
-- No broker yet: nothing in the daemon executes tools. Policy evaluation, approvals, path classes (`sensitive`/`protected` beyond the name-based hint), secret handles, and the sandboxed `ProcessLauncher` arrive with #17. `DirectLauncher` is unsandboxed and test-only.
+- Policy evaluation, approvals, `protected` path classes, secret handles, and the sandboxed `ProcessLauncher` live in `aidex-broker`. `DirectLauncher` is unsandboxed and test-only.
 - Confinement is a point-in-time check (TOCTOU): a concurrent process could swap a checked directory for a link between resolution and use. OS-enforced confinement belongs to the sandbox. A concurrent external writer can also race the final hash check and rename.
 - `fs.read` does not redact file content; credential-like files are governed by policy (sensitive path class), and `fs.search` skips them by name only. The hint is not a secret scanner.
 - Ignore rules: `.gitignore` files inside the workspace and `.git/info/exclude`; files above the workspace root and the global excludes file are not read.
