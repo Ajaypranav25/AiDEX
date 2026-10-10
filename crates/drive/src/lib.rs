@@ -1,19 +1,27 @@
-//! Portable-drive path validation, the schema-v1 manifest, and safe drive operations.
+//! Portable-drive path validation, the schema-v2 manifest with explicit v1 migration,
+//! and safe drive operations.
 //!
 //! The root-level `aidex-drive.json` file is the sole drive manifest. Initialization
-//! creates only manifest-declared directories; status never repairs missing, malformed,
-//! or unsupported manifest state. Relative paths are validated before filesystem use.
+//! creates only manifest-declared directories and migrates a valid schema-v1 manifest
+//! only through an explicit, backed-up, verified transform; status never repairs or
+//! rewrites missing, malformed, or unsupported manifest state. Relative paths are
+//! validated before filesystem use.
 
 mod error;
+mod layout;
 mod manifest;
+mod migration;
 mod ops;
 mod path;
 mod platform;
 
 pub use error::DriveError;
+pub use layout::{DriveLayout, DriveLayoutV1};
 pub use manifest::{
-    CURRENT_SCHEMA_VERSION, DriveLayout, DriveManifest, MANIFEST_FILE_NAME, ManifestError,
+    CURRENT_SCHEMA_VERSION, DriveManifest, DriveManifestV1, MANIFEST_FILE_NAME, ManifestError,
+    StoredManifest, V1_SCHEMA_VERSION,
 };
+pub use migration::V1_BACKUP_FILE_NAME;
 pub use ops::{DriveStatus, init, resolve_root, status};
 pub use path::{PathError, RelativePath};
 pub use platform::is_windows_drive_root;

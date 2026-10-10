@@ -1,14 +1,17 @@
 //! Drive root resolution plus the `init` and `status` operations.
 
 use std::{
+    ffi::OsStr,
     fs::{self, OpenOptions},
-    io::Write,
-    path::{Component, Path, PathBuf},
+    io::{ErrorKind, Write},
+    path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
 use crate::{
-    DriveError, DriveManifest, MANIFEST_FILE_NAME, RelativePath,
+    CURRENT_SCHEMA_VERSION, DriveError, DriveManifest, MANIFEST_FILE_NAME, RelativePath,
+    StoredManifest,
+    migration::migrate_v1_manifest,
     platform::{available_bytes, is_windows_drive_root, require_removable},
 };
 
@@ -25,6 +28,23 @@ pub struct DriveStatus {
     pub free_bytes: Option<u64>,
     /// Manifest schema version; status only succeeds when it is supported.
     pub schema_version: Option<u32>,
+}
+
+impl DriveStatus {
+    /// Whether the manifest uses an older supported schema that `aidex init` migrates.
+    pub fn migration_required(&self) -> bool {
+        self.schema_version
+            .is_some_and(|version| version < CURRENT_SCHEMA_VERSION)
+    }
+
+    /// User-facing advice when [`Self::migration_required`] is true.
+    pub fn migration_advice(&self) -> Option<String> {
+        let version = self.schema_version.filter(|_| self.migration_required())?;
+        Some(format!(
+            "manifest schema v{version} can be migrated to v{CURRENT_SCHEMA_VERSION}; run `aidex init --drive {}` (the original manifest is kept as a backup)",
+            self.root.display()
+        ))
+    }
 }
 
 /// Resolve an explicit drive root or `AIDEX_DRIVE_ROOT` from a portable launcher.
@@ -58,8 +78,9 @@ pub fn resolve_root(explicit: Option<&Path>) -> Result<PathBuf, DriveError> {
         .map_err(|error| DriveError::InvalidRoot(format!("{}: {error}", root.display())))
 }
 
-/// Initialize manifest-declared directories without replacing existing content.
-/// Safe to retry after interruption; existing invalid manifests are never changed.
+/// Initialize manifest-declared directories on a removable drive without replacing
+/// existing content. A valid schema-v1 manifest is explicitly migrated to v2 first.
+/// Safe to retry after interruption; malformed or unsupported manifests are never changed.
 pub fn init(root: impl AsRef<Path>) -> Result<DriveStatus, DriveError> {
     let root = resolve_root(Some(root.as_ref()))?;
     require_removable(&root)?;
@@ -75,6 +96,7 @@ pub fn init(root: impl AsRef<Path>) -> Result<DriveStatus, DriveError> {
 }
 
 /// Inspect drive health without creating directories or repairing a manifest.
+/// A schema-v1 drive succeeds and reports [`DriveStatus::migration_required`].
 pub fn status(root: impl AsRef<Path>) -> Result<DriveStatus, DriveError> {
     let root = resolve_root(Some(root.as_ref()))?;
     require_removable(&root)?;
@@ -83,23 +105,20 @@ pub fn status(root: impl AsRef<Path>) -> Result<DriveStatus, DriveError> {
     status_at(&root, writable, free_bytes)
 }
 
-fn initialize_at(root: &Path) -> Result<(), DriveError> {
+pub(crate) fn initialize_at(root: &Path) -> Result<(), DriveError> {
     let manifest_path = root.join(MANIFEST_FILE_NAME);
-    let manifest = match read_manifest(&manifest_path) {
-        Ok(manifest) => manifest,
+    let manifest = match read_stored_manifest(&manifest_path) {
+        Ok((StoredManifest::V2(manifest), _)) => manifest,
+        Ok((StoredManifest::V1(legacy), original)) => {
+            writable_probe(root)?;
+            migrate_v1_manifest(root, &original, &legacy)?
+        }
         Err(DriveError::MissingManifest(_)) => DriveManifest::current(),
         Err(error) => return Err(error),
     };
     writable_probe(root)?;
 
-    for relative in [
-        &manifest.layout.public_runtime,
-        &manifest.layout.public_models,
-        &manifest.layout.private_vault,
-        &manifest.layout.private_identity,
-        &manifest.layout.private_sessions,
-        &manifest.layout.private_config,
-    ] {
+    for (_, relative) in manifest.layout.entries() {
         create_owned_dir(root, relative)?;
     }
 
@@ -121,8 +140,10 @@ fn initialize_at(root: &Path) -> Result<(), DriveError> {
                     ))
                 })?;
         }
-        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-            read_manifest(&manifest_path)?;
+        Err(error) if error.kind() == ErrorKind::AlreadyExists => {
+            if let (StoredManifest::V1(_), _) = read_stored_manifest(&manifest_path)? {
+                return Err(DriveError::MigrationRequired(root.to_path_buf()));
+            }
         }
         Err(error) => {
             return Err(DriveError::Io(format!(
@@ -135,40 +156,51 @@ fn initialize_at(root: &Path) -> Result<(), DriveError> {
 }
 
 fn create_owned_dir(root: &Path, relative: &RelativePath) -> Result<(), DriveError> {
+    create_dirs_beneath(root, relative.as_str().split('/').map(OsStr::new)).map(drop)
+}
+
+/// Create each missing directory below a trusted `root`, refusing any existing
+/// component that is a symbolic link, junction, or non-directory.
+fn create_dirs_beneath<'a>(
+    root: &Path,
+    segments: impl IntoIterator<Item = &'a OsStr>,
+) -> Result<PathBuf, DriveError> {
     let mut current = root.to_path_buf();
-    for component in Path::new(relative.as_str()).components() {
-        let Component::Normal(segment) = component else {
-            return Err(DriveError::InvalidRoot(format!(
-                "invalid manifest directory `{}`",
-                relative.as_str()
-            )));
-        };
+    for segment in segments {
         current.push(segment);
-        match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
-            Ok(_) => {
-                return Err(DriveError::Io(format!(
-                    "refusing to use non-directory or symbolic link `{}`",
-                    current.display()
-                )));
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                fs::create_dir(&current).map_err(|error| {
-                    DriveError::Io(format!(
+        let created = match fs::symlink_metadata(&current) {
+            Ok(_) => false,
+            Err(error) if error.kind() == ErrorKind::NotFound => match fs::create_dir(&current) {
+                Ok(()) => true,
+                // A concurrent creator won the race; inspect what it created.
+                Err(error) if error.kind() == ErrorKind::AlreadyExists => false,
+                Err(error) => {
+                    return Err(DriveError::Io(format!(
                         "cannot create AiDEX directory `{}`: {error}",
                         current.display()
-                    ))
-                })?;
-            }
+                    )));
+                }
+            },
             Err(error) => {
                 return Err(DriveError::Io(format!(
                     "cannot inspect AiDEX directory `{}`: {error}",
                     current.display()
                 )));
             }
+        };
+        if !created {
+            let metadata = fs::symlink_metadata(&current).map_err(|error| {
+                DriveError::Io(format!(
+                    "cannot inspect AiDEX directory `{}`: {error}",
+                    current.display()
+                ))
+            })?;
+            if !metadata.is_dir() || metadata.file_type().is_symlink() {
+                return Err(DriveError::UnsafeComponent(current));
+            }
         }
     }
-    Ok(())
+    Ok(current)
 }
 
 fn status_at(
@@ -176,7 +208,7 @@ fn status_at(
     writable: bool,
     free_bytes: Option<u64>,
 ) -> Result<DriveStatus, DriveError> {
-    let manifest = read_manifest(&root.join(MANIFEST_FILE_NAME))?;
+    let (manifest, _) = read_stored_manifest(&root.join(MANIFEST_FILE_NAME))?;
     Ok(DriveStatus {
         root: root.to_path_buf(),
         writable,
@@ -185,29 +217,26 @@ fn status_at(
     })
 }
 
-fn read_manifest(path: &Path) -> Result<DriveManifest, DriveError> {
+/// Read and decode a regular-file manifest at any supported schema version, returning
+/// the exact bytes alongside it. Never modifies the file.
+pub(crate) fn read_stored_manifest(path: &Path) -> Result<(StoredManifest, Vec<u8>), DriveError> {
+    let corrupt = |reason: String| DriveError::CorruptManifest(path.to_path_buf(), reason);
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+        Err(error) if error.kind() == ErrorKind::NotFound => {
             return Err(DriveError::MissingManifest(path.to_path_buf()));
         }
-        Err(error) => {
-            return Err(DriveError::CorruptManifest(
-                path.to_path_buf(),
-                error.to_string(),
-            ));
-        }
+        Err(error) => return Err(corrupt(error.to_string())),
     };
     if !metadata.is_file() || metadata.file_type().is_symlink() {
-        return Err(DriveError::CorruptManifest(
-            path.to_path_buf(),
-            "manifest is not a regular file".into(),
-        ));
+        return Err(corrupt("manifest is not a regular file".into()));
     }
-    let content = fs::read_to_string(path)
-        .map_err(|error| DriveError::CorruptManifest(path.to_path_buf(), error.to_string()))?;
-    DriveManifest::from_json(&content)
-        .map_err(|error| DriveError::CorruptManifest(path.to_path_buf(), error.to_string()))
+    let bytes = fs::read(path).map_err(|error| corrupt(error.to_string()))?;
+    let content =
+        std::str::from_utf8(&bytes).map_err(|_| corrupt("manifest is not valid UTF-8".into()))?;
+    let manifest =
+        StoredManifest::from_json(content).map_err(|error| corrupt(error.to_string()))?;
+    Ok((manifest, bytes))
 }
 
 fn writable_probe(root: &Path) -> Result<(), DriveError> {

@@ -1,6 +1,8 @@
-//! Errors returned by drive resolution, initialization, and health checks.
+//! Errors returned by drive resolution, initialization, migration, and path services.
 
 use std::{error::Error, fmt, path::PathBuf};
+
+use aidex_core::ServiceErrorCode;
 
 /// Errors from drive resolution, initialization, or health checks.
 #[derive(Debug)]
@@ -8,11 +10,37 @@ pub enum DriveError {
     InvalidRoot(String),
     NotRemovable(String),
     ReadOnly(String),
-    LowSpace { available: u64, required: u64 },
+    LowSpace {
+        available: u64,
+        required: u64,
+    },
     MissingManifest(PathBuf),
     CorruptManifest(PathBuf, String),
     Io(String),
     Discovery(String),
+    /// The drive at this root still uses manifest schema v1; `aidex init` migrates it.
+    MigrationRequired(PathBuf),
+    /// The v1 backup path already holds different content; nothing was changed.
+    MigrationConflict(PathBuf),
+    /// Migration stopped before completion; the reason says what was preserved.
+    MigrationFailed(String),
+    /// A path component is a symbolic link, junction, or non-directory.
+    UnsafeComponent(PathBuf),
+}
+
+impl DriveError {
+    /// Stable service code for API mapping.
+    pub fn code(&self) -> ServiceErrorCode {
+        match self {
+            Self::InvalidRoot(_) | Self::NotRemovable(_) => ServiceErrorCode::InvalidArgument,
+            Self::MissingManifest(_) => ServiceErrorCode::NotFound,
+            Self::ReadOnly(_) | Self::UnsafeComponent(_) => ServiceErrorCode::PermissionDenied,
+            Self::CorruptManifest(..) | Self::MigrationConflict(_) => ServiceErrorCode::Conflict,
+            Self::MigrationRequired(_) => ServiceErrorCode::IncompatibleVersion,
+            Self::LowSpace { .. } | Self::Discovery(_) => ServiceErrorCode::Unavailable,
+            Self::Io(_) | Self::MigrationFailed(_) => ServiceErrorCode::Internal,
+        }
+    }
 }
 
 impl fmt::Display for DriveError {
@@ -41,6 +69,22 @@ impl fmt::Display for DriveError {
                 path.display()
             ),
             Self::Io(message) | Self::Discovery(message) => f.write_str(message),
+            Self::MigrationRequired(root) => write!(
+                f,
+                "AiDEX drive {root} uses manifest schema v1; run `aidex init --drive {root}` to migrate it to schema v2",
+                root = root.display()
+            ),
+            Self::MigrationConflict(backup) => write!(
+                f,
+                "cannot migrate the schema v1 manifest: backup `{}` already exists with different content; nothing was changed (move that file aside after confirming it is not needed, then retry)",
+                backup.display()
+            ),
+            Self::MigrationFailed(reason) => write!(f, "manifest migration failed: {reason}"),
+            Self::UnsafeComponent(path) => write!(
+                f,
+                "refusing to use non-directory or symbolic link `{}`",
+                path.display()
+            ),
         }
     }
 }

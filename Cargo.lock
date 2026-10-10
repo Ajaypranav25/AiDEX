@@ -40,8 +40,10 @@ dependencies = [
 name = "aidex-drive"
 version = "0.1.0"
 dependencies = [
+ "aidex-core",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
