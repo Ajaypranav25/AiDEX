@@ -5,7 +5,7 @@
   "identifier": "dev.aidex.installer",
   "build": {
     "beforeDevCommand": "bun run dev",
-    "devUrl": "http://localhost:3312",
+    "devUrl": "http://127.0.0.1:3312",
     "beforeBuildCommand": "bun run build",
     "frontendDist": "../out"
   },
@@ -18,7 +18,7 @@
       "minHeight": 620,
       "resizable": true
     }],
-    "security": { "csp": "default-src 'self'; connect-src ws://localhost:3312; style-src 'self' 'unsafe-inline'; img-src 'self' data:" }
+    "security": { "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data:" }
   },
   "bundle": {
     "active": true,
