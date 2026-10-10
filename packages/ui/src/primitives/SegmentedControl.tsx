@@ -12,6 +12,8 @@ export type SegmentedControlProps<Value extends string> = {
   options: readonly SegmentedOption<Value>[];
   value: Value;
   onValueChange: (value: Value) => void;
+  /** `sm` for compact filter bars. */
+  size?: "sm" | "md";
   className?: string;
 };
 
@@ -23,6 +25,7 @@ export function SegmentedControl<Value extends string>({
   options,
   value,
   onValueChange,
+  size = "md",
   className,
 }: SegmentedControlProps<Value>) {
   const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -46,7 +49,7 @@ export function SegmentedControl<Value extends string>({
   };
 
   return (
-    <div role="radiogroup" aria-label={label} className={cx(styles.group, className)}>
+    <div role="radiogroup" aria-label={label} className={cx(styles.group, styles[size], className)}>
       {options.map((option, index) => {
         const checked = index === selectedIndex;
         return (

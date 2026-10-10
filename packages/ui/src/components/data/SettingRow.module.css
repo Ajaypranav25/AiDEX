@@ -1,0 +1,37 @@
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aidex-space-6);
+  min-width: 0;
+  padding: var(--aidex-space-4) var(--aidex-space-1);
+  border-bottom: 1px solid var(--aidex-color-border);
+}
+
+.text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.title {
+  color: var(--aidex-color-text);
+  font-size: var(--aidex-text-sm);
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.description {
+  margin: var(--aidex-space-1) 0 0;
+  color: var(--aidex-color-text-muted);
+  font-size: var(--aidex-text-xs);
+  line-height: 1.5;
+}
+
+.control {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--aidex-space-2);
+}

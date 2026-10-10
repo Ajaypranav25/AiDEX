@@ -1,7 +1,8 @@
 .topBar {
   display: grid;
   flex: none;
-  grid-template-columns: minmax(48px, 1fr) minmax(0, 600px) minmax(48px, 1fr);
+  /* Side slots keep their content width; the centered slot gives way when the window narrows. */
+  grid-template-columns: minmax(max-content, 1fr) minmax(0, 600px) minmax(max-content, 1fr);
   align-items: center;
   gap: var(--aidex-space-4);
   min-height: 72px;

@@ -1,0 +1,13 @@
+.pattern {
+  display: block;
+  flex: none;
+}
+
+/* Dark modules on a light tile, like a printed QR code. */
+.tile {
+  fill: var(--aidex-color-text);
+}
+
+.modules {
+  fill: var(--aidex-color-bg);
+}

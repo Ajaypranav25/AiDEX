@@ -4,7 +4,8 @@ import styles from "./Container.module.css";
 
 export type ContainerProps = ComponentPropsWithRef<"div"> & {
   /** Maximum content width. */
-  size?: "xs" | "sm" | "md" | "lg";
+  /** `prose` is a comfortable reading column for conversations. */
+  size?: "xs" | "sm" | "prose" | "md" | "lg";
   /** Centers the container on the cross axis too when its parent is a flex column. */
   verticallyCentered?: boolean;
 };

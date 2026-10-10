@@ -3,23 +3,52 @@ import {
   ChatIcon,
   ClockIcon,
   CloudIcon,
+  FolderIcon,
   GridIcon,
   HomeIcon,
   SettingsIcon,
+  ShieldIcon,
   SmartphoneIcon,
   UsersIcon,
+  type IconProps,
 } from "@aidex/ui/icons";
+import type { ComponentType } from "react";
+import type { Route } from "./routes";
 
-export const navigationItems = [
-  { id: "home", label: "Home", Icon: HomeIcon },
-  { id: "chat", label: "Chat", Icon: ChatIcon },
-  { id: "sessions", label: "Sessions", Icon: ClockIcon },
-  { id: "remote", label: "Remote", Icon: SmartphoneIcon },
-  { id: "plugins", label: "Plugins", Icon: GridIcon },
-  { id: "agents", label: "Agents", Icon: UsersIcon },
-  { id: "models", label: "Models", Icon: BoxIcon },
-  { id: "mcp", label: "MCP servers", Icon: CloudIcon },
-  { id: "settings", label: "Settings", Icon: SettingsIcon },
-] as const;
+export const railItems = [
+  { id: "home", label: "Home", Icon: HomeIcon, route: { page: "home" } },
+  { id: "workspaces", label: "Workspaces", Icon: FolderIcon, route: { page: "workspaces" } },
+  { id: "chat", label: "Chat", Icon: ChatIcon, route: { page: "chat" } },
+  { id: "history", label: "History", Icon: ClockIcon, route: { page: "history" } },
+  { id: "remote", label: "Remote access", Icon: SmartphoneIcon, route: { page: "remote" } },
+  { id: "extensions", label: "Plugins", Icon: GridIcon, route: { page: "extensions" } },
+  { id: "agents", label: "Agents", Icon: UsersIcon, route: { page: "agents" } },
+  { id: "models", label: "Local models", Icon: BoxIcon, route: { page: "models", tab: "local" } },
+  { id: "providers", label: "Provider accounts", Icon: CloudIcon, route: { page: "models", tab: "providers" } },
+  { id: "security", label: "Security", Icon: ShieldIcon, route: { page: "security" } },
+  { id: "settings", label: "Settings", Icon: SettingsIcon, route: { page: "settings" } },
+] as const satisfies readonly { id: string; label: string; Icon: ComponentType<IconProps>; route: Route }[];
 
-export type PageId = (typeof navigationItems)[number]["id"];
+export type RailId = (typeof railItems)[number]["id"];
+
+/** Which rail destination a route belongs to, so drill-in pages keep their section highlighted. */
+export function railIdFor(route: Route): RailId {
+  switch (route.page) {
+    case "workspace-create":
+    case "workspace":
+      return "workspaces";
+    case "agent":
+    case "execution":
+    case "review":
+    case "agent-config":
+      return "agents";
+    case "checkpoints":
+      return "history";
+    case "model":
+      return "models";
+    case "models":
+      return route.tab === "providers" ? "providers" : "models";
+    default:
+      return route.page;
+  }
+}

@@ -1,0 +1,45 @@
+.list {
+  min-width: 0;
+  margin: 0;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aidex-space-4);
+  min-height: 60px;
+  padding: var(--aidex-space-2) var(--aidex-space-1);
+  border-bottom: 1px solid var(--aidex-color-border);
+  font-size: var(--aidex-text-sm);
+  line-height: 1.45;
+  transition: background-color var(--aidex-duration-fast) var(--aidex-ease);
+}
+
+.row:last-child {
+  border-bottom: 0;
+}
+
+.row:hover {
+  background: color-mix(in srgb, var(--aidex-color-text) 3%, transparent);
+}
+
+/* Labels are short and never break mid-word; long values wrap instead. */
+.label {
+  flex: none;
+  max-width: 45%;
+  color: var(--aidex-color-text);
+  overflow-wrap: break-word;
+}
+
+.value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--aidex-space-2);
+  min-width: 0;
+  margin: 0;
+  color: var(--aidex-color-text-muted);
+  text-align: right;
+  overflow-wrap: anywhere;
+}

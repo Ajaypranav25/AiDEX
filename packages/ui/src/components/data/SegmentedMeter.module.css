@@ -1,0 +1,110 @@
+.meter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--aidex-space-3);
+  min-width: 0;
+  margin: 0;
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--aidex-space-3);
+  font-size: var(--aidex-text-sm);
+  line-height: 1.4;
+}
+
+.label {
+  min-width: 0;
+  color: var(--aidex-color-text);
+  font-weight: 500;
+}
+
+.summary {
+  flex: none;
+  color: var(--aidex-color-text-secondary);
+}
+
+/* The 2px gap lets the surface separate touching segments instead of drawn borders. */
+.track {
+  display: flex;
+  gap: 2px;
+  height: 10px;
+  overflow: hidden;
+  border-radius: var(--aidex-radius-full);
+}
+
+.segment,
+.track .remainder {
+  flex-basis: 0;
+  min-width: 0;
+}
+
+.segment,
+.remainder {
+  background: var(--segment-color);
+}
+
+.remainder {
+  --segment-color: var(--aidex-color-surface-strong);
+}
+
+.color1 {
+  --segment-color: var(--aidex-chart-1);
+}
+
+.color2 {
+  --segment-color: var(--aidex-chart-2);
+}
+
+.color3 {
+  --segment-color: var(--aidex-chart-3);
+}
+
+.color4 {
+  --segment-color: var(--aidex-chart-4);
+}
+
+.color5 {
+  --segment-color: var(--aidex-chart-5);
+}
+
+.color6 {
+  --segment-color: var(--aidex-chart-6);
+}
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--aidex-space-2) var(--aidex-space-5);
+  margin: 0;
+  font-size: var(--aidex-text-xs);
+  line-height: 1.4;
+}
+
+.item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--aidex-space-2);
+}
+
+.itemLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--aidex-space-2);
+  color: var(--aidex-color-text-secondary);
+}
+
+.itemValue {
+  margin: 0;
+  color: var(--aidex-color-text);
+}
+
+.swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--segment-color);
+}

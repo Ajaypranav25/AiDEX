@@ -1,0 +1,50 @@
+.log {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--aidex-color-text-secondary);
+  font-family: var(--aidex-font-mono);
+  font-size: var(--aidex-text-xs);
+  line-height: 1.8;
+}
+
+.entry {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--aidex-space-4);
+  padding: var(--aidex-space-2) 0;
+  border-bottom: 1px solid var(--aidex-color-border-subtle);
+}
+
+.entry:last-child {
+  border-bottom: 0;
+}
+
+.time {
+  flex: none;
+  min-width: 8ch;
+  color: var(--aidex-color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.text :where(strong) {
+  color: var(--aidex-color-text);
+  font-weight: 500;
+}
+
+.success .text {
+  color: var(--aidex-color-success);
+}
+
+.danger .text {
+  color: var(--aidex-color-danger);
+}
+
+.accent .text {
+  color: var(--aidex-color-accent);
+}

@@ -1,0 +1,101 @@
+.chart {
+  min-width: 0;
+  margin: 0;
+}
+
+.caption {
+  margin-bottom: var(--aidex-space-4);
+  color: var(--aidex-color-text);
+  font-size: var(--aidex-text-sm);
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Label, bar, and value columns are shared by every row through subgrid, so bars start on one baseline. */
+.rows {
+  display: grid;
+  grid-template-columns: fit-content(40%) minmax(0, 1fr) auto;
+  gap: var(--aidex-space-1) var(--aidex-space-4);
+  margin: 0;
+}
+
+.row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  padding: var(--aidex-space-1) var(--aidex-space-2);
+  border-radius: var(--aidex-radius-sm);
+  transition: background-color var(--aidex-duration-fast) var(--aidex-ease);
+}
+
+.row:hover {
+  background: color-mix(in srgb, var(--aidex-color-text) 3%, transparent);
+}
+
+.label {
+  min-width: 0;
+  color: var(--aidex-color-text-secondary);
+  font-size: var(--aidex-text-sm);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.datum {
+  display: grid;
+  grid-column: 2 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  margin: 0;
+}
+
+/* Hairline baseline; bars grow from it with a square base and a rounded data end. */
+.track {
+  display: flex;
+  height: 12px;
+  border-left: 1px solid var(--aidex-color-border-strong);
+}
+
+.bar {
+  border-radius: 0 4px 4px 0;
+  background: var(--aidex-chart-1);
+  transition:
+    width var(--aidex-duration-base) var(--aidex-ease),
+    filter var(--aidex-duration-fast) var(--aidex-ease);
+}
+
+.row:hover .bar {
+  filter: brightness(1.15);
+}
+
+.value {
+  color: var(--aidex-color-text);
+  font-size: var(--aidex-text-sm);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  text-align: right;
+  white-space: nowrap;
+}
+
+/* Weight, not just color, marks the emphasized bars. */
+.highlight .label,
+.highlight .value {
+  color: var(--aidex-color-text);
+  font-weight: 600;
+}
+
+.muted .bar {
+  background: color-mix(in srgb, var(--aidex-color-text-muted) 55%, transparent);
+}

@@ -1,0 +1,57 @@
+.region {
+  position: fixed;
+  right: var(--aidex-space-6);
+  bottom: var(--aidex-space-6);
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--aidex-space-2);
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--aidex-space-3);
+  max-width: 420px;
+  padding: var(--aidex-space-2) var(--aidex-space-2) var(--aidex-space-2) var(--aidex-space-4);
+  border: 1px solid var(--aidex-color-border-strong);
+  border-radius: var(--aidex-radius-md);
+  background: var(--aidex-color-surface-strong);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.45);
+  color: var(--aidex-color-text);
+  font-size: var(--aidex-text-sm);
+  pointer-events: auto;
+  animation: enter var(--aidex-duration-base) var(--aidex-ease);
+}
+
+.icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
+.info .icon {
+  color: var(--aidex-color-accent);
+}
+
+.success .icon {
+  color: var(--aidex-color-success);
+}
+
+.danger .icon {
+  color: var(--aidex-color-danger);
+}
+
+.message {
+  flex: 1;
+  line-height: 1.45;
+}
+
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}

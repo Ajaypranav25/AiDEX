@@ -7,6 +7,7 @@ const config: NextConfig = {
   output: "export",
   images: { unoptimized: true },
   assetPrefix: isProduction ? undefined : `http://${devHost}:3312`,
+  transpilePackages: ["@aidex/ui"],
 };
 
 export default config;
