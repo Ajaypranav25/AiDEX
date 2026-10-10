@@ -605,7 +605,10 @@ fn a_created_ephemeral_child_prevents_deleting_its_drive_source() {
         Err(WorkspaceError::Conflict(_))
     ));
     assert!(registry.get(&source.id).unwrap().is_available());
-    assert_eq!(fs::read_to_string(tree.root().join("keep.txt")).unwrap(), "source data");
+    assert_eq!(
+        fs::read_to_string(tree.root().join("keep.txt")).unwrap(),
+        "source data"
+    );
     assert!(registry.review(&copy.id).unwrap().changes.is_empty());
     registry.discard(&copy.id).unwrap();
     registry.delete_data(&source.id).unwrap();
@@ -652,7 +655,10 @@ fn mutable_review_enforces_file_count_and_byte_limits_before_apply() {
     assert_eq!(registry.review(&copy.id).unwrap().changes.len(), 1);
 
     write(tree.root(), "c", "");
-    assert!(matches!(registry.review(&copy.id), Err(WorkspaceError::TooLarge(_))));
+    assert!(matches!(
+        registry.review(&copy.id),
+        Err(WorkspaceError::TooLarge(_))
+    ));
     assert!(matches!(
         registry.apply(&copy.id, &ApplySelection::All, None),
         Err(WorkspaceError::TooLarge(_))
@@ -660,10 +666,16 @@ fn mutable_review_enforces_file_count_and_byte_limits_before_apply() {
     assert!(!source.path().join("b").exists());
     fs::remove_file(tree.root().join("c")).unwrap();
     write(tree.root(), "b", "345");
-    assert!(matches!(registry.review(&copy.id), Err(WorkspaceError::TooLarge(_))));
+    assert!(matches!(
+        registry.review(&copy.id),
+        Err(WorkspaceError::TooLarge(_))
+    ));
     fs::remove_file(tree.root().join("b")).unwrap();
     write(tree.root(), "a", "12345");
-    assert!(matches!(registry.review(&copy.id), Err(WorkspaceError::TooLarge(_))));
+    assert!(matches!(
+        registry.review(&copy.id),
+        Err(WorkspaceError::TooLarge(_))
+    ));
     write(tree.root(), "a", "12");
     assert!(registry.review(&copy.id).unwrap().changes.is_empty());
     assert_eq!(fs::read_to_string(source.path().join("a")).unwrap(), "12");
@@ -683,10 +695,91 @@ fn newly_ignored_baseline_files_still_count_toward_review_limits() {
     let tree = registry.confined_root(&copy.id).unwrap();
     write(tree.root(), ".gitignore", "tracked\n");
     write(tree.root(), "tracked", "123456789");
-    assert!(matches!(registry.review(&copy.id), Err(WorkspaceError::TooLarge(_))));
+    assert!(matches!(
+        registry.review(&copy.id),
+        Err(WorkspaceError::TooLarge(_))
+    ));
     write(tree.root(), "tracked", "x");
     write(tree.root(), "new", "");
-    assert!(matches!(registry.review(&copy.id), Err(WorkspaceError::TooLarge(_))));
+    assert!(matches!(
+        registry.review(&copy.id),
+        Err(WorkspaceError::TooLarge(_))
+    ));
     fs::remove_file(tree.root().join("new")).unwrap();
     assert_eq!(registry.review(&copy.id).unwrap().changes.len(), 1);
+}
+
+#[test]
+fn separate_git_dir_excludes_apply_to_repository_and_subdirectory_sources() {
+    for absolute in [false, true] {
+        let drive = Drive::new();
+        let layout = project(&[
+            ("metadata/info/exclude", "/app/private.txt\n"),
+            ("repo/app/private.txt", "excluded"),
+            ("repo/app/keep.txt", "kept"),
+        ]);
+        let repo = layout.path().join("repo");
+        let target = if absolute {
+            layout
+                .path()
+                .join("metadata")
+                .to_string_lossy()
+                .into_owned()
+        } else {
+            "../metadata".into()
+        };
+        write(&repo, ".git", &format!("gitdir: {target}\r\n"));
+        let registry = drive.registry();
+        for (name, source_root, kept) in [
+            ("root", repo.clone(), "app/keep.txt"),
+            ("subdir", repo.join("app"), "keep.txt"),
+        ] {
+            let source = registry.add_host(&source_root, Some(name)).unwrap();
+            let copy = registry.create_ephemeral(&source.id).unwrap().workspace;
+            let tree = registry.confined_root(&copy.id).unwrap();
+            assert_eq!(files_under(tree.root()), [kept]);
+            let base = tree.root().parent().unwrap();
+            let baseline = fs::read_to_string(base.join(BASELINE_FILE)).unwrap();
+            assert!(!baseline.contains("private.txt"));
+            assert!(registry.review(&copy.id).unwrap().changes.is_empty());
+        }
+    }
+}
+
+#[test]
+fn linked_worktree_excludes_come_from_commondir_not_private_gitdir() {
+    let drive = Drive::new();
+    let layout = project(&[
+        ("shared/info/exclude", "/app/private.txt\n"),
+        ("shared/worktrees/topic/commondir", "../..\n"),
+        ("shared/worktrees/topic/info/exclude", "/app/keep.txt\n"),
+        ("repo/.git", "gitdir: ../shared/worktrees/topic\n"),
+        ("repo/app/private.txt", "excluded"),
+        ("repo/app/keep.txt", "kept"),
+    ]);
+    let registry = drive.registry();
+    let source = registry
+        .add_host(&layout.path().join("repo/app"), None)
+        .unwrap();
+    let copy = registry.create_ephemeral(&source.id).unwrap().workspace;
+    let tree = registry.confined_root(&copy.id).unwrap();
+    assert_eq!(files_under(tree.root()), ["keep.txt"]);
+    assert!(registry.review(&copy.id).unwrap().changes.is_empty());
+}
+
+#[test]
+fn malformed_gitdir_files_do_not_load_unrelated_excludes() {
+    let drive = Drive::new();
+    let layout = project(&[
+        ("metadata/info/exclude", "*.txt\n"),
+        ("repo/.git", "../metadata\n"),
+        ("repo/keep.txt", "kept"),
+    ]);
+    let registry = drive.registry();
+    let source = registry
+        .add_host(&layout.path().join("repo"), None)
+        .unwrap();
+    let copy = registry.create_ephemeral(&source.id).unwrap().workspace;
+    let tree = registry.confined_root(&copy.id).unwrap();
+    assert_eq!(files_under(tree.root()), ["keep.txt"]);
 }
