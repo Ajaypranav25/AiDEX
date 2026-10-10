@@ -75,10 +75,10 @@ export function SecurityStep(props: Props) {
           </Grid>
           <Meter label="Password strength" value={strength.score} max={4} valueText={strength.label} tone={strength.tone} />
           {accepted ? (
-            <Notice tone="success">Password checked in this preview. The password itself was not kept.</Notice>
+            <Notice tone="success">Password meets the requirements. It is not kept by Setup.</Notice>
           ) : null}
           <Text tone="muted">
-            The real installer hands the password to the native vault. This preview discards it when you leave this step.
+            Setup does not create the vault yet: it is created in AiDEX on this drive's first launch, where you set this password. Setup discards it when you leave this step.
           </Text>
         </Stack>
       ) : (

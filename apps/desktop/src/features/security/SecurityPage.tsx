@@ -20,7 +20,7 @@ export function SecurityPage() {
   const tab = tabOf(route, "security");
   // Shared across tabs so the dashboard and tab count reflect decisions and isolation changes.
   const approvals = useApprovals();
-  const [isolation, setIsolation] = useState<IsolationLevel>("standard");
+  const [isolation, setIsolation] = useState<IsolationLevel>("brokered");
 
   const tabItems = securityTabs.map(({ value, label, Icon }) => ({
     value,
@@ -34,7 +34,7 @@ export function SecurityPage() {
       <PageHeader
         title="Security"
         description="Policies, secrets, and approvals that govern what agents can do."
-        meta={<StatusIndicator tone="neutral" label="Preview: sample policy data until AiDEX Core is connected" />}
+        meta={<StatusIndicator tone="neutral" label="Sandbox capabilities are live; policy, vault, audit, and approvals are sample data" />}
       />
       <Tabs
         id={TABS_ID}

@@ -1,7 +1,9 @@
-// Sample setup catalog until drive discovery and the portable distribution manifest exist.
-// Drives are examples, sizes are planning estimates, and nothing is read from hardware or written to a drive.
+// Setup choices and planning estimates. Drives are real (`list_drives`); component sizes are
+// planning estimates until the portable distribution manifest exists (issue #26), and the
+// component catalog is a sample until model import (#15) and agent adapters (#23) land.
+import type { VolumeInfo } from "@aidex/client/dto/drive";
+import { bytesToGb } from "@aidex/client/format";
 
-export type DriveId = "samsung" | "kingston" | "small";
 export type Preset = "lite" | "developer" | "custom";
 export type ModelId = "gemma" | "embedding" | "custom";
 export type AgentId = "codex" | "claude" | "omp";
@@ -9,11 +11,9 @@ export type ExtensionId = "skills" | "mcp" | "toolchains";
 export type Backend = "auto" | "cpu" | "gpu";
 export type VaultMode = "password" | "none";
 
-export type Drive = { id: DriveId; name: string; letter: string; totalGb: number; freeGb: number; kind: string };
-
 export type SetupState = {
-  driveId: DriveId;
-  folder: string;
+  /** Root of the chosen volume (`H:\`), or `null` before one is chosen. */
+  driveRoot: string | null;
   preset: Preset;
   models: readonly ModelId[];
   customModelPath: string;
@@ -22,14 +22,6 @@ export type SetupState = {
   extensions: readonly ExtensionId[];
   vault: VaultMode;
 };
-
-export const drives: readonly Drive[] = [
-  { id: "samsung", name: "Samsung T7 Portable SSD", letter: "E:", totalGb: 1000, freeGb: 632, kind: "External SSD" },
-  { id: "kingston", name: "Kingston DataTraveler", letter: "F:", totalGb: 64, freeGb: 42.8, kind: "USB flash drive" },
-  { id: "small", name: "Sample small USB", letter: "G:", totalGb: 8, freeGb: 2.3, kind: "USB flash drive" },
-];
-
-export const driveById = (id: DriveId): Drive => drives.find((drive) => drive.id === id) ?? drives[0];
 
 /** AiDEX app, native agent harness, and the llama.cpp runtime are always included. */
 const CORE_GB = 1.1;
@@ -46,9 +38,15 @@ export function estimateGb(state: SetupState): number {
 
 export const formatGb = (gb: number): string => `${gb.toFixed(1)} GB`;
 
-export const fitsOnDrive = (state: SetupState): boolean => estimateGb(state) <= driveById(state.driveId).freeGb;
+/** Free space of a volume in GB, or `null` when the platform did not report it. */
+export const freeGb = (volume: VolumeInfo | null): number | null =>
+  volume?.free_bytes == null ? null : bytesToGb(volume.free_bytes);
 
-export const installPath = (state: SetupState): string => `${driveById(state.driveId).letter}\\${state.folder}`;
+/** Whether the estimate fits; `false` when no drive is chosen or its free space is unknown. */
+export const fitsOnDrive = (state: SetupState, volume: VolumeInfo | null): boolean => {
+  const free = freeGb(volume);
+  return free !== null && estimateGb(state) <= free;
+};
 
 const PRESET_SELECTIONS: Record<Exclude<Preset, "custom">, Pick<SetupState, "models" | "agents" | "extensions">> = {
   lite: { models: [], agents: [], extensions: [] },
@@ -61,8 +59,7 @@ export function applyPreset(state: SetupState, preset: Preset): SetupState {
 }
 
 export const initialSetup: SetupState = {
-  driveId: "samsung",
-  folder: "AiDEX",
+  driveRoot: null,
   preset: "developer",
   ...PRESET_SELECTIONS.developer,
   customModelPath: "",

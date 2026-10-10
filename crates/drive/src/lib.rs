@@ -1,5 +1,5 @@
 //! Portable-drive path validation, the schema-v2 manifest with explicit v1 migration,
-//! safe drive operations, and service directory resolution.
+//! safe drive operations, service directory resolution, and read-only volume discovery.
 //!
 //! The root-level `aidex-drive.json` file is the sole drive manifest. Initialization
 //! creates only manifest-declared directories and migrates a valid schema-v1 manifest
@@ -15,6 +15,7 @@ mod ops;
 mod path;
 mod paths;
 mod platform;
+mod volume;
 
 pub use error::DriveError;
 pub use layout::{DriveLayout, DriveLayoutV1};
@@ -23,7 +24,10 @@ pub use manifest::{
     StoredManifest, V1_SCHEMA_VERSION,
 };
 pub use migration::V1_BACKUP_FILE_NAME;
-pub use ops::{DriveStatus, InitOptions, init, init_with, resolve_root, status};
+pub use ops::{
+    DriveStatus, InitOptions, StatusOptions, init, init_with, resolve_root, status, status_with,
+};
 pub use path::{PathError, RelativePath};
 pub use paths::{DrivePaths, platform_runtime_name};
 pub use platform::is_windows_drive_root;
+pub use volume::{RemovableStatus, VolumeInfo, list_volumes, volume_for};

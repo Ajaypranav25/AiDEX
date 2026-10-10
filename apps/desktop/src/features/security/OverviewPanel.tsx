@@ -61,7 +61,7 @@ export function OverviewPanel({ pendingCount, isolation }: Props) {
           value={sandbox.value}
           hint={sandbox.hint}
           icon={<LockIcon />}
-          tone={isolation === "off" ? "danger" : "success"}
+          tone={isolation === "direct" ? "danger" : "success"}
         />
       </Grid>
 

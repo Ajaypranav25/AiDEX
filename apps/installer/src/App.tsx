@@ -5,9 +5,11 @@ import { ToastRegion } from "@aidex/ui/components";
 import { ArrowLeftIcon, ArrowRightIcon, ExternalLinkIcon } from "@aidex/ui/icons";
 import { SetupFooter, SetupWindow, StepTrack } from "@aidex/ui/installer";
 import { Badge, Button, Stack } from "@aidex/ui/primitives";
+import { isEligibleVolume } from "@aidex/client/dto/drive";
 import { fitsOnDrive, initialSetup, type SetupState } from "./lib/setup";
 import { LAST_STEP, steps } from "./lib/steps";
-import { usePreviewRun } from "./lib/usePreviewRun";
+import { useDrives } from "./lib/useDrives";
+import { useInstallRun } from "./lib/useInstallRun";
 import { useToasts } from "./lib/useToasts";
 import { AgentsStep } from "./steps/agent-selection/AgentsStep";
 import { ConfigurationStep } from "./steps/configuration/ConfigurationStep";
@@ -21,7 +23,10 @@ const FORM_ID = "setup-step";
 const NOTE_ID = "setup-footer-note";
 const SECURITY_STEP = steps.findIndex((step) => step.id === "security");
 
-/** AiDEX Setup preview. State lives here; it never scans, formats, encrypts, or writes to a drive. */
+/**
+ * AiDEX Setup. State lives here. Drives come from `list_drives`; the Install step initializes the
+ * chosen removable drive with `init_drive` (AiDEX folders and manifest only; never formats or deletes).
+ */
 export default function App() {
   const [state, setState] = useState<SetupState>(initialSetup);
   const [stepIndex, setStepIndex] = useState(0);
@@ -32,7 +37,9 @@ export default function App() {
   const [passwordError, setPasswordError] = useState<string>();
   const [passwordAccepted, setPasswordAccepted] = useState(false);
   const { toasts, notify, dismiss } = useToasts();
-  const run = usePreviewRun();
+  const run = useInstallRun();
+  const drives = useDrives();
+  const volume = drives.volumes.find((candidate) => candidate.root === state.driveRoot) ?? null;
   const titleRef = useRef<HTMLHeadingElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const customPathRef = useRef<HTMLInputElement>(null);
@@ -68,6 +75,10 @@ export default function App() {
   };
 
   const stepIsValid = (): boolean => {
+    if (steps[stepIndex].id === "drive" && !(volume && isEligibleVolume(volume))) {
+      notify("Choose a removable drive or portable SSD to continue.", "danger");
+      return false;
+    }
     if (steps[stepIndex].id === "models" && state.models.includes("custom") && !state.customModelPath.trim()) {
       setCustomPathError("Enter the GGUF file path, or clear Bring your own GGUF.");
       customPathRef.current?.focus();
@@ -96,9 +107,9 @@ export default function App() {
     goTo(0);
   };
 
-  const stepProps = { state, update, notify, titleRef };
+  const stepProps = { state, update, notify, titleRef, volume };
   const vaultReady = state.vault === "none" || passwordAccepted;
-  const canInstall = fitsOnDrive(state) && vaultReady;
+  const canInstall = volume !== null && isEligibleVolume(volume) && fitsOnDrive(state, volume) && vaultReady;
 
   const track = steps.map((step, index) => ({
     id: step.id,
@@ -112,7 +123,7 @@ export default function App() {
       <SetupWindow
         title="AiDEX Setup"
         subtitle="Portable environment installer"
-        badge={<Badge tone="neutral">Preview · nothing is written</Badge>}
+        badge={<Badge tone="neutral">Initializes the drive · components arrive later</Badge>}
         contentRef={contentRef}
         steps={
           <StepTrack label="Installation steps" steps={track} onSelect={(id) => goTo(steps.findIndex((step) => step.id === id))} />
@@ -131,7 +142,7 @@ export default function App() {
   function renderStepBody() {
     switch (steps[stepIndex].id) {
       case "drive":
-        return <DriveStep {...stepProps} />;
+        return <DriveStep {...stepProps} drives={drives} />;
       case "setup":
         return <ConfigurationStep {...stepProps} />;
       case "models":
@@ -172,9 +183,12 @@ export default function App() {
           <InstallStep
             state={state}
             titleRef={titleRef}
+            volume={volume}
             phase={run.phase}
-            percent={run.percent}
-            taskIndex={run.taskIndex}
+            tasks={run.tasks}
+            completed={run.completed}
+            report={run.report}
+            error={run.error}
             passwordAccepted={passwordAccepted}
           />
         );
@@ -200,37 +214,46 @@ export default function App() {
       );
     }
     if (run.phase === "running") {
+      // Initialization is short and safe to retry, but stopping midway is not offered.
       return (
-        <SetupFooter noteId={NOTE_ID} note="Installation preview in progress">
-          <Button
-            variant="outline"
-            onClick={() => {
-              run.reset();
-              notify("Preview stopped. No drive was changed.");
-            }}
-          >
-            Cancel
+        <SetupFooter noteId={NOTE_ID} note={`Setting up ${volume?.root ?? "the drive"}…`}>
+          {null}
+        </SetupFooter>
+      );
+    }
+    if (run.phase === "failed") {
+      return (
+        <SetupFooter noteId={NOTE_ID} note="Setup stopped. Fix the problem, then try again.">
+          <Button variant="outline" icon={<ArrowLeftIcon />} onClick={restart}>
+            Start over
+          </Button>
+          <Button variant="primary" onClick={() => void run.start(state)}>
+            Try again
           </Button>
         </SetupFooter>
       );
     }
     if (run.phase === "finished") {
       return (
-        <SetupFooter noteId={NOTE_ID} note="Preview finished. Nothing was written to the drive.">
+        <SetupFooter noteId={NOTE_ID} note={`AiDEX drive ready at ${run.report?.root ?? volume?.root ?? "the drive"}.`}>
           <Button variant="outline" onClick={restart}>
             New installation
           </Button>
           <Button
             variant="primary"
             trailing={<ExternalLinkIcon />}
-            onClick={() => notify("Launching AiDEX will be available in the native installer.")}
+            onClick={() =>
+              notify("The AiDEX app is not on the drive yet; it is copied there once the portable bundle (issue #26) is available.")
+            }
           >
             Launch AiDEX
           </Button>
         </SetupFooter>
       );
     }
-    const blocked = !fitsOnDrive(state)
+    const blocked = !volume
+      ? "Choose a drive on the Drive step first."
+      : !fitsOnDrive(state, volume)
       ? "Not enough free space on the selected drive."
       : !vaultReady
         ? "Set the vault password on the Security step first."
@@ -243,9 +266,9 @@ export default function App() {
           trailing={<ArrowRightIcon />}
           disabled={!canInstall}
           aria-describedby={canInstall ? undefined : NOTE_ID}
-          onClick={run.start}
+          onClick={() => void run.start(state)}
         >
-          Start install preview
+          Set up drive
         </Button>
       </SetupFooter>
     );
