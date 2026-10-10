@@ -1,5 +1,17 @@
 use super::*;
 
+#[test]
+fn filesystem_observations_distinguish_directories_files_and_unknown_paths() {
+    assert_eq!(
+        directory_state(Some(&env::temp_dir())),
+        Probe::Available(())
+    );
+    assert_eq!(
+        directory_state(env::current_exe().ok().as_deref()),
+        Probe::Unavailable
+    );
+    assert_eq!(directory_state(None), Probe::Unknown);
+}
 
 #[test]
 fn current_host_smoke_reports_a_versioned_profile() {
