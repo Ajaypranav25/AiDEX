@@ -11,9 +11,7 @@
       "$ref": "#/definitions/ContractPayload"
     },
     "version": {
-      "type": "integer",
-      "format": "uint16",
-      "minimum": 0.0
+      "$ref": "#/definitions/ContractVersion"
     }
   },
   "additionalProperties": false,
@@ -186,14 +184,10 @@
       ],
       "properties": {
         "maximum": {
-          "type": "integer",
-          "format": "uint16",
-          "minimum": 0.0
+          "$ref": "#/definitions/ContractVersion"
         },
         "minimum": {
-          "type": "integer",
-          "format": "uint16",
-          "minimum": 0.0
+          "$ref": "#/definitions/ContractVersion"
         }
       },
       "additionalProperties": false
@@ -508,6 +502,11 @@
           }
         }
       ]
+    },
+    "ContractVersion": {
+      "type": "integer",
+      "format": "uint16",
+      "minimum": 1.0
     },
     "EntityId": {
       "type": "string"
