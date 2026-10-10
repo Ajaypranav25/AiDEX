@@ -38,7 +38,7 @@ workspaces/ephemeral/<id>/tree/            ephemeral workspace root
 
 ## Guarantees
 
-- **Explicit roots.** A host root is exactly the directory the user selected, canonicalized; discovery only informs. It must exist. The drive root, any directory that contains the drive (which would expose the vault, identity, and sessions), and anything inside a declared drive directory or `.aidex` are refused, and the check is repeated whenever a host root is resolved for use. A root that is already registered (in any spelling) is a conflict; names are unique case-insensitively.
+- **Explicit roots.** A host root is exactly the directory the user selected, canonicalized; discovery only informs. It must exist. The drive root, any directory that contains the drive (which would expose the vault, identity, and sessions), and roots containing or lying inside any declared managed directory or `.aidex` are refused, including custom layouts. Unrelated sibling directories remain allowed. The check is repeated whenever a host root is resolved for use. A root that is already registered (in any spelling) is a conflict; names are unique case-insensitively.
 - **Unavailable roots are reported, never recreated.** A missing host root (or one added on another OS) is `Unavailable` in `list`/`get` and `RootUnavailable` for `confined_root`/`handle`; nothing is created. The registry, ids, and selection survive restarts.
   Persisted host roots replaced by symbolic links or junctions are unavailable;
   workspace access never redirects to the replacement target.
