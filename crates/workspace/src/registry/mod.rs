@@ -35,7 +35,7 @@ pub const EPHEMERAL_DIR: &str = "ephemeral";
 /// Durable registry of host, drive, and ephemeral workspaces for one drive.
 ///
 /// Thread-safe (`Send + Sync`): database access is serialized internally, and
-/// ephemeral apply/discard operations are serialized against each other.
+/// ephemeral creation/apply/discard and data deletion are serialized against each other.
 pub struct WorkspaceRegistry {
     paths: DrivePaths,
     database: PathBuf,
