@@ -14,7 +14,8 @@
     "check:cli": "tsc --noEmit -p apps/cli/tsconfig.json",
     "login:omp": "omp login",
     "dev:desktop": "bun run --cwd apps/desktop tauri dev",
-    "dev:installer": "bun run --cwd apps/installer tauri dev"
+    "dev:installer": "bun run --cwd apps/installer tauri dev",
+    "test": "bun run --cwd packages/client test && bun run --cwd packages/ui test && bun run --cwd apps/desktop test"
   },
   "dependencies": {
     "@oh-my-pi/pi-coding-agent": "18.8.7"
