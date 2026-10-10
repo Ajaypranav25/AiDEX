@@ -3,7 +3,7 @@
 
 use crate::commands::{
     agent::AgentCommand, daemon::DaemonCommand, events::EventsArgs, omp::SessionOptions,
-    workspace::WorkspaceArgs,
+    vault::VaultCommand, workspace::WorkspaceArgs,
 };
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -63,6 +63,11 @@ pub enum Commands {
     Events(EventsArgs),
     /// Check host information, drive health, and Oh My Pi availability.
     Doctor,
+    /// Manage the drive's encrypted vault and its secrets.
+    Vault {
+        #[command(subcommand)]
+        command: VaultCommand,
+    },
     /// Manage host, drive, and ephemeral workspaces.
     #[command(alias = "project")]
     Workspace(WorkspaceArgs),
@@ -84,6 +89,7 @@ impl Commands {
             },
             Some(Self::Events(_)) => "aidex events",
             Some(Self::Doctor) => "aidex doctor",
+            Some(Self::Vault { command }) => command.label(),
             Some(Self::Workspace(args)) => args.command.label(),
         }
     }

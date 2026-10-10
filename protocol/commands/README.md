@@ -122,7 +122,7 @@ renumbered. Messages are for humans and never contain secrets.
 | -32013 | `server_busy` | Connection or subscription limit reached | `unavailable` | 3 |
 | -32014 | `shutting_down` | Daemon stopping or drive removed | `unavailable` | 3 |
 | -32015 | `slow_consumer` | Outbound queue overflowed; connection dropped | `unavailable` | 3 |
-| -32020 | `vault_locked` | Reserved for the vault: locked or credential needed | `permission_denied` | 5 |
+| -32020 | `vault_locked` | Vault locked, or wrong passphrase/recovery key (`data.reason`: `locked`, `wrong_passphrase`, `wrong_recovery_key`) | `permission_denied` | 5 |
 | -32021 | `policy_denied` | Reserved for broker/policy: denied by policy | `permission_denied` | 6 |
 | -32022 | `model_unavailable` | Reserved for models/providers: nothing usable | `unavailable` | 7 |
 | -32023 | `cancelled` | Operation cancelled or interrupted | `unavailable` | 9 |
@@ -138,6 +138,16 @@ Domain errors carrying an `aidex_core::ServiceErrorCode` map to -32001..-32006
 | `daemon.ping` | none | `{pong: true}` |
 | `daemon.stop` | none | `{state: "stopping"}`; then every connection is closed and the endpoint removed |
 | `events.replay` | `{workspace_id, after, limit?}` (`limit` 1-256, default 256) | `{events: [Event...]}` strictly after `after`, ascending |
+| `vault.status` | none | `{state: "missing"\|"locked"\|"unlocked"\|"unavailable", vault_id?, secrets?, has_recovery_key?, unlocked_by?, unlocked_at?, idle_lock_secs?, reason?, message?}` |
+| `vault.init` | `{passphrase, recovery?: bool}` | `{state: "unlocked", vault_id, recovery_key?}`; the recovery key is returned only here, once |
+| `vault.unlock` | `{passphrase}` or `{recovery_key}` | `vault.status` result |
+| `vault.lock` | none | `{state, was_unlocked, revoked_handles}` |
+| `vault.secret.set` | `{name, value, consumers?: ["provider:<id>"\|"mcp:<id>"\|"process:<id>"\|"git:<host>"], kind?}` | `SecretMeta {secret_ref, name, kind, created_at, updated_at, policy: {allowed_consumers}}` (never the value) |
+| `vault.secret.list` | none | `{secrets: [SecretMeta...]}` sorted by name |
+| `vault.secret.delete` | `{name}` | `{deleted: SecretMeta}` |
+| `vault.passphrase.change` | `{old_passphrase?, new_passphrase}` (`old_passphrase` may be omitted only after a recovery-key unlock) | `{changed: true}` |
+
+Vault errors carry `data.reason`, the stable `aidex_vault::VaultErrorKind` name (e.g. `vault_not_found`, `vault_exists`, `locked`, `wrong_passphrase`, `corrupt`, `tampered`, `missing_header`, `unsupported_version`, `forbidden_consumer`, `secret_not_found`, `conflict`). Wrong credentials and a locked vault use `vault_locked`; other vault errors use their `ServiceErrorCode` mapping. Parameters of `vault.*` methods may contain passphrases or secret values: they are only accepted over this authenticated local connection and are never echoed in error messages (invalid-parameter errors name at most a missing field). Secret handles are issued and resolved inside the daemon for the broker; no IPC method returns a secret value.
 | `workspace.add` | `{path, name?}` (absolute host directory) | `Workspace` |
 | `workspace.create_drive` | `{name}` | `Workspace` (kind `drive`) |
 | `workspace.list` | none | `{workspaces: [Workspace...], selected: id\|null}` |

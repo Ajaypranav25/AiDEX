@@ -17,7 +17,7 @@ uses. Wire format, handshake, error codes, and naming rules:
 | `stream` | `NotificationSink` for subscription methods |
 | `transport` (private) | listener, per-connection reader/writer threads, bounded outbox, shutdown |
 | `services` | `Services`, built once and shared with handlers as `Arc<Services>` |
-| `methods/<domain>` | JSON-RPC adapters: `daemon.*` (status/ping/stop), `events.*` (replay), `workspace.*` (registry, discovery, ephemeral review/apply/discard over `aidex-workspace`) |
+| `methods/<domain>` | JSON-RPC adapters: `daemon.*` (status/ping/stop), `events.*` (replay), `vault.*` (status/init/unlock/lock/secret.set/secret.list/secret.delete/passphrase.change), `workspace.*` (registry, discovery, ephemeral review/apply/discard over `aidex-workspace`) |
 | `lifecycle` | `Daemon`, `DaemonHandle`, `serve`, `launch`, `stop`, stale-endpoint recovery |
 | `client` | `Client`, `Subscription`, `ClientError` |
 
@@ -89,8 +89,12 @@ handlers without sockets.
 
 ## Limitations
 
-- Methods: only `daemon.status|ping|stop` and `events.replay` exist. Event push
+- Methods: `daemon.status|ping|stop`, `events.replay`, and `vault.*` exist. Event push
   streaming (`events.subscribe`) and every other domain are future work.
+- `Services::vault()` returns the drive's `Arc<aidex_vault::VaultService>` (vault in
+  `DrivePaths::vault()`, default 30 min idle auto-lock). A damaged vault does not stop
+  the daemon; `vault.status` reports it as `unavailable`. Secret handles are issued and
+  resolved through `VaultService` in-process (for the broker), never over IPC.
 - The event database stays at `.aidex/runtime/events.sqlite` (PR #40); moving it
   under `DrivePaths` is left to the events owner.
 - DTOs for daemon methods live in this crate (`methods::*`), not in the
