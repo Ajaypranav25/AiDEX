@@ -593,6 +593,26 @@ fn ephemeral_relationships_are_enforced() {
 }
 
 #[test]
+fn a_created_ephemeral_child_prevents_deleting_its_drive_source() {
+    let drive = Drive::new();
+    let registry = drive.registry();
+    let source = registry.create_drive("source").unwrap();
+    let tree = registry.confined_root(&source.id).unwrap();
+    write(tree.root(), "keep.txt", "source data");
+    let copy = registry.create_ephemeral(&source.id).unwrap().workspace;
+    assert!(matches!(
+        registry.delete_data(&source.id),
+        Err(WorkspaceError::Conflict(_))
+    ));
+    assert!(registry.get(&source.id).unwrap().is_available());
+    assert_eq!(fs::read_to_string(tree.root().join("keep.txt")).unwrap(), "source data");
+    assert!(registry.review(&copy.id).unwrap().changes.is_empty());
+    registry.discard(&copy.id).unwrap();
+    registry.delete_data(&source.id).unwrap();
+    assert!(registry.list().unwrap().is_empty());
+}
+
+#[test]
 fn large_diffs_are_bounded() {
     let fixture = Fixture::new(&[("big.txt", "line\n")]);
     let registry = fixture.drive.registry().with_limits(EphemeralLimits {
