@@ -21,6 +21,15 @@ These properties are requirements from the product specification, not current im
 - There is no online lockout for an offline drive: passphrase strength is the protection against offline guessing. A lost passphrase without a recovery key is unrecoverable; encrypted backups protect against drive loss, not credential loss.
 - Not yet done: independent cryptographic review (required before release), memory locking, zeroization of IPC request buffers, whole-vault rollback detection, audit events, phone factor, and host-trust policies.
 
+## Model providers (`crates/providers`, `crates/router`)
+
+- Provider configuration (`private_config/providers.toml`) stores endpoints and vault secret *names* only; its closed schema rejects inline keys, and parse errors never quote file contents. API keys live in the vault with a policy naming the consumer `provider:<id>`.
+- For each request the daemon issues a single-use 30-second handle for `provider:<id>`, resolves it, and revokes it; the bytes (zeroizing, redacted `Debug`) build only the `Authorization: Bearer` header and are never logged, cached, put in events or errors, or sent in the request body. A locked vault, a missing secret, or a policy that names another consumer fails before any connection is made.
+- Credentials go only over `https` or to loopback; URLs with embedded credentials are rejected, and redirects are never followed so the header cannot be forwarded to another host. HTTP error text from providers (which can echo keys) is never surfaced; only status and a sanitized code are.
+- Offline mode (`aidex offline on`, persisted in `private_config/network.toml`) refuses remote provider traffic before credentials are resolved or sockets are opened. Only loopback endpoints count as local; LAN servers are remote. Turning offline on applies even if persisting fails.
+- The router never selects or falls back to a remote model when the privacy mode is local-only or air-gapped, the network is offline, or the task is secret-heavy; an explicit model choice that violates this is refused rather than swapped.
+- Not yet: the broker's policy-backed egress gate (DNS re-checks, allowlists) replacing `OfflineMode`, zeroization of HTTP client buffers, OAuth/device login, and audit events for credential release.
+
 ## Process sandbox
 
 `aidex-sandbox` contains processes AiDEX launches. Callers request a level (0 direct, 1 brokered, 2 restricted, 3 ephemeral), mounts, network mode, and limits; negotiation returns an `EnforcementPlan` naming the mechanism for every requirement, or fails with the list of requirements this host cannot enforce. Nothing is silently downgraded, and level 0 requires an explicit `allow_direct` opt-in.

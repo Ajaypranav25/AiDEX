@@ -89,8 +89,16 @@ handlers without sockets.
 
 ## Limitations
 
-- Methods: `daemon.status|ping|stop`, `events.replay`, and `vault.*` exist. Event push
-  streaming (`events.subscribe`) and every other domain are future work.
+- Methods: `daemon.status|ping|stop`, `events.replay`, `vault.*`, `workspace.*`, and
+  `model.*`/`provider.*`/`network.*` exist. Event push streaming (`events.subscribe`)
+  and every other domain are future work.
+- `Services::models()` returns `ModelServices`: the `ProviderRegistry`
+  (`private_config/providers.toml`; runtime providers such as local inference register
+  through `registry().register(..)`), the `aidex-router` `Router`, and the persisted
+  `OfflineMode`. Provider credentials are resolved by `VaultCredentials`: one 30 s
+  handle for the consumer `provider:<id>` per request, resolved and then revoked.
+  Model notifications go to a no-op `ModelObserver` until the events v2 catalog is
+  wired.
 - `Services::vault()` returns the drive's `Arc<aidex_vault::VaultService>` (vault in
   `DrivePaths::vault()`, default 30 min idle auto-lock). A damaged vault does not stop
   the daemon; `vault.status` reports it as `unavailable`. Secret handles are issued and
