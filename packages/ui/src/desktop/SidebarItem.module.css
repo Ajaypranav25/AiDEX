@@ -68,6 +68,13 @@
   white-space: nowrap;
 }
 
+.count {
+  flex: none;
+  color: var(--aidex-color-text-muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
 .hasActions .label {
   padding-right: var(--aidex-space-8);
 }
