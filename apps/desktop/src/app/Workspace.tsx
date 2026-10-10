@@ -1,24 +1,50 @@
 import { useCallback, useState } from "react";
-import { MainLayout } from "../layouts/MainLayout";
 import { HomePage } from "../features/home/HomePage";
 import { useCommandShortcut } from "../hooks/useCommandShortcut";
-import type { PageId } from "../lib/navigation";
+import { MainLayout } from "../layouts/MainLayout";
+import { NavigationProvider, useNavigation } from "./providers/navigation";
+import { PreferencesProvider } from "./providers/preferences";
+import { ToastProvider } from "./providers/toast";
+import { homeSidebar, screens } from "./registry";
 
+/** The signed-in workspace: providers plus the route-driven shell. */
 export function Workspace() {
-  const [activePage, setActivePage] = useState<PageId>("home");
+  return (
+    <NavigationProvider initialRoute={{ page: "home" }}>
+      <PreferencesProvider>
+        <ToastProvider>
+          <WorkspaceScreens />
+        </ToastProvider>
+      </PreferencesProvider>
+    </NavigationProvider>
+  );
+}
+
+function WorkspaceScreens() {
+  const { route, navigate } = useNavigation();
   // Remounting the home page gives each new session an empty composer; it takes focus on entry too.
   const [sessionKey, setSessionKey] = useState(0);
 
   const startNewSession = useCallback(() => {
-    setActivePage("home");
+    navigate({ page: "home" });
     setSessionKey((key) => key + 1);
-  }, []);
+  }, [navigate]);
 
   useCommandShortcut("k", startNewSession);
 
+  if (route.page === "home") {
+    return (
+      <MainLayout Sidebar={homeSidebar} onNewSession={startNewSession}>
+        <HomePage key={sessionKey} autoFocus />
+      </MainLayout>
+    );
+  }
+
+  const { Page, Sidebar } = screens[route.page];
   return (
-    <MainLayout activePage={activePage} onNavigate={setActivePage} onNewSession={startNewSession}>
-      <HomePage key={sessionKey} autoFocus />
+    <MainLayout Sidebar={Sidebar} onNewSession={startNewSession}>
+      {/* Keyed by record so local state resets when the same page opens another workspace, agent, or model. */}
+      <Page key={`${route.page}:${route.id ?? ""}`} />
     </MainLayout>
   );
 }

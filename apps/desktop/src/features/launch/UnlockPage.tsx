@@ -95,6 +95,7 @@ export function UnlockPage({ onUnlock }: Props) {
                       key={method}
                       ref={fieldRef}
                       label={`Workspace ${copy.noun}`}
+                      labelVisibility="hidden"
                       placeholder={`Enter your ${copy.noun}`}
                       leadingIcon={<copy.FieldIcon />}
                       revealLabel={`Show ${copy.noun}`}
