@@ -75,6 +75,7 @@ Every component accepts its root element's props (including `ref` and `className
 | `ActivityLog` | `entries: { time, text, tone? }[]`, `live` |
 | `TaskGraph` | `root`, `nodes: { id, label, icon?, status?, detail? }[]` |
 | `DiffView` | `fileName`, `additions`, `deletions`, `lines: { kind: context · add · del, oldLine?, newLine?, text }[]`, `actions` |
+| `CodeDiff` | `fileName`, `language?`, either `oldCode` + `newCode` or a unified `patch`, `layout` unified · split (or `defaultLayout` + `onLayoutChange`), `showLayoutToggle`, `actions`. See [Code diffs](#code-diffs). `getDiffStats(fileName, source)` returns the same `{ additions, deletions }` the header shows |
 | `CodeBlock`, `Terminal`, `InlineCode` | `CodeBlock`: `code`, `title`, `language`, `actions`. `Terminal`: `lines: { kind: command · output · error, text }[]`, `title` |
 | `ChatMessage` | `role` user · assistant, `meta`, `actions` |
 | `FileTree` | `nodes: { id, name, kind: folder · file, children?, meta? }[]`, `selectedId`, `onSelect`, `defaultExpanded` |
@@ -100,6 +101,15 @@ Every component accepts its root element's props (including `ref` and `className
 | `WizardLayout` | `title`, `badge`, `steps` (a `Stepper`), `aside`, `footer`, `contentRef`; brand header, step rail, scrolling content, pinned footer |
 | `WizardFooter` | `back`, `status` (polite live text, e.g. why Next is disabled), `statusId`, `next` |
 | `Stepper` | `label`, `steps: { id, title, description?, status: complete · current · upcoming }[]`, `onSelect` (completed steps only) |
+
+## Code diffs
+
+`CodeDiff` is the one diff component; every diff in an app renders through it. It wraps [`@pierre/diffs`](https://diffs.com) (Shiki-based) and adds an accessible header: file name, `+N −M` counts with a spoken "N additions, M deletions" summary, a unified/split `SegmentedControl`, and an `actions` slot.
+
+- **Client only, lazy.** The header and a placeholder sized to the diff are prerendered (safe under `output: "export"`). After hydration the highlighter chunk (`CodeDiffRenderer`) loads with `React.lazy`; Shiki themes and grammars are further split into on-demand chunks, so a screen without diffs never downloads them.
+- **No WebAssembly, no network.** Shiki uses its JavaScript regex engine (`preferredHighlighter: "shiki-js"`), so the Tauri CSP needs no `wasm-unsafe-eval`. Themes and grammars are bundled; nothing is fetched at runtime.
+- **Theming.** Syntax colors come from the bundled `pierre-dark` theme. Surface, text, line tints, and fonts map onto `--aidex-*` tokens through the `--aidex-color-diff-*` tokens in `tokens.css`, set as `--diffs-*` custom properties on the library's host element.
+- **Accessibility.** Lines carry classic `+`/`-` markers, so changes never rely on color alone. Long lines wrap instead of scrolling, and the library's mouse-only hunk-expand controls are turned off.
 
 ## Checks
 

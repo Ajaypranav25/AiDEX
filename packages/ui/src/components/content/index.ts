@@ -1,6 +1,14 @@
 export { ActivityLog, type ActivityEntry, type ActivityLogProps, type ActivityTone } from "./ActivityLog";
 export { ChatMessage, type ChatMessageProps, type ChatRole } from "./ChatMessage";
 export { CodeBlock, type CodeBlockProps } from "./CodeBlock";
+export {
+  CodeDiff,
+  getDiffStats,
+  type CodeDiffLayout,
+  type CodeDiffProps,
+  type CodeDiffSource,
+  type DiffStats,
+} from "./CodeDiff";
 export { DiffView, type DiffLine, type DiffLineKind, type DiffViewProps } from "./DiffView";
 export { FileTree, type FileTreeProps, type TreeNode } from "./FileTree";
 export { InlineCode, type InlineCodeProps } from "./InlineCode";
