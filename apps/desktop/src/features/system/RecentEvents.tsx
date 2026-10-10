@@ -1,10 +1,11 @@
-import { ActivityLog, EmptyState, Notice } from "@aidex/ui/components";
+import { ActivityLog, EmptyState } from "@aidex/ui/components";
 import { ActivityIcon } from "@aidex/ui/icons";
 import type { EventFilter } from "@aidex/client/dto/daemon";
 import { call } from "@aidex/client/rpc";
 import { useAidexStatus } from "../../hooks/useAidexStatus";
 import { useBridgeQuery } from "../../hooks/useBridgeQuery";
 import { activityEntry } from "./events";
+import { QueryState } from "./QueryState";
 
 type Props = {
   /** Narrow to one workspace (`wsp_…`); omit for every event. */
@@ -30,16 +31,19 @@ export function RecentEvents({ workspaceId, limit = 20 }: Props) {
     daemonRunning,
   );
 
-  if (recent.error) return <Notice tone="warning">Cannot read events: {recent.error.message}</Notice>;
-  if (!recent.data) return <Notice>Reading events…</Notice>;
-  if (recent.data.length === 0) {
-    return (
-      <EmptyState
-        icon={<ActivityIcon />}
-        title="No events yet"
-        description={workspaceId ? `Nothing has been recorded for ${workspaceId}.` : "Nothing has been recorded on this drive yet."}
-      />
-    );
-  }
-  return <ActivityLog entries={recent.data.map(activityEntry)} />;
+  return (
+    <QueryState query={recent} loading="Reading events…" failure="Cannot read events">
+      {(events) =>
+        events.length === 0 ? (
+          <EmptyState
+            icon={<ActivityIcon />}
+            title="No events yet"
+            description={workspaceId ? `Nothing has been recorded for ${workspaceId}.` : "Nothing has been recorded on this drive yet."}
+          />
+        ) : (
+          <ActivityLog entries={events.map(activityEntry)} />
+        )
+      }
+    </QueryState>
+  );
 }

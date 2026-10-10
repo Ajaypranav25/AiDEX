@@ -17,6 +17,7 @@ import type { ProviderAccount, ProviderPreset } from "@aidex/client/dto/models";
 import { useRpc } from "../../hooks/useRpc";
 import { useToast } from "../../app/providers/toast";
 import { useNavigation } from "../../app/providers/navigation";
+import { QueryError } from "../system/QueryState";
 
 export function ProvidersPanel() {
   const { navigate } = useNavigation();
@@ -252,9 +253,7 @@ export function ProvidersPanel() {
           }
           meta={`${accounts.data?.providers.length ?? 0} accounts`}
         />
-        {accounts.error && (
-          <Notice tone="danger">{accounts.error.message}</Notice>
-        )}
+        <QueryError query={accounts} failure="Cannot list provider accounts" />
         <List>
           {(accounts.data?.providers ?? []).map((account) => (
             <ListRow
@@ -348,9 +347,7 @@ export function ProvidersPanel() {
               {error}
             </Notice>
           )}
-          {presets.error && (
-            <Notice tone="danger">{presets.error.message}</Notice>
-          )}
+          <QueryError query={presets} failure="Cannot load provider presets" />
           <Select
             label="Provider"
             value={presetId}

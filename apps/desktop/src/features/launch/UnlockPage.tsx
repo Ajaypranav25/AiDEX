@@ -4,6 +4,7 @@ import { FocusLayout } from "@aidex/ui/desktop";
 import { ArrowRightIcon, HardDriveIcon, LockIcon, LockOpenIcon } from "@aidex/ui/icons";
 import { Button, Card, Container, Heading, IconBadge, Stack, StatusIndicator, Text } from "@aidex/ui/primitives";
 import { removableLabels } from "@aidex/client/dto/drive";
+import type { VaultStatus } from "@aidex/client/dto/vault";
 import { ErrorKind, toAidexError } from "@aidex/client/errors";
 import { formatBytes } from "@aidex/client/format";
 import { call } from "@aidex/client/rpc";
@@ -12,6 +13,7 @@ import { useDriveReport } from "../../hooks/useCoreReports";
 import { useRpc } from "../../hooks/useRpc";
 import { CoreStatusNotice } from "../system/CoreStatusNotice";
 import { driveSourceLabels } from "../system/labels";
+import { QueryState } from "../system/QueryState";
 import { UnlockForm, type UnlockMethod } from "./UnlockForm";
 import { VaultSetupForm } from "./VaultSetupForm";
 
@@ -123,9 +125,15 @@ export function UnlockPage({ onContinue }: Props) {
         />
       );
     }
-    if (vault.error) return <Notice tone="warning">Cannot read the vault status: {vault.error.message}</Notice>;
-    if (!vault.data) return <Text tone="secondary">Checking the vault…</Text>;
-    switch (state) {
+    return (
+      <QueryState query={vault} loading="Checking the vault…" failure="Cannot read the vault status">
+        {(status) => vaultState(status)}
+      </QueryState>
+    );
+  };
+
+  const vaultState = (status: VaultStatus) => {
+    switch (status.state) {
       case "missing":
         return <VaultSetupForm onSubmit={create} busy={busy} error={error} />;
       case "locked":
@@ -136,14 +144,14 @@ export function UnlockPage({ onContinue }: Props) {
             media={<IconBadge tone="accent" icon={<LockOpenIcon />} />}
             title="Vault unlocked"
             titleLevel={2}
-            description={`${vault.data.secrets ?? 0} secrets on this drive. Agents receive handles, never values.`}
+            description={`${status.secrets ?? 0} secrets on this drive. Agents receive handles, never values.`}
             trailing={<StatusIndicator tone="success" label="Unlocked" />}
           />
         );
       default:
         return (
           <Notice tone="danger" role="alert">
-            The vault on this drive cannot be used{vault.data.message ? `: ${vault.data.message}` : "."} Nothing was changed.
+            The vault on this drive cannot be used{status.message ? `: ${status.message}` : "."} Nothing was changed.
           </Notice>
         );
     }

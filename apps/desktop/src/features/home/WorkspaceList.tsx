@@ -1,8 +1,9 @@
-import { EmptyState, List, ListRow, Notice } from "@aidex/ui/components";
+import { EmptyState, List, ListRow } from "@aidex/ui/components";
 import { FolderIcon, HardDriveIcon, LayersIcon } from "@aidex/ui/icons";
 import { IconBadge, StatusIndicator } from "@aidex/ui/primitives";
-import type { Workspace } from "@aidex/client/dto/workspace";
+import type { Workspace, WorkspaceList as WorkspaceRegistry } from "@aidex/client/dto/workspace";
 import { useRpc } from "../../hooks/useRpc";
+import { QueryState } from "../system/QueryState";
 
 const KIND_LABEL = { host: "Folder on this computer", drive: "On the AiDEX drive", ephemeral: "Ephemeral copy" } as const;
 const KIND_ICON = { host: FolderIcon, drive: HardDriveIcon, ephemeral: LayersIcon } as const;
@@ -14,10 +15,15 @@ const byRecency = (left: Workspace, right: Workspace) =>
 /** The drive's workspace registry from `workspace.list`. */
 export function WorkspaceList({ limit = 6 }: { limit?: number }) {
   const list = useRpc("workspace.list");
+  return (
+    <QueryState query={list} loading="Loading workspaces…" failure="Cannot list workspaces">
+      {(registry) => <Workspaces registry={registry} limit={limit} />}
+    </QueryState>
+  );
+}
 
-  if (list.error) return <Notice tone="warning">Cannot list workspaces: {list.error.message}</Notice>;
-  if (!list.data) return <Notice>Loading workspaces…</Notice>;
-  const workspaces = [...list.data.workspaces].sort(byRecency).slice(0, limit);
+function Workspaces({ registry, limit }: { registry: WorkspaceRegistry; limit: number }) {
+  const workspaces = [...registry.workspaces].sort(byRecency).slice(0, limit);
   if (workspaces.length === 0) {
     return (
       <EmptyState
@@ -32,6 +38,7 @@ export function WorkspaceList({ limit = 6 }: { limit?: number }) {
       {workspaces.map((workspace) => {
         const Icon = KIND_ICON[workspace.kind.type];
         const available = workspace.availability.state === "available";
+        const selected = workspace.id === registry.selected;
         return (
           <ListRow
             key={workspace.id}
@@ -40,8 +47,8 @@ export function WorkspaceList({ limit = 6 }: { limit?: number }) {
             subtitle={`${KIND_LABEL[workspace.kind.type]} · ${workspace.path}${workspace.repository?.vcs === "git" ? " · git" : ""}`}
             trailing={
               <StatusIndicator
-                tone={available ? (workspace.id === list.data?.selected ? "success" : "neutral") : "warning"}
-                label={!available ? "Unavailable" : workspace.id === list.data?.selected ? "Selected" : "Available"}
+                tone={available ? (selected ? "success" : "neutral") : "warning"}
+                label={!available ? "Unavailable" : selected ? "Selected" : "Available"}
               />
             }
           />
