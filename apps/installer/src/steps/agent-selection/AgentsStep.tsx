@@ -1,40 +1,42 @@
-import { Stack } from "@aidex/ui/primitives";
-import { ComponentChecklist } from "../../components/ComponentChecklist";
-import { SpaceSummary } from "../../components/SpaceSummary";
-import type { ComponentGroupId, SetupSelections } from "../../lib/setup";
+import { Notice, PageHeader } from "@aidex/ui/components";
+import { CheckboxGroup, Grid } from "@aidex/ui/primitives";
+import { agentOptions, extensionOptions, type AgentId, type ExtensionId } from "../../lib/setup";
+import { stepKicker } from "../../lib/steps";
+import type { StepProps } from "../types";
 
-type Props = {
-  selections: SetupSelections;
-  onToggle: (group: ComponentGroupId, id: string, on: boolean) => void;
-};
+const NATIVE = "native";
+const runtimeOptions = [
+  { value: NATIVE, title: "AiDEX Native", description: "Chat and agent harness", meta: "Included", disabled: true },
+  ...agentOptions,
+];
 
-/** Screen 32: agents, skill packs, MCP servers, and toolchains, each with sizes. */
-export function AgentsStep({ selections, onToggle }: Props) {
+/** Step 4: choose external agent runtimes and extensions to carry alongside AiDEX Native. */
+export function AgentsStep({ state, update, titleRef }: StepProps) {
   return (
-    <Stack gap={8}>
-      <SpaceSummary selections={selections} />
-      <ComponentChecklist
-        title="Agents"
-        group="agents"
-        selections={selections}
-        onToggle={onToggle}
-        note="External agents are optional adapters. AiDEX does not include accounts or API keys; you sign in after setup."
+    <>
+      <PageHeader
+        eyebrow={stepKicker(3)}
+        title="Agents & extensions"
+        description="Choose the portable coding agents and tools that AiDEX should carry."
+        titleRef={titleRef}
       />
-      <ComponentChecklist title="Skill packs" group="skills" selections={selections} onToggle={onToggle} />
-      <ComponentChecklist
-        title="MCP servers"
-        group="mcp"
-        selections={selections}
-        onToggle={onToggle}
-        note="Servers run only inside workspaces you approve."
-      />
-      <ComponentChecklist
-        title="Toolchains"
-        group="toolchains"
-        selections={selections}
-        onToggle={onToggle}
-        note="Portable toolchains run from the drive without changing the host computer."
-      />
-    </Stack>
+      <Grid columns={2} gap={8}>
+        <CheckboxGroup
+          label="Agent runtimes"
+          options={runtimeOptions}
+          value={[NATIVE, ...state.agents]}
+          onValueChange={(values) =>
+            update({ agents: values.filter((value) => value !== NATIVE) as AgentId[], preset: "custom" })
+          }
+        />
+        <CheckboxGroup
+          label="Extensions"
+          options={extensionOptions}
+          value={state.extensions}
+          onValueChange={(extensions) => update({ extensions: extensions as ExtensionId[], preset: "custom" })}
+        />
+      </Grid>
+      <Notice>External CLIs may require sign-in on the destination host. No credentials are bundled.</Notice>
+    </>
   );
 }

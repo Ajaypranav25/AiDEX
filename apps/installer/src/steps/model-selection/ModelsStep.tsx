@@ -1,45 +1,64 @@
-import { SectionHeader } from "@aidex/ui/components";
-import { Checkbox, Stack } from "@aidex/ui/primitives";
-import { ComponentChecklist } from "../../components/ComponentChecklist";
-import { SpaceSummary } from "../../components/SpaceSummary";
-import { formatGb, RUNTIME, type ComponentGroupId, type SetupSelections } from "../../lib/setup";
+import type { Ref } from "react";
+import { PageHeader } from "@aidex/ui/components";
+import { FileIcon } from "@aidex/ui/icons";
+import { CheckboxGroup, Grid, Select, Stack, Text, TextField } from "@aidex/ui/primitives";
+import { backendOptions, modelOptions, type Backend, type ModelId } from "../../lib/setup";
+import { stepKicker } from "../../lib/steps";
+import type { StepProps } from "../types";
 
-type Props = {
-  selections: SetupSelections;
-  onToggle: (group: ComponentGroupId, id: string, on: boolean) => void;
+type Props = StepProps & {
+  customPathError?: string;
+  customPathRef: Ref<HTMLInputElement>;
 };
 
-/** Screen 31: local models, the required inference runtime, and acceleration backends with a live size meter. */
-export function ModelsStep({ selections, onToggle }: Props) {
+const runtimeOptions = [
+  { value: "llama.cpp", title: "llama.cpp", description: "Portable inference engine", meta: "Included", disabled: true },
+] as const;
+
+/** Step 3: choose models to carry on the drive and the inference backend. */
+export function ModelsStep({ state, update, titleRef, customPathError, customPathRef }: Props) {
   return (
-    <Stack gap={8}>
-      <SpaceSummary selections={selections} />
-      <ComponentChecklist
-        title="Models"
-        group="models"
-        selections={selections}
-        onToggle={onToggle}
-        note="Quantized GGUF models. Choose at least one chat model; the embedding model powers workspace search."
+    <>
+      <PageHeader
+        eyebrow={stepKicker(2)}
+        title="Local models & runtime"
+        description="Choose models to store on your drive. Local inference can work without cloud APIs."
+        titleRef={titleRef}
       />
-      <section>
+      <Grid columns={2} gap={8}>
         <Stack gap={4}>
-          <SectionHeader title="Inference runtime" meta={`${formatGb(RUNTIME.sizeGb)} selected`} />
-          <Checkbox
-            label={RUNTIME.name}
-            description={`${formatGb(RUNTIME.sizeGb)} · Required. Runs every local model offline from the drive.`}
-            checked
-            disabled
-            readOnly
+          <CheckboxGroup
+            label="Models"
+            options={modelOptions}
+            value={state.models}
+            // Editing components by hand turns the setup into a custom one.
+            onValueChange={(models) => update({ models: models as ModelId[], preset: "custom" })}
+          />
+          {state.models.includes("custom") ? (
+            <TextField
+              ref={customPathRef}
+              label="GGUF file path"
+              placeholder="File location"
+              leadingIcon={<FileIcon />}
+              size="md"
+              value={state.customModelPath}
+              error={customPathError}
+              onChange={(event) => update({ customModelPath: event.target.value })}
+            />
+          ) : null}
+        </Stack>
+        <Stack gap={5}>
+          <CheckboxGroup label="Inference runtime" options={runtimeOptions} value={["llama.cpp"]} onValueChange={() => {}} />
+          <Select
+            label="Execution backend"
+            options={backendOptions}
+            value={state.backend}
+            hint="The runtime detects the host's supported acceleration backends when AiDEX starts."
+            onChange={(event) => update({ backend: event.target.value as Backend })}
           />
         </Stack>
-      </section>
-      <ComponentChecklist
-        title="Acceleration backends"
-        group="backends"
-        selections={selections}
-        onToggle={onToggle}
-        note="AiDEX picks the fastest available backend on each computer. Host details are sample values in this preview."
-      />
-    </Stack>
+      </Grid>
+      <Text tone="muted">Models shown are sample package choices. This preview does not download or inspect files.</Text>
+    </>
   );
 }

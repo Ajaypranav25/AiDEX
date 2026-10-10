@@ -1,3 +1,3 @@
-# Installation and verification (screen 34)
+# Install step
 
-`InstallationStep` summarizes the choices, then plays a timer-driven visual preview of the installation stages with a progress bar, step list, and activity log (`../../lib/usePreviewRun.ts`). Every stage is labelled as simulated; the application does not modify drives.
+Step 6: review the choices, then run a visual preview that animates each installation stage. Nothing is written, and the finished state reports checks as "Not run in preview" rather than claiming success.

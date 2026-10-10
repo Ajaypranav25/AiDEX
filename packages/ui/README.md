@@ -32,10 +32,11 @@ Every component accepts its root element's props (including `ref` and `className
 | `TextArea` | `label`, `labelVisibility`, `hint`, `error`, `monospace` |
 | `Select` | `label`, `labelVisibility`, `options: { value, label }[]`, `variant` field · ghost, `hint` |
 | `Checkbox` | `label`, `description` |
+| `CheckboxGroup` | `label`, `options: { value, title, description?, meta?, disabled? }[]`, `value: string[]`, `onValueChange` (ruled rows) |
 | `Switch` | `checked`, `onCheckedChange`, `label` (when no visible `<label htmlFor>`) |
 | `SegmentedControl` | `label`, `options`, `value`, `onValueChange`, `size` sm · md (radio-group semantics) |
 | `Tabs` + `TabPanel` | `id`, `label`, `items: { value, label, icon?, count? }[]`, `value`, `onValueChange`, `variant` pill · underline; wrap the selected content in `<TabPanel tabsId={id} value={value}>` |
-| `ChoiceCardGroup` | `label`, `options: { value, title, description?, icon?, meta?, disabled? }[]`, `value`, `onValueChange`, `columns` 1 · 2 · 3 |
+| `ChoiceCardGroup` | `label`, `options: { value, title, description?, icon?, meta?, disabled? }[]`, `value`, `onValueChange`, `columns` 1 · 2 · 3, `variant` cards · rows |
 | `SwatchPicker` | `label`, `swatches: { value, label }[]`, `value`, `onValueChange`, `allowCustom` |
 | `Badge` | `tone` accent · success · neutral, `icon` |
 | `StatusIndicator` | `label`, `tone` success · warning · neutral (dot plus text) |
@@ -58,6 +59,7 @@ Every component accepts its root element's props (including `ref` and `className
 | `SectionHeader` | `title`, `level` 2 · 3, `meta`, `actions` |
 | `Brand` | `name`, `size` md · lg · xl, `layout` inline · stacked |
 | `Composer` | `value`, `onValueChange`, `onSubmit`, `onAttach`, `label`, `placeholder`, `attachments`, `toolbarStart`, `toolbarEnd`, `size` default · compact |
+| `Notice` | `tone` info · success · warning · danger, `variant` plain · banner (pass `role="alert"` for errors) |
 | `MediaItem` | `media`, `title`, `description`, `trailing`, `titleLevel`, `size` md · lg |
 | `InfoCard` | `icon`, `status`, `label`, `value`, `detail` |
 | `ToastRegion` | `toasts: { id, message, tone? }[]`, `onDismiss` |
@@ -97,9 +99,9 @@ Every component accepts its root element's props (including `ref` and `className
 
 | Component | Key props |
 | --- | --- |
-| `WizardLayout` | `title`, `badge`, `steps` (a `Stepper`), `aside`, `footer`, `contentRef`; brand header, step rail, scrolling content, pinned footer |
-| `WizardFooter` | `back`, `status` (polite live text, e.g. why Next is disabled), `statusId`, `next` |
-| `Stepper` | `label`, `steps: { id, title, description?, status: complete · current · upcoming }[]`, `onSelect` (completed steps only) |
+| `SetupWindow` | `title`, `subtitle`, `badge`, `steps` (a `StepTrack`), `footer` (a `SetupFooter`), `contentRef`; centered window with title bar, step track, scrolling content column, pinned footer |
+| `SetupFooter` | `note` (polite live text), `noteId`, action buttons as children |
+| `StepTrack` | `label`, `steps: { id, title, status: complete · current · upcoming, reachable? }[]`, `onSelect` |
 
 ## Checks
 

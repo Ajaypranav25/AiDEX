@@ -4,6 +4,6 @@ Installer-specific UI components belong here. Keep cross-device components in `.
 
 | Component | Key props |
 | --- | --- |
-| `WizardLayout` | `title`, `badge`, `steps` (rail, typically a `Stepper`), `aside` (under the steps), `footer`, `contentRef`; full-window frame with a brand header, step rail, scrolling content, and pinned footer |
-| `WizardFooter` | `back`, `status` (polite live text, e.g. why Next is disabled), `statusId`, `next` |
-| `Stepper` | `label`, `steps: { id, title, description?, status: complete · current · upcoming }[]`, `onSelect` (completed steps only) |
+| `SetupWindow` | `title`, `subtitle`, `badge`, `steps` (a `StepTrack`), `footer` (a `SetupFooter`), `contentRef`; a centered window with title bar, step track, scrolling content column, and pinned footer |
+| `SetupFooter` | `note` (polite live text, e.g. step progress or why Continue is unavailable), `noteId`, action buttons as children |
+| `StepTrack` | `label`, `steps: { id, title, status: complete · current · upcoming, reachable? }[]`, `onSelect` (reachable, non-current steps only) |

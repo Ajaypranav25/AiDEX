@@ -1,0 +1,41 @@
+.group {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.legend {
+  margin-bottom: var(--aidex-space-3);
+  padding: 0;
+}
+
+.rows {
+  border-top: 1px solid var(--aidex-color-border-subtle);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--aidex-space-4);
+  border-bottom: 1px solid var(--aidex-color-border-subtle);
+}
+
+.row:hover {
+  background: color-mix(in srgb, var(--aidex-color-text) 3%, transparent);
+}
+
+/* The checkbox label fills the row so the whole line toggles. */
+.checkbox {
+  flex: 1;
+  min-width: 0;
+  padding: var(--aidex-space-4) var(--aidex-space-1);
+}
+
+.meta {
+  flex: none;
+  padding-right: var(--aidex-space-1);
+  color: var(--aidex-color-text-muted);
+  font-size: 13px;
+  white-space: nowrap;
+}

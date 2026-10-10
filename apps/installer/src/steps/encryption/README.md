@@ -1,3 +1,3 @@
-# Encryption and identity (screen 33)
+# Security step
 
-`EncryptionStep` collects the workspace owner name, a vault password with length, match, and strength checks, and shows a fixed sample recovery key with copy and download actions that only explain they are not available yet. The passwords stay in the step's local state and are discarded when the step unmounts; the wizard only learns whether they pass validation. Encryption is not implemented.
+Step 5: a password-protected vault is the default because durable private data is stored encrypted (`docs/security.md`). The no-password mode is available but marked "Not recommended". Passwords need at least 10 characters, a "Fair" strength, and a matching confirmation; they are discarded when the step closes.

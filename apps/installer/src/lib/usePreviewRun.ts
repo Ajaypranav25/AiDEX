@@ -1,60 +1,47 @@
 import { useCallback, useEffect, useState } from "react";
-import type { ActivityEntry } from "@aidex/ui/components";
 
-export type RunPhase = "idle" | "running" | "finished";
+export type RunPhase = "review" | "running" | "finished";
 
-export type PreviewTask = {
-  title: string;
-  /** What the real installer will do in this stage. */
-  plan: string;
-};
+/** What the real installer will do, in order. The preview only animates through them. */
+export const previewTasks = [
+  "Preparing destination directory",
+  "Staging AiDEX runtime",
+  "Configuring models and toolchains",
+  "Applying vault settings",
+  "Verifying the setup",
+] as const;
 
-const STAGE_DURATION_MS = 1100;
-
-function clock(seconds: number): string {
-  const minutes = Math.floor(seconds / 60);
-  return `${String(minutes).padStart(2, "0")}:${String(seconds % 60).padStart(2, "0")}`;
-}
+const TICK_MS = 80;
+const STEP_PERCENT = 2;
 
 /**
- * Drives the visual installation preview on a timer. It never touches the drive: each stage only
- * advances a counter and appends a log line that says the stage was simulated.
+ * Drives the visual installation preview on a timer. It never touches the drive: progress is a
+ * number that climbs to 100, and the current task is derived from it.
  */
-export function usePreviewRun(tasks: readonly PreviewTask[]) {
-  const [phase, setPhase] = useState<RunPhase>("idle");
-  const [completed, setCompleted] = useState(0);
-  const [entries, setEntries] = useState<readonly ActivityEntry[]>([]);
+export function usePreviewRun() {
+  const [phase, setPhase] = useState<RunPhase>("review");
+  const [percent, setPercent] = useState(0);
 
   useEffect(() => {
     if (phase !== "running") return;
-    const timer = setTimeout(() => {
-      const task = tasks[completed];
-      const next = completed + 1;
-      const elapsed = clock(Math.round((next * STAGE_DURATION_MS) / 1000));
-      const stageEntry: ActivityEntry = { id: `stage-${next}`, time: elapsed, text: `${task?.title ?? "Stage"}: simulated, nothing written.` };
-      const done = next >= tasks.length;
-      setCompleted(next);
-      setEntries((current) =>
-        done
-          ? [...current, stageEntry, { id: "finished", time: elapsed, text: "Preview run finished. The drive was not changed.", tone: "accent" }]
-          : [...current, stageEntry],
-      );
-      if (done) setPhase("finished");
-    }, STAGE_DURATION_MS);
+    if (percent >= 100) {
+      setPhase("finished");
+      return;
+    }
+    const timer = setTimeout(() => setPercent((value) => Math.min(100, value + STEP_PERCENT)), TICK_MS);
     return () => clearTimeout(timer);
-  }, [phase, completed, tasks]);
+  }, [phase, percent]);
 
   const start = useCallback(() => {
-    setCompleted(0);
-    setEntries([{ id: "start", time: clock(0), text: "Preview run started. This is a visual walkthrough only.", tone: "accent" }]);
+    setPercent(0);
     setPhase("running");
   }, []);
 
   const reset = useCallback(() => {
-    setPhase("idle");
-    setCompleted(0);
-    setEntries([]);
+    setPercent(0);
+    setPhase("review");
   }, []);
 
-  return { phase, completed, entries, start, reset };
+  const taskIndex = Math.min(previewTasks.length - 1, Math.floor(percent / (100 / previewTasks.length)));
+  return { phase, percent, taskIndex, start, reset };
 }

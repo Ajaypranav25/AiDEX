@@ -1,3 +1,2 @@
-// Installer-specific components are exported here.
-export { Stepper, type StepperProps, type StepperStatus, type StepperStep } from "./Stepper";
-export { WizardFooter, WizardLayout, type WizardFooterProps, type WizardLayoutProps } from "./WizardLayout";
+export { SetupFooter, SetupWindow, type SetupFooterProps, type SetupWindowProps } from "./SetupWindow";
+export { StepTrack, type StepTrackProps, type StepTrackStatus, type StepTrackStep } from "./StepTrack";
