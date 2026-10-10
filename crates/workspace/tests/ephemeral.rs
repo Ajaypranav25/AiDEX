@@ -690,3 +690,70 @@ fn newly_ignored_baseline_files_still_count_toward_review_limits() {
     fs::remove_file(tree.root().join("new")).unwrap();
     assert_eq!(registry.review(&copy.id).unwrap().changes.len(), 1);
 }
+
+#[test]
+fn separate_git_dir_excludes_apply_to_repository_and_subdirectory_sources() {
+    for absolute in [false, true] {
+        let drive = Drive::new();
+        let layout = project(&[
+            ("metadata/info/exclude", "/app/private.txt\n"),
+            ("repo/app/private.txt", "excluded"),
+            ("repo/app/keep.txt", "kept"),
+        ]);
+        let repo = layout.path().join("repo");
+        let target = if absolute {
+            layout.path().join("metadata").to_string_lossy().into_owned()
+        } else {
+            "../metadata".into()
+        };
+        write(&repo, ".git", &format!("gitdir: {target}\r\n"));
+        let registry = drive.registry();
+        for (name, source_root, kept) in [
+            ("root", repo.clone(), "app/keep.txt"),
+            ("subdir", repo.join("app"), "keep.txt"),
+        ] {
+            let source = registry.add_host(&source_root, Some(name)).unwrap();
+            let copy = registry.create_ephemeral(&source.id).unwrap().workspace;
+            let tree = registry.confined_root(&copy.id).unwrap();
+            assert_eq!(files_under(tree.root()), [kept]);
+            let base = tree.root().parent().unwrap();
+            let baseline = fs::read_to_string(base.join(BASELINE_FILE)).unwrap();
+            assert!(!baseline.contains("private.txt"));
+            assert!(registry.review(&copy.id).unwrap().changes.is_empty());
+        }
+    }
+}
+
+#[test]
+fn linked_worktree_excludes_come_from_commondir_not_private_gitdir() {
+    let drive = Drive::new();
+    let layout = project(&[
+        ("shared/info/exclude", "/app/private.txt\n"),
+        ("shared/worktrees/topic/commondir", "../..\n"),
+        ("shared/worktrees/topic/info/exclude", "/app/keep.txt\n"),
+        ("repo/.git", "gitdir: ../shared/worktrees/topic\n"),
+        ("repo/app/private.txt", "excluded"),
+        ("repo/app/keep.txt", "kept"),
+    ]);
+    let registry = drive.registry();
+    let source = registry.add_host(&layout.path().join("repo/app"), None).unwrap();
+    let copy = registry.create_ephemeral(&source.id).unwrap().workspace;
+    let tree = registry.confined_root(&copy.id).unwrap();
+    assert_eq!(files_under(tree.root()), ["keep.txt"]);
+    assert!(registry.review(&copy.id).unwrap().changes.is_empty());
+}
+
+#[test]
+fn malformed_gitdir_files_do_not_load_unrelated_excludes() {
+    let drive = Drive::new();
+    let layout = project(&[
+        ("metadata/info/exclude", "*.txt\n"),
+        ("repo/.git", "../metadata\n"),
+        ("repo/keep.txt", "kept"),
+    ]);
+    let registry = drive.registry();
+    let source = registry.add_host(&layout.path().join("repo"), None).unwrap();
+    let copy = registry.create_ephemeral(&source.id).unwrap().workspace;
+    let tree = registry.confined_root(&copy.id).unwrap();
+    assert_eq!(files_under(tree.root()), ["keep.txt"]);
+}
