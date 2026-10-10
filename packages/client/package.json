@@ -1,0 +1,25 @@
+{
+  "name": "@aidex/client",
+  "private": true,
+  "version": "0.1.0",
+  "sideEffects": false,
+  "exports": {
+    "./bridge": "./src/bridge.ts",
+    "./desktop": "./src/desktop.ts",
+    "./errors": "./src/errors.ts",
+    "./format": "./src/format.ts",
+    "./host": "./src/host.ts",
+    "./installer": "./src/installer.ts",
+    "./rpc": "./src/rpc.ts",
+    "./dto/*": "./src/dto/*.ts"
+  },
+  "scripts": {
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.8.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.8.3"
+  }
+}

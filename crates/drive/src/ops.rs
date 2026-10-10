@@ -67,6 +67,25 @@ impl Default for InitOptions {
     }
 }
 
+/// Options for [`status_with`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct StatusOptions {
+    /// Require the root to be a recognized removable volume (default `true`).
+    ///
+    /// `false` lets frontends report the health of an explicitly chosen developer
+    /// folder (for example `AIDEX_DRIVE_ROOT` pointing at a temporary directory);
+    /// [`status`] never skips the check.
+    pub require_removable: bool,
+}
+
+impl Default for StatusOptions {
+    fn default() -> Self {
+        Self {
+            require_removable: true,
+        }
+    }
+}
+
 /// Resolve an explicit drive root or `AIDEX_DRIVE_ROOT` from a portable launcher.
 pub fn resolve_root(explicit: Option<&Path>) -> Result<PathBuf, DriveError> {
     let root = match explicit {
@@ -125,8 +144,19 @@ pub fn init_with(root: impl AsRef<Path>, options: InitOptions) -> Result<DriveSt
 /// Inspect drive health without creating directories or repairing a manifest.
 /// A schema-v1 drive succeeds and reports [`DriveStatus::migration_required`].
 pub fn status(root: impl AsRef<Path>) -> Result<DriveStatus, DriveError> {
+    status_with(root, StatusOptions::default())
+}
+
+/// [`status`] with explicit options; see [`StatusOptions::require_removable`].
+/// Never creates directories or repairs a manifest.
+pub fn status_with(
+    root: impl AsRef<Path>,
+    options: StatusOptions,
+) -> Result<DriveStatus, DriveError> {
     let root = resolve_root(Some(root.as_ref()))?;
-    require_removable(&root)?;
+    if options.require_removable {
+        require_removable(&root)?;
+    }
     let writable = writable_probe(&root).is_ok();
     let free_bytes = available_bytes(&root).ok();
     status_at(&root, writable, free_bytes)

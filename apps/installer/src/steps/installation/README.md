@@ -1,3 +1,3 @@
 # Install step
 
-Step 6: review the choices, then run a visual preview that animates each installation stage. Nothing is written, and the finished state reports checks as "Not run in preview" rather than claiming success.
+Step 6: review the choices, then set up the drive for real through `useInstallRun` (`../../lib/useInstallRun.ts`): `inspect_drive` (must be eligible), `init_drive` (creates only the manifest-declared AiDEX folders and `aidex-drive.json`; migrates a schema v1 manifest with a backup; never formats or deletes), then `inspect_drive` again to verify the manifest. Progress counts these three steps. Copying the app bundle (#26), creating the vault (on first launch of AiDEX), importing models (#15), and installing agents (#23, #24) are listed as "not available yet" or "skipped", never simulated or reported as done. A failure stops the run and shows the backend error; "Try again" is safe because init is idempotent.
