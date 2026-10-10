@@ -30,7 +30,9 @@ fn repository() -> Fixture {
     }
     let mut session = String::from("//! Session token refresh.\n\n");
     for line in 0..150 {
-        session.push_str(&format!("// filler line {line} about nothing in particular\n"));
+        session.push_str(&format!(
+            "// filler line {line} about nothing in particular\n"
+        ));
         if line % 40 == 0 {
             session.push('\n');
         }
@@ -95,33 +97,45 @@ fn packs_never_exceed_the_budget() {
             budget,
         )
         .with_paths(vec![wp("src/unrelated/u001.rs")])
-        .with_summaries(vec!["Earlier: we traced the failure to token renewal.".into()]);
-        let pack = fixture.service.assemble(&fixture.target(), &request).unwrap();
+        .with_summaries(vec![
+            "Earlier: we traced the failure to token renewal.".into(),
+        ]);
+        let pack = fixture
+            .service
+            .assemble(&fixture.target(), &request)
+            .unwrap();
         let sum: usize = pack.items.iter().map(|item| item.tokens).sum();
         assert_eq!(pack.total_tokens, sum);
-        assert!(pack.total_tokens <= budget, "budget {budget}: {}", pack.total_tokens);
+        assert!(
+            pack.total_tokens <= budget,
+            "budget {budget}: {}",
+            pack.total_tokens
+        );
         for item in &pack.items {
             assert_eq!(item.tokens, estimator.estimate(&item.text));
-            assert!(item.text.starts_with(&format!(
-                "{DELIMITER_PREFIX}context nonce={} ",
-                pack.nonce
-            )));
-            assert!(item
-                .text
-                .ends_with(&format!("{DELIMITER_PREFIX}end nonce={}>>>\n", pack.nonce)));
+            assert!(
+                item.text
+                    .starts_with(&format!("{DELIMITER_PREFIX}context nonce={} ", pack.nonce))
+            );
+            assert!(
+                item.text
+                    .ends_with(&format!("{DELIMITER_PREFIX}end nonce={}>>>\n", pack.nonce))
+            );
         }
         if budget <= 7 {
             assert!(pack.items.is_empty());
             assert!(!pack.dropped.is_empty());
         }
     }
-    assert!(fixture
-        .service
-        .assemble(
-            &fixture.target(),
-            &PackRequest::new(fixture.workspace.clone(), "x", 0)
-        )
-        .is_err());
+    assert!(
+        fixture
+            .service
+            .assemble(
+                &fixture.target(),
+                &PackRequest::new(fixture.workspace.clone(), "x", 0)
+            )
+            .is_err()
+    );
 }
 
 #[test]
@@ -139,7 +153,10 @@ fn packs_select_relevant_chunks_instead_of_dumping_the_repository() {
         )
         .unwrap();
     let paths = file_paths(&pack);
-    assert_eq!(paths.first().map(String::as_str), Some("src/auth/session.rs"));
+    assert_eq!(
+        paths.first().map(String::as_str),
+        Some("src/auth/session.rs")
+    );
     let distinct: HashSet<&String> = paths.iter().collect();
     assert!(distinct.len() < 40, "{} files", distinct.len());
     let session_items: Vec<_> = pack
@@ -196,7 +213,10 @@ fn every_source_is_delimited_with_its_trust_level() {
             .map(|item| item.trust)
             .collect()
     };
-    assert_eq!(trust_of(&|source| *source == ContextSource::Rule), [Trust::Project]);
+    assert_eq!(
+        trust_of(&|source| *source == ContextSource::Rule),
+        [Trust::Project]
+    );
     assert_eq!(
         trust_of(&|source| matches!(source, ContextSource::ProjectInstructions { .. })),
         [Trust::Project]
@@ -208,9 +228,11 @@ fn every_source_is_delimited_with_its_trust_level() {
     let mut memories = trust_of(&|source| matches!(source, ContextSource::Memory { .. }));
     memories.sort_by_key(|trust| trust.as_str());
     assert_eq!(memories, [Trust::Untrusted, Trust::User]);
-    assert!(trust_of(&|source| matches!(source, ContextSource::File { .. }))
-        .iter()
-        .all(|trust| *trust == Trust::Untrusted));
+    assert!(
+        trust_of(&|source| matches!(source, ContextSource::File { .. }))
+            .iter()
+            .all(|trust| *trust == Trust::Untrusted)
+    );
     // Rules come first, then project guidance.
     assert_eq!(pack.items[0].source, ContextSource::Rule);
     assert!(pack.items[0].text.contains("never modify: migrations"));
@@ -247,10 +269,12 @@ fn explicit_files_come_first_and_are_cut_to_fit() {
     };
     assert_eq!(lines.start, 1);
     assert!(lines.end > 250);
-    assert!(whole
-        .dropped
-        .iter()
-        .any(|dropped| dropped.reason == DropReason::NotIndexed));
+    assert!(
+        whole
+            .dropped
+            .iter()
+            .any(|dropped| dropped.reason == DropReason::NotIndexed)
+    );
 
     let cut = fixture
         .service
@@ -258,11 +282,16 @@ fn explicit_files_come_first_and_are_cut_to_fit() {
         .unwrap();
     assert!(cut.total_tokens <= 900);
     assert_eq!(cut.items.len(), 1);
-    assert!(cut.items[0].text.contains("omitted to fit the context budget"));
-    assert!(cut
-        .dropped
-        .iter()
-        .any(|dropped| dropped.reason == DropReason::Budget));
+    assert!(
+        cut.items[0]
+            .text
+            .contains("omitted to fit the context budget")
+    );
+    assert!(
+        cut.dropped
+            .iter()
+            .any(|dropped| dropped.reason == DropReason::Budget)
+    );
 }
 
 #[test]
@@ -291,7 +320,11 @@ fn packs_work_from_sources_without_a_service() {
         memory: None,
         estimator: &estimator,
     };
-    let pack = assemble(&empty, &PackRequest::new(fixture.workspace.clone(), "x", 10)).unwrap();
+    let pack = assemble(
+        &empty,
+        &PackRequest::new(fixture.workspace.clone(), "x", 10),
+    )
+    .unwrap();
     assert!(pack.items.is_empty());
     assert_eq!(pack.index_state, aidex_context::IndexState::Empty);
 }

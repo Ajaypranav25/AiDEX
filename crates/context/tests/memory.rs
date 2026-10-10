@@ -5,8 +5,8 @@ mod common;
 use std::fs;
 
 use aidex_context::{
-    ContextSource, DropReason, FileMemoryStore, MemoryEdit, MemoryError, MemoryScope,
-    MemorySource, MemoryStore, NewMemory, PackRequest, Trust,
+    ContextSource, DropReason, FileMemoryStore, MemoryEdit, MemoryError, MemoryScope, MemorySource,
+    MemoryStore, NewMemory, PackRequest, Trust,
 };
 use aidex_core::EntityId;
 use common::*;
@@ -27,7 +27,10 @@ fn every_scope_is_listable_editable_and_removable() {
         session_id: id("ses_one"),
     };
     let user = store
-        .add(&MemoryScope::User, NewMemory::user("Prefer tabs").with_tags(["Style"]))
+        .add(
+            &MemoryScope::User,
+            NewMemory::user("Prefer tabs").with_tags(["Style"]),
+        )
         .unwrap();
     assert_eq!(user.tags, ["style"]);
     assert_eq!(user.source, MemorySource::User);
@@ -42,7 +45,10 @@ fn every_scope_is_listable_editable_and_removable() {
         .unwrap();
     assert!(agent.source.is_agent());
     store
-        .add(&session, NewMemory::agent(id("ses_one"), "Halfway through the refactor"))
+        .add(
+            &session,
+            NewMemory::agent(id("ses_one"), "Halfway through the refactor"),
+        )
         .unwrap();
 
     // Human-editable files in the documented locations.
@@ -57,7 +63,11 @@ fn every_scope_is_listable_editable_and_removable() {
     assert_eq!(listed, [build.clone(), agent.clone()]);
 
     let edited = store
-        .edit(&workspace, &build.id, MemoryEdit::by_user().text("Build with `bun run build:all`"))
+        .edit(
+            &workspace,
+            &build.id,
+            MemoryEdit::by_user().text("Build with `bun run build:all`"),
+        )
         .unwrap();
     assert_eq!(edited.text, "Build with `bun run build:all`");
     assert_eq!(edited.created_at, build.created_at);
@@ -116,7 +126,11 @@ fn secret_like_memories_are_rejected_and_never_stored() {
     }
     let entry = store.add(&scope, NewMemory::user("harmless")).unwrap();
     assert_eq!(
-        store.edit(&scope, &entry.id, MemoryEdit::by_user().text(format!("now {token}"))),
+        store.edit(
+            &scope,
+            &entry.id,
+            MemoryEdit::by_user().text(format!("now {token}"))
+        ),
         Err(MemoryError::SecretLike)
     );
     let file = fs::read_to_string(drive.paths().memory().join("user.toml")).unwrap();
@@ -134,7 +148,10 @@ fn hand_edited_memory_files_are_validated_and_secrets_are_not_packed() {
         workspace_id: fixture.workspace.clone(),
     };
     let kept = memory
-        .add(&workspace, NewMemory::user("deploy runs from the release branch"))
+        .add(
+            &workspace,
+            NewMemory::user("deploy runs from the release branch"),
+        )
         .unwrap();
     let agent = memory
         .add(
@@ -172,12 +189,16 @@ fn hand_edited_memory_files_are_validated_and_secrets_are_not_packed() {
     assert_eq!(memory_items.len(), 1);
     assert_eq!(memory_items[0].trust, Trust::User);
     assert!(memory_items[0].text.contains(&kept.text));
-    assert!(pack.dropped.iter().any(|dropped| dropped.reason == DropReason::SecretLike
-        && dropped.source
-            == ContextSource::Memory {
-                scope: aidex_context::MemoryScopeKind::Workspace,
-                id: agent.id.clone()
-            }));
+    assert!(
+        pack.dropped
+            .iter()
+            .any(|dropped| dropped.reason == DropReason::SecretLike
+                && dropped.source
+                    == ContextSource::Memory {
+                        scope: aidex_context::MemoryScopeKind::Workspace,
+                        id: agent.id.clone()
+                    })
+    );
 
     // An invalid file is reported, never silently replaced.
     fs::write(&path, "schema_version = 1\n[[entries]]\nid = 3\n").unwrap();

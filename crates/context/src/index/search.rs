@@ -140,7 +140,8 @@ pub(crate) struct ChunkRow {
     pub mtime_ns: i64,
 }
 
-const CHUNK_COLUMNS: &str = "c.id, c.file_id, f.path, c.ordinal, c.start_line, c.end_line, c.text, f.size, f.mtime_ns";
+const CHUNK_COLUMNS: &str =
+    "c.id, c.file_id, f.path, c.ordinal, c.start_line, c.end_line, c.text, f.size, f.mtime_ns";
 
 fn chunk_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<ChunkRow> {
     Ok(ChunkRow {
@@ -239,10 +240,16 @@ fn validate(query: &Query) -> Result<(String, Option<String>), ContextError> {
             "limit must be between 1 and {MAX_SEARCH_LIMIT}"
         )));
     }
-    Ok((text.to_owned(), normalize_prefix(query.path_prefix.as_deref())?))
+    Ok((
+        text.to_owned(),
+        normalize_prefix(query.path_prefix.as_deref())?,
+    ))
 }
 
-pub(super) fn search(connection: &Connection, query: &Query) -> Result<Vec<SearchHit>, ContextError> {
+pub(super) fn search(
+    connection: &Connection,
+    query: &Query,
+) -> Result<Vec<SearchHit>, ContextError> {
     let (text, prefix) = validate(query)?;
     let mut hits = match query.mode {
         SearchMode::Lexical => lexical(connection, &text, prefix.as_deref(), query.limit)?,
@@ -506,7 +513,8 @@ pub(crate) fn symbol_rows(
     let lower = name.to_lowercase();
     let mut ranked = Vec::new();
     for row in rows {
-        let (found, kind, line, file_id, path, language) = row.map_err(sql("symbol search failed"))?;
+        let (found, kind, line, file_id, path, language) =
+            row.map_err(sql("symbol search failed"))?;
         let Ok(kind) = kind.parse::<SymbolKind>() else {
             continue;
         };
@@ -556,9 +564,7 @@ pub(crate) fn chunk_at_line(
     let mut rows = statement
         .query_map(params![file_id, line], chunk_row)
         .map_err(sql("chunk lookup failed"))?;
-    rows.next()
-        .transpose()
-        .map_err(sql("chunk lookup failed"))
+    rows.next().transpose().map_err(sql("chunk lookup failed"))
 }
 
 /// The chunk of `file_id` with `ordinal`.
@@ -576,13 +582,14 @@ pub(crate) fn chunk_by_ordinal(
     let mut rows = statement
         .query_map(params![file_id, ordinal], chunk_row)
         .map_err(sql("chunk lookup failed"))?;
-    rows.next()
-        .transpose()
-        .map_err(sql("chunk lookup failed"))
+    rows.next().transpose().map_err(sql("chunk lookup failed"))
 }
 
 /// Every chunk of the file at `path`, in order (empty when not indexed).
-pub(crate) fn file_chunks(connection: &Connection, path: &str) -> Result<Vec<ChunkRow>, ContextError> {
+pub(crate) fn file_chunks(
+    connection: &Connection,
+    path: &str,
+) -> Result<Vec<ChunkRow>, ContextError> {
     let mut statement = connection
         .prepare_cached(&format!(
             "SELECT {CHUNK_COLUMNS} FROM chunks c JOIN files f ON f.id = c.file_id
@@ -603,7 +610,10 @@ fn symbol(
     limit: usize,
 ) -> Result<Vec<SearchHit>, ContextError> {
     let mut hits = Vec::new();
-    for row in symbol_rows(connection, text, prefix)?.into_iter().take(limit) {
+    for row in symbol_rows(connection, text, prefix)?
+        .into_iter()
+        .take(limit)
+    {
         let snippet = chunk_at_line(connection, row.file_id, row.line)?
             .and_then(|chunk| {
                 let offset = row.line.checked_sub(chunk.start_line)? as usize;
@@ -647,7 +657,10 @@ mod tests {
 
     #[test]
     fn prefixes_are_normalized_and_validated() {
-        assert_eq!(normalize_prefix(Some("./src/")).unwrap().as_deref(), Some("src"));
+        assert_eq!(
+            normalize_prefix(Some("./src/")).unwrap().as_deref(),
+            Some("src")
+        );
         assert_eq!(normalize_prefix(Some("")).unwrap(), None);
         assert!(normalize_prefix(Some("../etc")).is_err());
         assert_eq!(like_escape("a_b%c\\"), "a\\_b\\%c\\\\");

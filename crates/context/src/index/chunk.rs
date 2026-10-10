@@ -128,7 +128,12 @@ mod tests {
         assert_eq!((chunks[2].start_line, chunks[2].end_line), (121, 130));
         let joined: String = chunks.iter().map(|chunk| chunk.text.as_str()).collect();
         assert_eq!(joined, text);
-        assert!(chunks.iter().enumerate().all(|(i, c)| c.ordinal == i as u32));
+        assert!(
+            chunks
+                .iter()
+                .enumerate()
+                .all(|(i, c)| c.ordinal == i as u32)
+        );
     }
 
     #[test]

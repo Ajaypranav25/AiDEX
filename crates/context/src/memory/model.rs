@@ -178,9 +178,14 @@ pub enum MemoryError {
     InvalidTag(String),
     InvalidScope(String),
     NotFound(EntityId),
-    TooMany { max: usize },
+    TooMany {
+        max: usize,
+    },
     /// A memory file exists but does not parse (it may have been edited by hand).
-    Corrupt { file: String, message: String },
+    Corrupt {
+        file: String,
+        message: String,
+    },
     Io(String),
 }
 
@@ -299,7 +304,10 @@ mod tests {
     #[test]
     fn text_is_trimmed_bounded_and_secret_free() {
         assert_eq!(validate_text("  use bun  ").unwrap(), "use bun");
-        assert!(matches!(validate_text("   "), Err(MemoryError::InvalidText(_))));
+        assert!(matches!(
+            validate_text("   "),
+            Err(MemoryError::InvalidText(_))
+        ));
         assert!(validate_text(&"x".repeat(MAX_MEMORY_TEXT_BYTES + 1)).is_err());
         assert!(validate_text("bell\u{7}").is_err());
         let token = format!("{}{}", "ghp_", "FAKE0fake1FAKE2fake3FAKE4fake5");

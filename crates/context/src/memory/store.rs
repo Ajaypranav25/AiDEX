@@ -7,7 +7,7 @@
 //! ```
 
 use std::{
-    path::PathBuf,
+    path::{Path, PathBuf},
     sync::Mutex,
 };
 
@@ -102,7 +102,7 @@ impl FileMemoryStore {
         Ok((path, file.entries))
     }
 
-    fn save(&self, path: &PathBuf, entries: Vec<MemoryEntry>) -> Result<(), MemoryError> {
+    fn save(&self, path: &Path, entries: Vec<MemoryEntry>) -> Result<(), MemoryError> {
         let file = MemoryFile {
             schema_version: MEMORY_SCHEMA_VERSION,
             entries,

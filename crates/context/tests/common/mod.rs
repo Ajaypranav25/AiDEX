@@ -8,7 +8,7 @@ use std::{
 };
 
 use aidex_context::{ContextService, IndexOptions, IndexTarget};
-use aidex_core::EntityId;
+use aidex_core::{CancelToken, EntityId};
 use aidex_drive::DrivePaths;
 use aidex_events::MemoryEventSink;
 use aidex_workspace::{ConfinedRoot, WorkspaceRegistry};
@@ -97,7 +97,7 @@ impl Fixture {
     /// Build synchronously without cancellation.
     pub fn build(&self) -> aidex_context::IndexReport {
         self.service
-            .build_now(&self.target(), &|| false, &mut |_| {})
+            .build_now(&self.target(), &CancelToken::new(), &mut |_| {})
             .expect("index build")
     }
 

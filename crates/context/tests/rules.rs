@@ -54,8 +54,7 @@ fn intents() -> Vec<Intent> {
             .with_remote_write(),
         intent(Action::ShellExec)
             .with_command(ShellCommand::classify("bun add zod", ShellPlatform::Unix)),
-        intent(Action::ShellExec)
-            .with_command(ShellCommand::classify("ls", ShellPlatform::Unix)),
+        intent(Action::ShellExec).with_command(ShellCommand::classify("ls", ShellPlatform::Unix)),
         intent(Action::DiskFormat),
     ]
 }

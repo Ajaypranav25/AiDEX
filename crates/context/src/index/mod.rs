@@ -19,7 +19,7 @@ use std::{
     },
 };
 
-use aidex_core::{EntityId, Timestamp};
+use aidex_core::{CancelToken, EntityId, Timestamp};
 use aidex_drive::DrivePaths;
 use aidex_workspace::{ConfinedRoot, RepositoryInfo, WorkspaceHandle};
 use rusqlite::Connection;
@@ -252,7 +252,10 @@ impl Index {
 
     /// Open the index of `workspace_id` in `DrivePaths::index()/<workspace-id>/`,
     /// creating the directory (symlinked components are refused).
-    pub fn open_on_drive(paths: &DrivePaths, workspace_id: &EntityId) -> Result<Self, ContextError> {
+    pub fn open_on_drive(
+        paths: &DrivePaths,
+        workspace_id: &EntityId,
+    ) -> Result<Self, ContextError> {
         let name = file_safe_id(workspace_id)?;
         let dir = paths.ensure_dir(&paths.index().join(name))?;
         Self::open(dir, workspace_id.clone())
@@ -284,13 +287,13 @@ impl Index {
     /// Index `target` incrementally: unchanged files (same size and modification
     /// time) are skipped, changed files are hashed and re-chunked only when their
     /// content changed, and files no longer present are removed once the walk has
-    /// completed. `is_cancelled` is checked before every file; committed batches are
-    /// kept. `progress` is called after every batch and phase change.
+    /// completed. `cancel` (explicit cancellation or its deadline) is checked before
+    /// every file; committed batches are kept. `progress` is called after every batch and phase change.
     pub fn build(
         &self,
         target: &IndexTarget,
         options: &IndexOptions,
-        is_cancelled: &dyn Fn() -> bool,
+        cancel: &CancelToken,
         progress: &mut dyn FnMut(&IndexProgress),
     ) -> Result<IndexReport, ContextError> {
         if target.workspace_id != self.workspace_id {
@@ -303,7 +306,7 @@ impl Index {
             return Err(ContextError::IndexBusy(self.workspace_id.clone()));
         }
         let _guard = BuildingGuard(&self.building);
-        indexer::build(&self.path(), target, options, is_cancelled, progress)
+        indexer::build(&self.path(), target, options, cancel, progress)
     }
 
     /// Counters, state, and repository metadata.

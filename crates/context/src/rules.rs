@@ -77,7 +77,7 @@ impl ProjectRules {
     /// declares must not be silently dropped). Unreadable instruction files are
     /// skipped; secret-looking ones are never read.
     pub fn load(root: &ConfinedRoot) -> Result<Self, ContextError> {
-        let rules = match read_confined(root, PROJECT_RULES_FILE, MAX_DOCUMENT_BYTES as u64)? {
+        let rules = match read_confined(root, PROJECT_RULES_FILE, MAX_DOCUMENT_BYTES)? {
             None => None,
             Some(file) => {
                 let text = String::from_utf8(file.bytes).map_err(|_| {
@@ -156,7 +156,9 @@ impl ProjectRules {
     }
 
     pub fn never_modify(&self) -> &[String] {
-        self.rules.as_ref().map_or(&[], |rules| rules.never_modify())
+        self.rules
+            .as_ref()
+            .map_or(&[], |rules| rules.never_modify())
     }
 
     pub fn require_approval(&self) -> &[ActionPattern] {

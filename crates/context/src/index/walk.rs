@@ -2,7 +2,7 @@
 
 use std::time::UNIX_EPOCH;
 
-use aidex_core::WorkspacePath;
+use aidex_core::{CancelToken, WorkspacePath};
 use aidex_workspace::{ConfinedRoot, parse_workspace_path};
 use ignore::WalkBuilder;
 use serde::{Deserialize, Serialize};
@@ -107,7 +107,7 @@ pub(crate) fn collect(
     root: &ConfinedRoot,
     settings: &WalkSettings,
     skipped: &mut SkipCounts,
-    is_cancelled: &dyn Fn() -> bool,
+    cancel: &CancelToken,
 ) -> Result<Option<WalkOutcome>, ContextError> {
     let base = root.root().to_path_buf();
     std::fs::read_dir(&base)
@@ -135,7 +135,7 @@ pub(crate) fn collect(
     let mut visited = 0usize;
     for result in builder.build() {
         visited += 1;
-        if visited % 256 == 0 && is_cancelled() {
+        if visited % 256 == 0 && cancel.is_stopped() {
             return Ok(None);
         }
         let Ok(entry) = result else {

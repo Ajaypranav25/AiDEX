@@ -142,7 +142,11 @@ pub(crate) fn connect(path: &Path) -> Result<Connection, ContextError> {
 }
 
 fn refuse_link(path: &Path) -> Result<(), ContextError> {
-    for candidate in [path.to_path_buf(), sidecar(path, "-wal"), sidecar(path, "-shm")] {
+    for candidate in [
+        path.to_path_buf(),
+        sidecar(path, "-wal"),
+        sidecar(path, "-shm"),
+    ] {
         if fs::symlink_metadata(&candidate).is_ok_and(|metadata| metadata.file_type().is_symlink())
         {
             return Err(ContextError::Index(format!(
@@ -315,7 +319,11 @@ pub(crate) fn meta_get(connection: &Connection, key: &str) -> Result<Option<Stri
 }
 
 /// Write a `meta` value.
-pub(crate) fn meta_set(connection: &Connection, key: &str, value: &str) -> Result<(), ContextError> {
+pub(crate) fn meta_set(
+    connection: &Connection,
+    key: &str,
+    value: &str,
+) -> Result<(), ContextError> {
     connection
         .execute(
             "INSERT INTO meta (key, value) VALUES (?1, ?2)

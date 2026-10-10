@@ -179,7 +179,10 @@ static PYTHON: LazyLock<Patterns> = LazyLock::new(|| {
             r"^\s+(?:async\s+)?def\s+([A-Za-z_][A-Za-z0-9_]*)",
         ),
         (SymbolKind::Class, r"^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)"),
-        (SymbolKind::Constant, r"^([A-Z][A-Z0-9_]+)\s*(?::[^=]+)?=[^=]"),
+        (
+            SymbolKind::Constant,
+            r"^([A-Z][A-Z0-9_]+)\s*(?::[^=]+)?=[^=]",
+        ),
     ])
 });
 
@@ -187,7 +190,10 @@ static GO: LazyLock<Patterns> = LazyLock::new(|| {
     compile(&[
         (SymbolKind::Method, r"^func\s+\([^)]*\)\s*([A-Za-z_]\w*)"),
         (SymbolKind::Function, r"^func\s+([A-Za-z_]\w*)"),
-        (SymbolKind::Struct, r"^type\s+([A-Za-z_]\w*)(?:\[[^\]]*\])?\s+struct\b"),
+        (
+            SymbolKind::Struct,
+            r"^type\s+([A-Za-z_]\w*)(?:\[[^\]]*\])?\s+struct\b",
+        ),
         (
             SymbolKind::Interface,
             r"^type\s+([A-Za-z_]\w*)(?:\[[^\]]*\])?\s+interface\b",
@@ -211,7 +217,10 @@ static C_FAMILY: LazyLock<Patterns> = LazyLock::new(|| {
             SymbolKind::Enum,
             r"^\s*(?:typedef\s+)?enum\s+(?:class\s+|struct\s+)?([A-Za-z_]\w*)\s*(?:[:{]|$)",
         ),
-        (SymbolKind::Module, r"^\s*namespace\s+([A-Za-z_]\w*)\s*\{?\s*$"),
+        (
+            SymbolKind::Module,
+            r"^\s*namespace\s+([A-Za-z_]\w*)\s*\{?\s*$",
+        ),
         (SymbolKind::Macro, r"^\s*#\s*define\s+([A-Za-z_]\w*)"),
         (
             SymbolKind::Function,

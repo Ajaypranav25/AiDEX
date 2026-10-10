@@ -69,16 +69,13 @@ pub fn is_secret_path(path: &str) -> bool {
     {
         return true;
     }
-    name.rsplit_once('.').is_some_and(|(stem, extension)| {
-        !stem.is_empty() && SECRET_EXTENSIONS.contains(&extension)
-    })
+    name.rsplit_once('.')
+        .is_some_and(|(stem, extension)| !stem.is_empty() && SECRET_EXTENSIONS.contains(&extension))
 }
 
 /// Whether a directory name should be pruned from the walk entirely.
 pub(crate) fn is_secret_dir_name(name: &str) -> bool {
-    SECRET_DIRS
-        .iter()
-        .any(|dir| dir.eq_ignore_ascii_case(name))
+    SECRET_DIRS.iter().any(|dir| dir.eq_ignore_ascii_case(name))
 }
 
 /// What to do with a text file's content.

@@ -8,7 +8,7 @@ use std::{
     time::Instant,
 };
 
-use aidex_core::{Timestamp, WorkspacePath};
+use aidex_core::{CancelToken, Timestamp, WorkspacePath};
 use aidex_workspace::Access;
 use rusqlite::{Connection, Transaction, TransactionBehavior, params};
 
@@ -32,7 +32,10 @@ struct Existing {
 enum FileOutcome {
     Unchanged,
     Touched,
-    Indexed { added: bool, redacted: bool },
+    Indexed {
+        added: bool,
+        redacted: bool,
+    },
     /// Not indexable now; any stored row is removed.
     Skipped,
 }
@@ -45,7 +48,7 @@ pub(super) fn build(
     database: &Path,
     target: &IndexTarget,
     options: &IndexOptions,
-    is_cancelled: &dyn Fn() -> bool,
+    cancel: &CancelToken,
     progress: &mut dyn FnMut(&IndexProgress),
 ) -> Result<IndexReport, ContextError> {
     if options.batch_size == 0 || options.max_files == 0 {
@@ -61,11 +64,7 @@ pub(super) fn build(
         + 1;
     schema::meta_set(&connection, meta_keys::RUNS, &run.to_string())?;
     schema::meta_set(&connection, meta_keys::STATE, "building")?;
-    schema::meta_set(
-        &connection,
-        meta_keys::LAST_RUN,
-        Timestamp::now().as_str(),
-    )?;
+    schema::meta_set(&connection, meta_keys::LAST_RUN, Timestamp::now().as_str())?;
 
     let mut report = IndexReport {
         outcome: BuildOutcome::Completed,
@@ -89,8 +88,7 @@ pub(super) fn build(
         max_files: options.max_files,
         global_excludes: options.global_excludes,
     };
-    let Some(walked) = walk::collect(&target.root, &settings, &mut report.skipped, is_cancelled)?
-    else {
+    let Some(walked) = walk::collect(&target.root, &settings, &mut report.skipped, cancel)? else {
         return finish_cancelled(&connection, report, started);
     };
     report.files_seen = walked.files.len() as u64;
@@ -108,12 +106,19 @@ pub(super) fn build(
             .map_err(sql("cannot start an index batch"))?;
         let mut cancelled = false;
         for candidate in batch {
-            if is_cancelled() {
+            if cancel.is_stopped() {
                 cancelled = true;
                 break;
             }
             let previous = existing.get(candidate.path.as_str());
-            let outcome = index_file(&transaction, target, options, candidate, previous, &mut report.skipped)?;
+            let outcome = index_file(
+                &transaction,
+                target,
+                options,
+                candidate,
+                previous,
+                &mut report.skipped,
+            )?;
             status.processed += 1;
             match outcome {
                 FileOutcome::Unchanged => {
@@ -166,8 +171,9 @@ pub(super) fn build(
         }
     }
     let metadata = repo::read(target.repository.as_ref());
-    let repository = serde_json::to_string(&metadata)
-        .map_err(|error| ContextError::Index(format!("cannot encode repository metadata: {error}")))?;
+    let repository = serde_json::to_string(&metadata).map_err(|error| {
+        ContextError::Index(format!("cannot encode repository metadata: {error}"))
+    })?;
     schema::meta_set(&transaction, meta_keys::REPOSITORY, &repository)?;
     schema::meta_set(
         &transaction,
@@ -321,7 +327,9 @@ fn index_file(
         if previous.sha256 == sha256 {
             transaction
                 .prepare_cached("UPDATE files SET size = ?1, mtime_ns = ?2 WHERE id = ?3")
-                .and_then(|mut statement| statement.execute(params![size as i64, mtime_ns, previous.id]))
+                .and_then(|mut statement| {
+                    statement.execute(params![size as i64, mtime_ns, previous.id])
+                })
                 .map_err(sql("cannot update an indexed file"))?;
             return Ok(FileOutcome::Touched);
         }
@@ -415,11 +423,18 @@ fn index_file(
                 .map_err(sql("cannot add chunks"))?;
         }
         let mut insert = transaction
-            .prepare_cached("INSERT INTO symbols (file_id, name, kind, line) VALUES (?1, ?2, ?3, ?4)")
+            .prepare_cached(
+                "INSERT INTO symbols (file_id, name, kind, line) VALUES (?1, ?2, ?3, ?4)",
+            )
             .map_err(sql("cannot add symbols"))?;
         for symbol in &found {
             insert
-                .execute(params![file_id, symbol.name, symbol.kind.as_str(), symbol.line])
+                .execute(params![
+                    file_id,
+                    symbol.name,
+                    symbol.kind.as_str(),
+                    symbol.line
+                ])
                 .map_err(sql("cannot add symbols"))?;
         }
     }

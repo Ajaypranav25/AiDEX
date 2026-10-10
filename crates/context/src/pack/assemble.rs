@@ -47,11 +47,11 @@ const NEIGHBOUR_FACTOR: f64 = 0.5;
 /// Function words left out of retrieval terms.
 const STOPWORDS: &[&str] = &[
     "a", "an", "the", "and", "or", "but", "if", "then", "else", "of", "in", "on", "at", "to",
-    "for", "from", "by", "with", "without", "into", "is", "are", "was", "were", "be", "been",
-    "it", "its", "this", "that", "these", "those", "as", "so", "do", "does", "did", "not", "no",
-    "can", "could", "should", "would", "will", "may", "might", "must", "we", "you", "i", "me",
-    "my", "our", "your", "they", "them", "their", "what", "which", "who", "when", "where", "why",
-    "how", "all", "any", "some", "there", "here", "about", "please", "make", "fix",
+    "for", "from", "by", "with", "without", "into", "is", "are", "was", "were", "be", "been", "it",
+    "its", "this", "that", "these", "those", "as", "so", "do", "does", "did", "not", "no", "can",
+    "could", "should", "would", "will", "may", "might", "must", "we", "you", "i", "me", "my",
+    "our", "your", "they", "them", "their", "what", "which", "who", "when", "where", "why", "how",
+    "all", "any", "some", "there", "here", "about", "please", "make", "fix",
 ];
 
 /// What a pack is assembled from. `index`, `rules`, and `memory` are optional so
@@ -400,10 +400,7 @@ impl<'a> Freshness<'a> {
         if metadata.file_type().is_symlink() {
             return Some(DropReason::Unreadable);
         }
-        if !metadata.is_file()
-            || metadata.len() != size
-            || file_mtime_ns(&metadata) != mtime_ns
-        {
+        if !metadata.is_file() || metadata.len() != size || file_mtime_ns(&metadata) != mtime_ns {
             return Some(DropReason::Stale);
         }
         None
@@ -613,7 +610,11 @@ fn render_file(
     let mut runs: Vec<Vec<&ChunkRow>> = Vec::new();
     for chunk in chunks.values() {
         match runs.last_mut() {
-            Some(run) if run.last().is_some_and(|last| last.ordinal + 1 == chunk.ordinal) => {
+            Some(run)
+                if run
+                    .last()
+                    .is_some_and(|last| last.ordinal + 1 == chunk.ordinal) =>
+            {
                 run.push(chunk);
             }
             _ => runs.push(vec![chunk]),
@@ -817,7 +818,10 @@ mod tests {
     #[test]
     fn prefixes_fit_by_binary_search() {
         let fitted = fit_prefix(10, 25, |count| (count, count * 5));
-        assert_eq!(fitted.map(|(count, _, tokens)| (count, tokens)), Some((5, 25)));
+        assert_eq!(
+            fitted.map(|(count, _, tokens)| (count, tokens)),
+            Some((5, 25))
+        );
         assert!(fit_prefix(10, 3, |count| (count, count * 5)).is_none());
         assert!(fit_prefix(0, 100, |count| (count, count)).is_none());
         assert_eq!(share(10, 0.3), 3);

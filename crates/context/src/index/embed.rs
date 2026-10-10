@@ -19,7 +19,10 @@ pub trait Embedder: Send + Sync {
 }
 
 fn encode(vector: &[f32]) -> Vec<u8> {
-    vector.iter().flat_map(|value| value.to_le_bytes()).collect()
+    vector
+        .iter()
+        .flat_map(|value| value.to_le_bytes())
+        .collect()
 }
 
 fn decode(bytes: &[u8]) -> Vec<f32> {
@@ -46,7 +49,11 @@ fn cosine(a: &[f32], b: &[f32]) -> f64 {
 impl Index {
     /// Embed up to `limit` chunks that have no vector for `embedder`'s model yet;
     /// returns how many were stored.
-    pub fn embed_missing(&self, embedder: &dyn Embedder, limit: usize) -> Result<usize, ContextError> {
+    pub fn embed_missing(
+        &self,
+        embedder: &dyn Embedder,
+        limit: usize,
+    ) -> Result<usize, ContextError> {
         let pending: Vec<(i64, String)> = self.with_reader(|connection| {
             let mut statement = connection
                 .prepare(
@@ -98,11 +105,9 @@ impl Index {
         text: &str,
         limit: usize,
     ) -> Result<Vec<SearchHit>, ContextError> {
-        let query = embedder
-            .embed(&[text])?
-            .into_iter()
-            .next()
-            .ok_or_else(|| ContextError::InvalidRequest("the embedder returned no vector".into()))?;
+        let query = embedder.embed(&[text])?.into_iter().next().ok_or_else(|| {
+            ContextError::InvalidRequest("the embedder returned no vector".into())
+        })?;
         let terms = search::query_terms(text);
         self.with_reader(|connection| {
             let mut statement = connection

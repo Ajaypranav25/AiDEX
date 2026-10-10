@@ -8,15 +8,12 @@
 
 use std::{
     collections::HashMap,
-    sync::{
-        Arc, Mutex, MutexGuard,
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::{Arc, Mutex, MutexGuard},
     thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
 
-use aidex_core::{EntityId, Timestamp};
+use aidex_core::{CancelToken, EntityId, Timestamp};
 use aidex_drive::DrivePaths;
 use aidex_events::{EventKind, EventScope, EventSink};
 use aidex_workspace::ConfinedRoot;
@@ -86,7 +83,7 @@ pub struct IndexJobStarted {
 
 struct Job {
     status: Mutex<IndexJobStatus>,
-    cancel: Arc<AtomicBool>,
+    cancel: CancelToken,
     handle: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -206,7 +203,7 @@ impl ContextService {
                 error: None,
                 event_error: None,
             }),
-            cancel: Arc::new(AtomicBool::new(false)),
+            cancel: CancelToken::new(),
             handle: Mutex::new(None),
         });
         emit(
@@ -256,7 +253,7 @@ impl ContextService {
         let jobs = lock(&self.jobs);
         match jobs.get(workspace) {
             Some(job) if job.status().state == JobState::Running => {
-                job.cancel.store(true, Ordering::SeqCst);
+                job.cancel.cancel();
                 true
             }
             _ => false,
@@ -277,11 +274,11 @@ impl ContextService {
     pub fn build_now(
         &self,
         target: &IndexTarget,
-        is_cancelled: &dyn Fn() -> bool,
+        cancel: &CancelToken,
         progress: &mut dyn FnMut(&IndexProgress),
     ) -> Result<IndexReport, ContextError> {
         let index = self.index(&target.workspace_id)?;
-        index.build(target, &self.options, is_cancelled, progress)
+        index.build(target, &self.options, cancel, progress)
     }
 
     /// The index summary and the latest job of `workspace`.
@@ -297,7 +294,11 @@ impl ContextService {
         })
     }
 
-    pub fn search(&self, workspace: &EntityId, query: &Query) -> Result<Vec<SearchHit>, ContextError> {
+    pub fn search(
+        &self,
+        workspace: &EntityId,
+        query: &Query,
+    ) -> Result<Vec<SearchHit>, ContextError> {
         self.index(workspace)?.search(query)
     }
 
@@ -337,7 +338,7 @@ impl ContextService {
     pub fn shutdown(&self) {
         let jobs: Vec<Arc<Job>> = lock(&self.jobs).values().map(Arc::clone).collect();
         for job in &jobs {
-            job.cancel.store(true, Ordering::SeqCst);
+            job.cancel.cancel();
         }
         for job in jobs {
             if let Some(handle) = lock(&job.handle).take() {
@@ -392,13 +393,9 @@ fn run_job(
             task_id: task_id.clone(),
         },
     );
-    let cancel = Arc::clone(&job.cancel);
-    let result = index.build(
-        target,
-        options,
-        &|| cancel.load(Ordering::SeqCst),
-        &mut |progress| job.status().progress = progress.clone(),
-    );
+    let result = index.build(target, options, &job.cancel, &mut |progress| {
+        job.status().progress = progress.clone()
+    });
     match result {
         Ok(report) => {
             let cancelled = report.outcome == BuildOutcome::Cancelled;

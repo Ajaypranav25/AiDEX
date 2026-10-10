@@ -134,8 +134,12 @@ pub enum ContextSource {
         id: EntityId,
     },
     /// A harness-provided summary, by position in the request.
-    Summary { index: usize },
-    ProjectInstructions { path: WorkspacePath },
+    Summary {
+        index: usize,
+    },
+    ProjectInstructions {
+        path: WorkspacePath,
+    },
 }
 
 /// How much the model may rely on an item (spec §91).
