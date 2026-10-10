@@ -78,6 +78,8 @@ Types:
 - An interrupted write leaves the previous committed state readable; stray temp files
   and orphaned records are ignored and cleaned up.
 - No API returns a secret value except handle resolution for an allowed consumer.
+- Revoked and expired handles are pruned before capacity checks, so revocation
+  immediately makes room for replacements without extending an old handle's life.
 
 ## Limitations
 

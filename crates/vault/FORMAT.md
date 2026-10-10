@@ -268,6 +268,10 @@ unlock session: lock, idle auto-lock, daemon restart, and `revoke_all_handles`
 invalidate them. Handle issuance and resolution are Rust APIs for the broker; they
 are not exposed over IPC.
 
+Issuance prunes revoked and expired entries before enforcing the 4096-handle
+registry limit. Revocation immediately frees capacity; a pruned handle is denied
+as unknown rather than remaining retained until its former expiry.
+
 ## In-memory handling
 
 - VMK, KEKs, subkeys, recovery keys, decrypted index/record plaintexts, and
