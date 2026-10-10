@@ -2,7 +2,7 @@
 
 Typed, workspace-scoped tools with a two-phase **plan → execute** contract (issue #16; spec §12.2-12.4, §13, §56, §78-79, §91). Every tool validates its input against a closed schema, resolves every path through `aidex_workspace::ConfinedRoot`, reports facts and risk for policy evaluation, previews writes as reviewable diffs, and executes only with a permit bound to the exact plan. Processes (git, shell) run only through a `ProcessLauncher` that the execution broker implements over `aidex-sandbox`.
 
-Depends on `aidex-core`, `aidex-events` (`EventSink`, `redact_text`), `aidex-policy` (`Action`, `ShellCommand`/`classify_shell`, `Intent`), `aidex-sandbox` (launch/exit/output types), and `aidex-workspace` (`ConfinedRoot`). The execution broker (`aidex-broker`) is the only holder of a registry; the daemon exposes tools through it (`tool.*`).
+Depends on `aidex-core`, `aidex-events` (`EventSink`, `redact_text`), `aidex-policy` (`Action`, `ShellCommand`/`classify_shell`, `Intent`), `aidex-sandbox` (launch/exit/output types), and `aidex-workspace` (`ConfinedRoot`). The execution broker (`aidex-broker`) exposes tools through the daemon (`tool.*`); the native harness (`aidex-harness`) currently holds its own registry.
 
 ## Flow
 

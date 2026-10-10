@@ -273,8 +273,8 @@ pub struct PolicyStatus {
 /// Mediates every tool execution: plans the call, evaluates policy on the plan's
 /// computed facts, asks for bound approvals, launches processes only through the
 /// sandbox, injects secrets only into the processes that need them, and records
-/// every decision and outcome as an audit event. It is the only holder of the
-/// [`ToolRegistry`]; agents and the harness hold the broker.
+/// every decision and outcome as an audit event. It owns its [`ToolRegistry`];
+/// callers hold the broker, never the registry.
 pub struct Broker {
     config: BrokerConfig,
     registry: ToolRegistry,
