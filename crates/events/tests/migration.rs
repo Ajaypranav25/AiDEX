@@ -349,7 +349,9 @@ fn skipped_imports_do_not_open_the_legacy_source() {
         let log = EventLog::open(&path, RetentionPolicy::UNBOUNDED).unwrap();
         assert_eq!(
             log.import_legacy(&legacy_path).unwrap(),
-            LegacyImport::Imported { events: rows.len() as u64 }
+            LegacyImport::Imported {
+                events: rows.len() as u64
+            }
         );
         // Neither an invalid source nor a missing source is opened after the marker,
         // including when the first import was empty and last_cursor is still zero.
@@ -365,9 +367,11 @@ fn skipped_imports_do_not_open_the_legacy_source() {
             reopened.import_legacy(&legacy_path).unwrap(),
             LegacyImport::AlreadyImported
         );
-        let nonempty =
-            EventLog::open(dir.path().join("nonempty.sqlite3"), RetentionPolicy::UNBOUNDED)
-                .unwrap();
+        let nonempty = EventLog::open(
+            dir.path().join("nonempty.sqlite3"),
+            RetentionPolicy::UNBOUNDED,
+        )
+        .unwrap();
         nonempty
             .append(EventScope::global(), EventKind::DriveSafeToRemove {})
             .unwrap();
@@ -376,6 +380,90 @@ fn skipped_imports_do_not_open_the_legacy_source() {
             LegacyImport::SkippedNonEmpty
         );
     }
+}
+
+#[test]
+fn active_subscribers_catch_up_imported_history_before_later_appends() {
+    for become_live in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy_path = dir.path().join("legacy.sqlite");
+        let rows: Vec<_> = (0..600)
+            .map(|index| {
+                (
+                    if index % 2 == 0 { "ws_a" } else { "ws_b" },
+                    None,
+                    r#"{"type":"task_started","task_id":"legacy_task"}"#,
+                )
+            })
+            .collect();
+        write_v1_database(&legacy_path, &rows);
+        let log = EventLog::open(db_path(dir.path()), RetentionPolicy::UNBOUNDED).unwrap();
+        let mut all = log
+            .subscribe_with_capacity(EventFilter::all(), Cursor::ZERO, 1)
+            .unwrap();
+        let mut filtered = log
+            .subscribe_with_capacity(EventFilter::for_workspace(id("ws_a")), Cursor::ZERO, 1)
+            .unwrap();
+        if become_live {
+            assert_eq!(all.try_next().unwrap(), None);
+            assert_eq!(filtered.try_next().unwrap(), None);
+        }
+        log.import_legacy(&legacy_path).unwrap();
+        log.append(EventScope::global(), EventKind::DriveSafeToRemove {})
+            .unwrap();
+        let mut seen = Vec::new();
+        while let Some(item) = all.try_next().unwrap() {
+            if let Some(event) = item.event {
+                seen.push(event.cursor.get());
+            }
+        }
+        assert_eq!(seen, (1..=601).collect::<Vec<_>>());
+        let mut seen_filtered = Vec::new();
+        while let Some(item) = filtered.try_next().unwrap() {
+            if let Some(event) = item.event {
+                seen_filtered.push(event.cursor.get());
+            }
+        }
+        assert_eq!(seen_filtered, (1..=599).step_by(2).collect::<Vec<_>>());
+        // Both rejoin live delivery after multiple disk pages, without duplicates.
+        let next = log
+            .append(
+                EventScope::workspace(id("ws_a")),
+                common::task_started("live_task"),
+            )
+            .unwrap();
+        assert_eq!(next.cursor, Cursor::new(602));
+        assert!(matches!(
+            all.try_next().unwrap().and_then(|item| item.event),
+            Some(event) if event == next
+        ));
+        assert!(matches!(
+            filtered.try_next().unwrap().and_then(|item| item.event),
+            Some(event) if event == next
+        ));
+        assert_eq!(all.try_next().unwrap(), None);
+        assert_eq!(filtered.try_next().unwrap(), None);
+    }
+}
+
+#[test]
+fn subscribers_report_expired_import_history_instead_of_skipping_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let legacy_path = dir.path().join("legacy.sqlite");
+    write_v1_database(&legacy_path, V1_ROWS);
+    let log = EventLog::open(db_path(dir.path()), RetentionPolicy::max_events(2)).unwrap();
+    let mut subscription = log.subscribe(EventFilter::all(), Cursor::ZERO).unwrap();
+    assert_eq!(subscription.try_next().unwrap(), None);
+    log.import_legacy(&legacy_path).unwrap();
+    log.append(EventScope::global(), EventKind::DriveSafeToRemove {})
+        .unwrap();
+    assert!(matches!(
+        subscription.try_next(),
+        Err(aidex_events::EventError::CursorExpired {
+            requested: Cursor::ZERO,
+            ..
+        })
+    ));
 }
 
 #[test]
@@ -391,7 +479,10 @@ fn separate_import_applies_retention_before_returning() {
         LegacyImport::Imported { events: imported }
     );
     assert_eq!(log.latest_cursor().unwrap(), Cursor::new(imported));
-    assert_eq!(log.oldest_cursor().unwrap(), Some(Cursor::new(imported - 2)));
+    assert_eq!(
+        log.oldest_cursor().unwrap(),
+        Some(Cursor::new(imported - 2))
+    );
     assert!(matches!(
         log.replay(&EventFilter::all(), Cursor::ZERO, 256),
         Err(aidex_events::EventError::CursorExpired { .. })
