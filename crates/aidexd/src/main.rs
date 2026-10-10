@@ -1,13 +1,27 @@
-use aidexd::server;
-
 use aidex_host::HostInfo;
+use aidexd::{
+    Client,
+    lifecycle::{self, STOP_TIMEOUT},
+    methods::daemon::{DaemonStatus, STATUS},
+};
+use serde_json::Value;
 use std::{
     env,
     path::{Path, PathBuf},
-    process::{Command, ExitCode, Stdio},
-    thread,
-    time::{Duration, Instant},
+    process::ExitCode,
 };
+
+const USAGE: &str = "aidexd — local AiDEX daemon
+
+Usage: aidexd <command> [--drive <PATH>]
+
+Commands:
+  start   launch a detached daemon for the drive and wait until it is ready
+  run     serve in the foreground (used by `start`)
+  status  print daemon status as JSON
+  stop    request graceful shutdown and wait for it
+  host    print host facts
+";
 
 fn main() -> ExitCode {
     match run(env::args().skip(1).collect()) {
@@ -20,8 +34,7 @@ fn main() -> ExitCode {
 }
 
 fn run(args: Vec<String>) -> Result<(), String> {
-    let command = args.first().map(String::as_str).unwrap_or("help");
-    match command {
+    match args.first().map(String::as_str).unwrap_or("help") {
         "host" => {
             let host = HostInfo::current();
             println!("os: {}", host.os);
@@ -34,20 +47,31 @@ fn run(args: Vec<String>) -> Result<(), String> {
             );
             Ok(())
         }
-        "run" => server::serve(&drive_arg(&args)?),
-        "start" => start(&drive_arg(&args)?),
+        "run" => lifecycle::serve(&drive_arg(&args)?)
+            .map(|_| ())
+            .map_err(|e| e.to_string()),
+        "start" => {
+            let executable =
+                env::current_exe().map_err(|e| format!("cannot locate aidexd executable: {e}"))?;
+            lifecycle::launch(&drive_arg(&args)?, &executable).map_err(|e| e.to_string())?;
+            println!("ready");
+            Ok(())
+        }
         "status" => {
-            println!("{}", server::request(&drive_arg(&args)?, "status")?);
+            let status: DaemonStatus = Client::connect(&drive_arg(&args)?, "aidexd")
+                .and_then(|mut client| client.call_as(STATUS, Value::Null))
+                .map_err(|e| e.to_string())?;
+            let json = serde_json::to_string_pretty(&status).map_err(|e| e.to_string())?;
+            println!("{json}");
             Ok(())
         }
         "stop" => {
-            println!("{}", server::request(&drive_arg(&args)?, "stop")?);
+            lifecycle::stop(&drive_arg(&args)?, STOP_TIMEOUT).map_err(|e| e.to_string())?;
+            println!("stopped");
             Ok(())
         }
         "--help" | "-h" | "help" => {
-            println!(
-                "aidexd — local AiDEX daemon\n\nUsage: aidexd <start|stop|status|host> [--drive <PATH>]\n"
-            );
+            print!("{USAGE}");
             Ok(())
         }
         other => Err(format!("unknown command {other}; run `aidexd --help`")),
@@ -60,28 +84,4 @@ fn drive_arg(args: &[String]) -> Result<PathBuf, String> {
         .find(|pair| pair[0] == "--drive")
         .map(|pair| Path::new(&pair[1]));
     aidex_drive::resolve_root(explicit).map_err(|e| e.to_string())
-}
-
-fn start(root: &Path) -> Result<(), String> {
-    server::recover_stale_endpoint(root)?;
-    let executable =
-        env::current_exe().map_err(|e| format!("cannot locate aidexd executable: {e}"))?;
-    Command::new(executable)
-        .arg("run")
-        .arg("--drive")
-        .arg(root)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("cannot launch daemon: {e}"))?;
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < deadline {
-        if server::request(root, "handshake").is_ok() {
-            println!("ready");
-            return Ok(());
-        }
-        thread::sleep(Duration::from_millis(50));
-    }
-    Err("daemon did not become ready within 5 seconds".into())
 }
