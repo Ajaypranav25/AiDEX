@@ -23,7 +23,9 @@ dependencies = [
  "aidex-host",
  "aidexd",
  "clap",
+ "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -84,6 +86,7 @@ dependencies = [
 name = "aidexd"
 version = "0.1.0"
 dependencies = [
+ "aidex-core",
  "aidex-drive",
  "aidex-events",
  "aidex-host",

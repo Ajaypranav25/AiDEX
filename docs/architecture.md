@@ -2,23 +2,25 @@
 
 ## Product boundary
 
-The CLI is the first active client surface. Its `aidex` Rust binary uses the existing host crate for diagnostics, delegates interactive agent sessions to the pinned Oh My Pi CLI, and runs headless sessions through Oh My Pi's restricted Bun SDK. The desktop and installer Tauri shells remain in place, but the product UI does not own domain behavior.
+The CLI is the first active client surface. Its `aidex` Rust binary reaches backend services through the `aidexd` daemon's JSON-RPC API (`protocol/commands/README.md`), uses the host crate for diagnostics, and, until the native agent lands, delegates interactive agent sessions to the pinned Oh My Pi CLI and headless sessions to Oh My Pi's restricted Bun SDK. The desktop and installer Tauri shells remain in place, but the product UI does not own domain behavior.
 
 ## Repository layers
 
 ```text
 crates/aidex-cli (`aidex`)
-   ├── aidex-host (host diagnostics)
-   └── pinned Oh My Pi runtime (CLI TUI + restricted Bun SDK)
-
-crates/core, drive, events, sessions, storage
-   └── Rust foundation; shared local-core API is not implemented yet
+   ├── aidexd::Client ──JSON-RPC 2.0, IPC contract v2, authenticated loopback──┐
+   ├── aidex-host (host diagnostics)                                          │
+   └── pinned Oh My Pi runtime (CLI TUI + restricted Bun SDK)                 │
+                                                                              ▼
+crates/aidexd (`aidexd`)
+   ├── transport: handshake, Router (`<domain>.<verb>`), bounded streams
+   └── Services ── crates/core, drive, events, sessions, storage
 
 apps/desktop, apps/installer
-   └── future clients of a versioned local-core API
+   └── future clients of the same daemon API
 ```
 
-The desktop and installer are independent Tauri v2 projects. Their Rust shells own desktop integration only; domain services belong in the Rust workspace. `crates/aidex-cli` owns the first Rust command surface and treats Oh My Pi as an external agent runtime, not as AiDEX core. `protocol/` is the intended source of frontend/backend contracts. Until generation and compatibility checks exist, no handwritten duplicate contract should be treated as canonical.
+The desktop and installer are independent Tauri v2 projects. Their Rust shells own desktop integration only; domain services belong in the Rust workspace. `crates/aidex-cli` owns the first Rust command surface and treats Oh My Pi as an external agent runtime, not as AiDEX core. `protocol/` is the intended source of frontend/backend contracts. The daemon IPC transport (framing, handshake, error codes, method naming) is defined by `crates/aidexd`'s Rust types and specified in `protocol/commands/README.md`; frontends use `aidexd::Client` or follow that document. Until generation and compatibility checks exist, no other handwritten duplicate contract should be treated as canonical.
 
 ## Rust workspace boundaries
 
