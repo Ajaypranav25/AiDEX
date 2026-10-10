@@ -55,6 +55,20 @@ struct Response {
     error: Option<String>,
 }
 
+#[derive(Debug)]
+pub enum EventRequestError {
+    Unavailable(String),
+    Rejected(String),
+}
+impl std::fmt::Display for EventRequestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Unavailable(message) | Self::Rejected(message) => f.write_str(message),
+        }
+    }
+}
+impl std::error::Error for EventRequestError {}
+
 pub fn state_path(root: &Path) -> PathBuf {
     root.join(STATE_DIR).join(STATE_FILE)
 }
@@ -153,6 +167,8 @@ pub fn request(root: &Path, command: &str) -> Result<String, String> {
             limit: None,
         },
     )
+    .map(|response| response.state)
+    .map_err(|error| error.to_string())
 }
 
 /// Fetch one bounded replay batch after the caller's last acknowledged cursor.
@@ -161,13 +177,13 @@ pub fn request_events(
     workspace_id: &str,
     after: u64,
     limit: usize,
-) -> Result<Vec<Event>, String> {
+) -> Result<Vec<Event>, EventRequestError> {
     if limit == 0 || limit > MAX_EVENT_BATCH {
-        return Err(format!(
+        return Err(EventRequestError::Rejected(format!(
             "event batch limit must be between 1 and {MAX_EVENT_BATCH}"
-        ));
+        )));
     }
-    let state = request_raw(
+    let response = request_raw(
         root,
         Request {
             version: CONTRACT_VERSION,
@@ -178,36 +194,41 @@ pub fn request_events(
             limit: Some(limit),
         },
     )?;
-    serde_json::from_str(&state).map_err(|e| format!("invalid event batch: {e}"))
+    serde_json::from_str(&response.state)
+        .map_err(|e| EventRequestError::Rejected(format!("invalid event batch: {e}")))
 }
 
-fn request_raw(root: &Path, request: Request) -> Result<String, String> {
-    let endpoint = read_endpoint(root)?;
-    let mut request = request;
+fn request_raw(root: &Path, mut request: Request) -> Result<Response, EventRequestError> {
+    let endpoint = read_endpoint(root).map_err(EventRequestError::Unavailable)?;
     request.token = endpoint.token;
     let mut stream = TcpStream::connect(("127.0.0.1", endpoint.port))
-        .map_err(|e| format!("daemon is not reachable: {e}"))?;
+        .map_err(|e| EventRequestError::Unavailable(format!("daemon is not reachable: {e}")))?;
     stream
         .set_read_timeout(Some(Duration::from_secs(2)))
-        .map_err(|e| e.to_string())?;
-    serde_json::to_writer(&mut stream, &request).map_err(|e| e.to_string())?;
-    stream.write_all(b"\n").map_err(|e| e.to_string())?;
+        .map_err(|e| EventRequestError::Unavailable(e.to_string()))?;
+    serde_json::to_writer(&mut stream, &request)
+        .map_err(|e| EventRequestError::Unavailable(e.to_string()))?;
+    stream
+        .write_all(b"\n")
+        .map_err(|e| EventRequestError::Unavailable(e.to_string()))?;
     stream
         .shutdown(Shutdown::Write)
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| EventRequestError::Unavailable(e.to_string()))?;
     let mut line = String::new();
     BufReader::new(stream)
         .take(MAX_RESPONSE_BYTES)
         .read_line(&mut line)
-        .map_err(|e| e.to_string())?;
-    let response: Response =
-        serde_json::from_str(&line).map_err(|e| format!("invalid daemon response: {e}"))?;
+        .map_err(|e| EventRequestError::Unavailable(e.to_string()))?;
+    let response: Response = serde_json::from_str(&line)
+        .map_err(|e| EventRequestError::Rejected(format!("invalid daemon response: {e}")))?;
     if response.version != CONTRACT_VERSION || !response.ok {
-        return Err(response
-            .error
-            .unwrap_or_else(|| "daemon rejected request".into()));
+        return Err(EventRequestError::Rejected(
+            response
+                .error
+                .unwrap_or_else(|| "daemon rejected request".into()),
+        ));
     }
-    Ok(response.state)
+    Ok(response)
 }
 
 /// Refuse a live instance and remove only an endpoint proven unreachable.
@@ -506,6 +527,45 @@ mod tests {
             assert_eq!(response.error.as_deref(), Some(expected));
         }
         assert!(TcpStream::connect(("127.0.0.1", 0)).is_err());
+    }
+
+    #[test]
+    fn expired_event_cursor_is_a_permanent_replay_error() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let state_dir = root.join(STATE_DIR);
+        fs::create_dir_all(&state_dir).unwrap();
+        let event_log = EventLog::open(state_dir.join(EVENT_FILE), 1).unwrap();
+        for task_id in ["first", "second"] {
+            event_log
+                .publish(
+                    "workspace",
+                    None,
+                    aidex_events::EventKind::TaskStarted {
+                        task_id: task_id.into(),
+                    },
+                )
+                .unwrap();
+        }
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let endpoint = Endpoint {
+            version: CONTRACT_VERSION,
+            pid: std::process::id(),
+            port: listener.local_addr().unwrap().port(),
+            token: "c".repeat(64),
+        };
+        fs::write(state_path(root), encode_endpoint(&endpoint).unwrap()).unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            handle(&mut stream, &endpoint, &AtomicBool::new(false), &event_log);
+        });
+
+        let error = request_events(root, "workspace", 0, 1).unwrap_err();
+        assert!(matches!(
+            error,
+            EventRequestError::Rejected(message) if message.contains("expired")
+        ));
+        server.join().unwrap();
     }
 
     #[test]

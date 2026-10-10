@@ -258,7 +258,7 @@ fn events_command(
                     std::thread::sleep(std::time::Duration::from_millis(250));
                 }
             }
-            Err(error) if follow => {
+            Err(aidexd::server::EventRequestError::Unavailable(error)) if follow => {
                 eprintln!("aidex events: reconnecting after error: {error}");
                 std::thread::sleep(std::time::Duration::from_millis(500));
             }

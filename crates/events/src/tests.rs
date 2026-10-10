@@ -95,6 +95,31 @@ fn full_live_queue_does_not_block_publisher_and_replay_recovers_after_overflow()
 }
 
 #[test]
+fn dropping_subscription_immediately_releases_its_registry_entry() {
+    let dir = tempfile::tempdir().unwrap();
+    let log = EventLog::open(dir.path().join("events.sqlite"), 20).unwrap();
+    let subscription = log.subscribe("workspace", 1).unwrap();
+    assert_eq!(
+        log.inner
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .subscribers
+            .len(),
+        1
+    );
+
+    drop(subscription);
+
+    assert!(
+        log.inner
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .subscribers
+            .is_empty()
+    );
+}
+
+#[test]
 fn event_wire_shape_is_versioned_and_contains_only_declared_transition_fields() {
     let dir = tempfile::tempdir().unwrap();
     let log = EventLog::open(dir.path().join("events.sqlite"), 4).unwrap();

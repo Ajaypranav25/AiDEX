@@ -8,7 +8,7 @@
 use std::{
     path::{Path, PathBuf},
     sync::{
-        Mutex,
+        Arc, Mutex, Weak,
         mpsc::{self, Receiver, SyncSender, TrySendError},
     },
 };
@@ -140,25 +140,29 @@ impl std::fmt::Display for EventError {
 impl std::error::Error for EventError {}
 
 struct Subscriber {
+    id: u64,
     workspace_id: String,
     sender: SyncSender<Event>,
 }
 struct Inner {
     connection: Connection,
     subscribers: Vec<Subscriber>,
+    next_subscriber_id: u64,
 }
 
 /// SQLite-backed event store. Retention is per workspace and bounded by event count.
 pub struct EventLog {
     path: PathBuf,
     retention: u64,
-    inner: Mutex<Inner>,
+    inner: Arc<Mutex<Inner>>,
 }
 
 /// Bounded, best-effort live feed. A disconnected receiver reconnects with its last
 /// acknowledged event sequence using [`EventLog::read_after`].
 pub struct Subscription {
     receiver: Receiver<Event>,
+    inner: Weak<Mutex<Inner>>,
+    id: u64,
 }
 impl Subscription {
     pub fn recv(&self) -> Result<Event, mpsc::RecvError> {
@@ -172,6 +176,17 @@ impl Subscription {
         timeout: std::time::Duration,
     ) -> Result<Event, mpsc::RecvTimeoutError> {
         self.receiver.recv_timeout(timeout)
+    }
+}
+impl Drop for Subscription {
+    fn drop(&mut self) {
+        if let Some(inner) = self.inner.upgrade() {
+            inner
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .subscribers
+                .retain(|subscriber| subscriber.id != self.id);
+        }
     }
 }
 
@@ -202,10 +217,11 @@ impl EventLog {
         Ok(Self {
             path,
             retention,
-            inner: Mutex::new(Inner {
+            inner: Arc::new(Mutex::new(Inner {
                 connection,
                 subscribers: Vec::new(),
-            }),
+                next_subscriber_id: 1,
+            })),
         })
     }
 
@@ -328,15 +344,21 @@ impl EventLog {
         let workspace_id = workspace_id.into();
         validate_identifier(&workspace_id)?;
         let (sender, receiver) = mpsc::sync_channel(capacity);
-        self.inner
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .subscribers
-            .push(Subscriber {
-                workspace_id,
-                sender,
-            });
-        Ok(Subscription { receiver })
+        let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let id = inner.next_subscriber_id;
+        inner.next_subscriber_id = id
+            .checked_add(1)
+            .ok_or_else(|| EventError::Storage("subscription identifiers exhausted".into()))?;
+        inner.subscribers.push(Subscriber {
+            id,
+            workspace_id,
+            sender,
+        });
+        Ok(Subscription {
+            receiver,
+            inner: Arc::downgrade(&self.inner),
+            id,
+        })
     }
 
     pub fn database_path(&self) -> &Path {
