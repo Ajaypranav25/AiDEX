@@ -20,9 +20,6 @@ pub mod services;
 pub mod stream;
 mod transport;
 
-/// Contract-v1 server kept until the CLI moves to the v2 client.
-pub mod server;
-
 pub use client::{Client, ClientError, Notification, Subscription};
 pub use endpoint::{Capability, Endpoint, EndpointError};
 pub use errors::{ErrorCode, RpcError};
