@@ -8,6 +8,7 @@ members = [
     "crates/events",
     "crates/host",
     "crates/policy",
+    "crates/sandbox",
     "crates/sessions",
     "crates/storage",
     "crates/workspace",
