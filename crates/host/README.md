@@ -1,6 +1,6 @@
 # Host capability profile
 
-`aidex-host::HostProfile::current()` returns a versioned snapshot (`version: 2`) of process and host facts. The profile serializes with `serde`; JSON output follows the struct field order and preserves the `available`, `unavailable`, and `unknown` probe states.
+`aidex-host::HostProfile::current()` returns a versioned snapshot (`version: 1`; `physical_cpu_count` and `available_ram_bytes` are additive fields) of process and host facts. The profile serializes with `serde`; JSON output follows the struct field order and preserves the `available`, `unavailable`, and `unknown` probe states.
 
 Tool discovery is bounded to the first 256 PATH entries and checks filesystem metadata only. It never invokes discovered executables. An `available` result proves only that a matching file was found, not that it is executable, functional, or suitable for a workload. Supported checks cover platform shells (`powershell`/`cmd` on Windows; `sh`/`bash` on Unix), Git, `rustc`/`cargo`, and PATH-visible local inference tools (`ollama`, `llama-server`, and `llama-cli`). If the PATH search is truncated or cannot be inspected, the result is `unknown`, not `unavailable`.
 
@@ -10,7 +10,7 @@ Tool discovery is bounded to the first 256 PATH entries and checks filesystem me
 
 ## GPU (opt-in)
 
-`HostProfile::current()` reports `gpu: {"state": "not_probed"}`. `HostProfile::current_with(&HostProbeOptions { gpu: Some(GpuProbeOptions::default()) })` or `probe_gpus(&options)` runs the best-effort probe and returns `GpuStatus::{NotProbed, Detected { source, devices: [GpuDevice { vendor, name, vram_bytes, driver_version, unified_memory }] }, NotDetected { source }, Unknown { reason }}`:
+`HostProfile::current()` reports `gpu: {"state": "unknown"}`. `HostProfile::current_with(&HostProbeOptions { gpu: Some(GpuProbeOptions::default()) })` runs the probe and reports presence (`available`/`unavailable`/`unknown`); `probe_gpus(&options)` returns the details: `GpuStatus::{NotProbed, Detected { source, devices: [GpuDevice { vendor, name, vram_bytes, driver_version, unified_memory }] }, NotDetected { source }, Unknown { reason }}`:
 
 - Windows and Linux: `nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader,nounits` located through the bounded PATH search, killed after the timeout (default 5 s), output capped at 64 KiB. This is the only probe that executes a program, which is why it is opt-in. AMD/Intel GPUs are not probed: a missing `nvidia-smi` is `unknown`, never "no GPU".
 - Apple Silicon (macOS aarch64): the integrated GPU is reported from the platform (unified memory), without running anything.

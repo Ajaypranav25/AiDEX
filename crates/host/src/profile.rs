@@ -13,9 +13,9 @@ use std::{
 
 use crate::{GpuProbeOptions, GpuStatus, HostResources, probe_gpus};
 
-/// Current serialized host profile schema (v2 adds memory, physical cores, and
-/// the opt-in GPU status).
-pub const PROFILE_VERSION: u32 = 2;
+/// Current serialized host profile schema. Fields added since (physical cores,
+/// available RAM) are additive.
+pub const PROFILE_VERSION: u32 = 1;
 /// Maximum number of PATH entries examined for each discovery.
 const MAX_PATH_ENTRIES: usize = 256;
 
@@ -77,9 +77,9 @@ pub struct HostProfile {
     pub inference_runtimes: Vec<NamedTool>,
     /// Network state is not probed.
     pub network: Probe<()>,
-    /// GPU devices; `not_probed` unless [`HostProbeOptions::gpu`] requested the
-    /// opt-in probe.
-    pub gpu: GpuStatus,
+    /// GPU presence: `unknown` unless [`HostProbeOptions::gpu`] ran the opt-in
+    /// probe ([`probe_gpus`] returns the device details).
+    pub gpu: Probe<()>,
     /// Sandbox state is not probed.
     pub sandbox: Probe<()>,
 }
@@ -130,7 +130,11 @@ impl HostProfile {
         profile.ram_bytes = resources.total_ram_bytes;
         profile.available_ram_bytes = resources.available_ram_bytes;
         if let Some(gpu) = &options.gpu {
-            profile.gpu = probe_gpus(gpu);
+            profile.gpu = match probe_gpus(gpu) {
+                GpuStatus::Detected { .. } => Probe::Available(()),
+                GpuStatus::NotDetected { .. } => Probe::Unavailable,
+                GpuStatus::NotProbed | GpuStatus::Unknown { .. } => Probe::Unknown,
+            };
         }
         profile
     }
@@ -200,7 +204,7 @@ impl HostProfile {
                 })
                 .collect(),
             network: Probe::Unknown,
-            gpu: GpuStatus::NotProbed,
+            gpu: Probe::Unknown,
             sandbox: Probe::Unknown,
         }
     }
