@@ -62,6 +62,11 @@ enum Commands {
         #[arg(long, value_name = "DRIVE_PATH")]
         drive: Option<PathBuf>,
     },
+    /// Control or inspect the local daemon.
+    Daemon {
+        #[command(subcommand)]
+        command: DaemonCommands,
+    },
     /// Check host information, drive health, and Oh My Pi availability.
     Doctor,
 }
@@ -140,6 +145,73 @@ enum AgentCommands {
     List,
 }
 
+#[derive(Debug, Subcommand)]
+enum DaemonCommands {
+    /// Start the daemon on the selected drive.
+    Start {
+        #[arg(long)]
+        drive: Option<PathBuf>,
+    },
+    /// Report daemon readiness on the selected drive.
+    Status {
+        #[arg(long)]
+        drive: Option<PathBuf>,
+    },
+    /// Request graceful daemon shutdown.
+    Stop {
+        #[arg(long)]
+        drive: Option<PathBuf>,
+    },
+}
+
+fn daemon_command(command: DaemonCommands) -> ExitCode {
+    let (operation, drive) = match command {
+        DaemonCommands::Start { drive } => ("start", drive),
+        DaemonCommands::Status { drive } => ("status", drive),
+        DaemonCommands::Stop { drive } => ("stop", drive),
+    };
+    let root = match resolve_root(drive.as_deref()) {
+        Ok(root) => root,
+        Err(error) => {
+            eprintln!("aidex daemon {operation}: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if operation == "start" {
+        let sibling = env::current_exe()
+            .ok()
+            .and_then(|path| {
+                path.parent().map(|parent| {
+                    parent.join(if cfg!(windows) {
+                        "aidexd.exe"
+                    } else {
+                        "aidexd"
+                    })
+                })
+            })
+            .filter(|path| path.is_file());
+        let mut launch = sibling.map_or_else(|| Command::new("aidexd"), Command::new);
+        return match launch.arg("start").arg("--drive").arg(&root).status() {
+            Ok(status) if status.success() => ExitCode::SUCCESS,
+            Ok(status) => exit_code(status.code()),
+            Err(error) => {
+                eprintln!("aidex daemon start: cannot launch aidexd: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
+    match aidexd::server::request(&root, operation) {
+        Ok(state) => {
+            println!("Daemon: {state}");
+            ExitCode::SUCCESS
+        }
+        Err(error) => {
+            eprintln!("aidex daemon {operation}: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn main() -> ExitCode {
     match Cli::parse().command {
         Some(Commands::Chat { options, prompt }) => launch_omp(&options, &prompt),
@@ -149,6 +221,7 @@ fn main() -> ExitCode {
         }) => list_agents(),
         Some(Commands::Init { drive }) => drive_init(&drive),
         Some(Commands::Status { drive }) => drive_health(drive.as_deref()),
+        Some(Commands::Daemon { command }) => daemon_command(command),
         Some(Commands::Doctor) => doctor(),
         None => launch_omp(&SessionOptions::default(), &[]),
     }
