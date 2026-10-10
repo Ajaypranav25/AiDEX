@@ -4,7 +4,7 @@ Preferences, diagnostics, and drive health for this AiDEX drive. Route: `setting
 
 - `SettingsPage` — header and underline tabs; each tab renders one panel.
 - `AppearancePanel` — accent color (`SwatchPicker` over `accentPresets`, bound to `usePreferences().accent`, so it re-themes the app live), theme, density, reduce motion, and keyboard hints.
-- `ShortcutsPanel` — shortcut table with the platform modifier (`useModifierKeyLabel`); only New session works today, the rest are marked planned.
+- `ShortcutsPanel` — shortcut table with the platform modifier (`useModifierKeyLabel`), or a shortcut's own keys where they differ outside Apple platforms (Alt+← for Go back). New session, Go back, and Go forward work today; the rest are marked planned.
 - `UpdatesPanel` — version, release channel, check for updates, and how updates are applied (staged, verified, switched atomically, rolled back on failure).
 - `DiagnosticsPanel` — live doctor-equivalent checks (host, drive manifest, AiDEX Core with Start, sandbox backend), system information, Run diagnostics (re-runs every check), an event-log reader (`events.replay` by workspace id), and Export logs (preview).
 - `DrivePanel` — the live session drive: volume label, root, filesystem, attachment, health, capacity meter, manifest details, and migration advice. Integrity verification (issue #27) and safe eject (issue #28) are previews, and host cleanup (`ResidueCleanup`) is labelled sample data.

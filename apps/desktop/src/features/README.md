@@ -4,7 +4,7 @@ Each folder owns one area of the desktop UI: its pages, its contextual sidebar, 
 
 Live today: `launch` (drive, AiDEX Core, vault create and unlock, host and sandbox detection), the Home system status with the workspace registry and live events, Settings Diagnostics and Drive, and the Security sandbox capability report.
 
-- `system`: shared live-status pieces: `CoreStatusNotice` (no drive, AiDEX Core stopped with Start, incompatible, outside the app), `RecentEvents` (`events.latest` + `events.replay`), `LiveEvents` (`events.subscribe`), and labels for host, sandbox, drive, and event data.
+- `system`: shared live-status pieces: `CoreStatusNotice` (no drive, AiDEX Core stopped with Start, incompatible, outside the app), `QueryState` (a query's spinner, then its data, or its announced failure with a retry that keeps focus), `RecentEvents` (`events.latest` + `events.replay`), `LiveEvents` (`events.subscribe`), and labels for host, sandbox, drive, and event data.
 - `launch`: drive selection, drive and vault check, and host/runtime detection, shown before the workspace.
 - `home`: the welcome dashboard, composer, and live system status.
 - `workspace`: workspace list, add or import, overview (files, git, environment, sessions), and context and memory.

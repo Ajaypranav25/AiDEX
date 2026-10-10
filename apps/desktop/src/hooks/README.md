@@ -8,6 +8,8 @@ Reusable React hooks for the desktop app.
 | `useBridgeQuery(load, key, enabled)` | Runs any bridge command when `key` changes: `{ data, error, loading, settled, refetch }`. Stale answers are dropped. |
 | `useRpc(method, params, { enabled })` | A typed daemon method (`RpcMethods` in `@aidex/client/rpc`) through `rpc_call`; runs only while the daemon answers and refetches on reconnect. |
 | `useSubscription(method, params, onData, { enabled })` | A daemon stream through `rpc_subscribe`; unsubscribes on unmount and resubscribes when the daemon changes. |
-| `useCommandShortcut`, `useModifierKeyLabel` | Ctrl/⌘ shortcuts and the platform's command-key label. |
+| `useCommandShortcut`, `useModifierKeyLabel` | Ctrl/⌘ shortcuts and the platform's command-key label. Pass a stable handler. |
+| `useApplePlatform()` | Whether the app runs on macOS or iOS; prerendered markup assumes another platform. |
+| `useHistoryShortcuts(back, forward)` | Back and forward on Alt+←/→ (⌘[ and ⌘] on Apple platforms), the keyboard's Back and Forward keys, and the mouse's side buttons. It waits while a modal is open or the focused field holds typed text. `NavigationProvider` uses it, and `historyShortcutLabels` names its keys. Pass stable callbacks. |
 
 Errors are `AidexError` (`@aidex/client/errors`): branch on `kind` (`bridge_unavailable`, `no_drive`, `daemon_unavailable`, `method_not_found`, ...), never on message text.
