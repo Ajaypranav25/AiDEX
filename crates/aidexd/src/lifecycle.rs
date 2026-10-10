@@ -269,16 +269,20 @@ impl Daemon {
         let thread = thread::Builder::new()
             .name("aidexd-accept".into())
             .spawn(move || {
+                // The saved model is verified and loaded on its own worker;
+                // accepting IPC never waits for GGUF hashing or llama.cpp readiness.
+                let _ = inference.restore_saved();
                 let outcome = server.run(
                     &root,
                     options.poll_interval,
                     &options.drive_present,
                     |outcome| {
                         native.shutdown();
-                        let _ = inference.stop();
+                        let _ = inference.shutdown();
                         record_stopping(&events, outcome);
                     },
                 );
+                let _ = inference.shutdown();
                 let cleanup = endpoint::remove(&root);
                 match (outcome, cleanup) {
                     (Ok(reason), Ok(())) => Ok(reason),

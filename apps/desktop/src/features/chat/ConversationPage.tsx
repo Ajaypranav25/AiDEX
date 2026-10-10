@@ -21,6 +21,8 @@ import type {
 import { useNavigation } from "../../app/providers/navigation";
 import { usePreferences } from "../../app/providers/preferences";
 import { useRpc } from "../../hooks/useRpc";
+import { useInferenceStatus } from "../../hooks/useInferenceStatus";
+import { LocalInferenceNotice } from "../model-manager/LocalInferenceNotice";
 import { HistoryMessages, MessageContent } from "../sessions/HistoryMessages";
 import styles from "./ConversationPage.module.css";
 const permissionOptions = [
@@ -37,6 +39,10 @@ export function ConversationPage({
   const { route, replace, navigate } = useNavigation();
   const preferences = usePreferences();
   const models = useRpc("model.list");
+  const inference = useInferenceStatus(models.refetch);
+  const localCatalog = useRpc("inference.catalog", undefined, {
+    enabled: inference.data?.state === "stopped",
+  });
   const workspaces = useRpc("workspace.list");
   const session = useRpc(
     "conversation.get",
@@ -73,15 +79,38 @@ export function ConversationPage({
   const selectedModel = availableModels.find(
     (m) => `${m.model.provider_id}/${m.model.model_id}` === currentRef,
   );
-  const model = session.data
-    ? selectedModel
-    : (selectedModel ??
-      availableModels.find(
-        (m) =>
-          m.model.provider_id === models.data?.default_model?.provider_id &&
-          m.model.model_id === models.data?.default_model?.model_id,
-      ) ??
-      availableModels[0]);
+  const preferredLocal =
+    currentRef?.startsWith("local-llama/") ||
+    (!currentRef && models.data?.default_model?.provider_id === "local-llama");
+  const installedModel =
+    localCatalog.data?.models.find(
+      (item) =>
+        item.id ===
+        (inference.data?.model_id ?? localCatalog.data?.settings?.model_id),
+    ) ?? localCatalog.data?.models[0];
+  const chosenModel = preferredLocal
+    ? inference.data?.state === "ready"
+      ? (selectedModel ??
+        (!session.data
+          ? availableModels.find(
+              (item) => item.model.provider_id === "local-llama",
+            )
+          : undefined))
+      : undefined
+    : session.data
+      ? selectedModel
+      : (selectedModel ??
+        availableModels.find(
+          (m) =>
+            m.model.provider_id === models.data?.default_model?.provider_id &&
+            m.model.model_id === models.data?.default_model?.model_id,
+        ) ??
+        availableModels[0]);
+  const model =
+    chosenModel?.model.provider_id === "local-llama" &&
+    inference.data?.state !== "ready"
+      ? undefined
+      : chosenModel;
   const project = workspaces.data?.workspaces.find((w) => w.id === workspaceId);
   const latestRun = session.data?.runs
     .filter((run) => !run.parent_run_id)
@@ -89,7 +118,11 @@ export function ConversationPage({
   const running =
     !!latestRun &&
     ["pending", "running", "waiting_approval"].includes(latestRun.status);
-  const modelName = model?.display_name ?? "Choose a model";
+  const modelName =
+    model?.display_name ??
+    inference.data?.model_name ??
+    installedModel?.name ??
+    "Choose a model";
   const lastMessage = session.data?.messages.at(-1);
   useEffect(() => {
     const container = endRef.current?.closest("main");
@@ -314,7 +347,7 @@ export function ConversationPage({
       label="Message"
       value={draft}
       onValueChange={setDraft}
-      onSubmit={(text) => void submit(text)}
+      onSubmit={model ? (text) => void submit(text) : undefined}
       disabled={busy || running}
       onAttach={() => setPopup("attach")}
       placeholder={mode === "chat" ? "Message AiDEX…" : "Describe the task…"}
@@ -389,21 +422,47 @@ export function ConversationPage({
             />
           )}
         </header>
-        {(error || session.error || models.error) && (
+        {(error ||
+          session.error ||
+          models.error ||
+          inference.error ||
+          localCatalog.error) && (
           <Notice tone="danger" role="alert">
-            {error ?? session.error?.message ?? models.error?.message}
+            {error ??
+              session.error?.message ??
+              models.error?.message ??
+              inference.error?.message ??
+              localCatalog.error?.message}
           </Notice>
         )}
-        {!models.loading && !availableModels.length && (
-          <Notice title="Choose a model">
-            <Button
-              variant="outline"
-              onClick={() => navigate({ page: "models" })}
-            >
-              Models and accounts
-            </Button>
-          </Notice>
+        <LocalInferenceNotice
+          status={inference.data}
+          onRefresh={inference.refetch}
+        />
+        {!inference.data && !inference.error && !availableModels.length && (
+          <Notice role="status">Checking the local model on this drive…</Notice>
         )}
+        {!models.loading &&
+          !availableModels.length &&
+          !!inference.data &&
+          !localCatalog.loading &&
+          (inference.data.state !== "stopped" || !!localCatalog.data) &&
+          inference.data?.state !== "starting" &&
+          inference.data?.state !== "failed" && (
+            <Notice>
+              <Text>
+                {installedModel
+                  ? `${installedModel.name} is installed on this drive. Start it in Models and accounts to use local chat.`
+                  : "Choose a model to start chatting."}
+              </Text>
+              <Button
+                variant="outline"
+                onClick={() => navigate({ page: "models" })}
+              >
+                Models and accounts
+              </Button>
+            </Notice>
+          )}
         {!session.data?.messages.length && !route.id && (
           <div className={styles.empty}>
             <ChatIcon size={28} />
@@ -559,6 +618,10 @@ export function ConversationPage({
         onClose={() => setPopup(null)}
       >
         {error && <Notice tone="danger">{error}</Notice>}
+        <LocalInferenceNotice
+          status={inference.data}
+          onRefresh={inference.refetch}
+        />
         <Select
           label="Model"
           disabled={busy || running}

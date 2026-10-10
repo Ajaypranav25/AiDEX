@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { List, ListRow, Notice } from "@aidex/ui/components";
 import {
   Button,
@@ -13,10 +13,13 @@ import { toAidexError } from "@aidex/client/errors";
 import type { InferenceBackend } from "@aidex/client/dto/inference";
 import { useRpc } from "../../hooks/useRpc";
 import { ModelInventory } from "./ModelInventory";
+import { LocalInferenceNotice } from "./LocalInferenceNotice";
+import { useInferenceStatus } from "../../hooks/useInferenceStatus";
 
 export function LocalModelsPanel() {
   const catalog = useRpc("inference.catalog");
-  const status = useRpc("inference.status");
+  const status = useInferenceStatus();
+  const [showImport, setShowImport] = useState(false);
   const [source, setSource] = useState("");
   const [runtimeSource, setRuntimeSource] = useState("");
   const [backend, setBackend] = useState<InferenceBackend>("auto");
@@ -24,6 +27,20 @@ export function LocalModelsPanel() {
   const [threads, setThreads] = useState("2");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const starting = status.data?.state === "starting";
+  const installed = !!catalog.data?.models.length;
+  useEffect(() => {
+    const settings = catalog.data?.settings;
+    if (!settings) return;
+    setBackend(settings.backend);
+    setContext(String(settings.context_window ?? 2048));
+    setThreads(String(settings.threads ?? 2));
+  }, [
+    catalog.data?.settings?.model_id,
+    catalog.data?.settings?.backend,
+    catalog.data?.settings?.context_window,
+    catalog.data?.settings?.threads,
+  ]);
   const act = async (operation: () => Promise<unknown>) => {
     setBusy(true);
     setError(undefined);
@@ -44,51 +61,82 @@ export function LocalModelsPanel() {
           {error ?? catalog.error?.message ?? status.error?.message}
         </Notice>
       )}
+      <LocalInferenceNotice status={status.data} onRefresh={status.refetch} />
       <Card padding="md">
         <Stack gap={3}>
           <Text>
             llama.cpp:{" "}
             {catalog.data?.runtime
               ? `${catalog.data.runtime.release} · ${catalog.data.runtime.verified ? "verified" : "unverified"}`
-              : "Not installed"}
+              : catalog.data
+                ? "Not installed"
+                : "Checking runtime…"}
           </Text>
-          <TextField
-            label="Verified runtime distribution folder"
-            hint="Leave empty to use the runtime bundled on this drive. A runtime-manifest.json with file checksums is required."
-            value={runtimeSource}
-            onChange={(event) => setRuntimeSource(event.target.value)}
-          />
-          <Button
-            disabled={busy}
-            variant="outline"
-            onClick={() =>
-              void act(() =>
-                call(
-                  "inference.runtime.install",
-                  runtimeSource.trim() ? { source: runtimeSource.trim() } : {},
-                ),
-              )
-            }
-          >
-            Install runtime
-          </Button>
-          <TextField
-            label="Import GGUF file"
-            value={source}
-            onChange={(event) => setSource(event.target.value)}
-            hint="Absolute file path. The file is checked and copied to the portable drive."
-          />
-          <Button
-            disabled={busy || !source.trim()}
-            onClick={() =>
-              void act(async () => {
-                await call("inference.import", { source: source.trim() });
-                setSource("");
-              })
-            }
-          >
-            Import model
-          </Button>
+          {!!catalog.data && (!catalog.data.runtime || showImport) && (
+            <>
+              <TextField
+                label="Verified runtime distribution folder"
+                hint="Leave empty to use the runtime bundled on this drive. A runtime-manifest.json with file checksums is required."
+                value={runtimeSource}
+                onChange={(event) => setRuntimeSource(event.target.value)}
+              />
+              <Button
+                disabled={busy || starting}
+                variant="outline"
+                onClick={() =>
+                  void act(() =>
+                    call(
+                      "inference.runtime.install",
+                      runtimeSource.trim()
+                        ? { source: runtimeSource.trim() }
+                        : {},
+                    ),
+                  )
+                }
+              >
+                Install runtime
+              </Button>
+            </>
+          )}
+          {!!catalog.data && (!installed || showImport) && (
+            <>
+              <TextField
+                label="Import GGUF file"
+                value={source}
+                onChange={(event) => setSource(event.target.value)}
+                hint="Absolute file path. The file is checked and copied to the portable drive."
+              />
+              <Button
+                disabled={busy || starting || !source.trim()}
+                onClick={() =>
+                  void act(async () => {
+                    await call("inference.import", { source: source.trim() });
+                    setSource("");
+                  })
+                }
+              >
+                Import model
+              </Button>
+            </>
+          )}
+          {installed && (
+            <>
+              <Text tone="muted">
+                Your installed models and runtime stay on this drive. AiDEX
+                remembers the last started model and loads it automatically on
+                launch.
+              </Text>
+              <Button
+                variant="ghost"
+                disabled={busy || starting}
+                onClick={() => setShowImport((value) => !value)}
+              >
+                {showImport
+                  ? "Hide setup options"
+                  : "Add another model or replace runtime"}
+              </Button>
+            </>
+          )}
           {busy && (
             <Button
               variant="outline"
@@ -133,6 +181,7 @@ export function LocalModelsPanel() {
       </Stack>
       <Text>
         Inference {status.data?.state ?? "loading"}
+        {status.data?.model_name ? ` · ${status.data.model_name}` : ""}
         {status.data?.backend ? ` · ${status.data.backend}` : ""}
       </Text>
       {status.data?.limitations.map((limitation) => (
@@ -165,6 +214,7 @@ export function LocalModelsPanel() {
                 <Button
                   disabled={
                     busy ||
+                    starting ||
                     model.availability !== "available" ||
                     !catalog.data?.runtime ||
                     status.data?.state === "ready"
@@ -182,19 +232,25 @@ export function LocalModelsPanel() {
                         throw new Error(
                           "Enter valid positive integer limits (context at least 512).",
                         );
-                      return call("inference.start", {
+                      const start = call("inference.start", {
                         model_id: model.id,
                         backend,
                         context_window,
                         threads: threadCount,
                       });
+                      status.refetch();
+                      return start;
                     })
                   }
                 >
-                  Start
+                  {starting && status.data?.model_id === model.id
+                    ? "Loading…"
+                    : "Start"}
                 </Button>
                 <Button
-                  disabled={busy || status.data?.model_id === model.id}
+                  disabled={
+                    busy || starting || status.data?.model_id === model.id
+                  }
                   variant="ghost"
                   onClick={() => {
                     if (
@@ -214,7 +270,7 @@ export function LocalModelsPanel() {
           />
         ))}
       </List>
-      {!catalog.loading && !catalog.data?.models.length && (
+      {!!catalog.data && !catalog.data.models.length && (
         <Text tone="muted">Import a GGUF model to use local chat.</Text>
       )}
       <ModelInventory localOnly />

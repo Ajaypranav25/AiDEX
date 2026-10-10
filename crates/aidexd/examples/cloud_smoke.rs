@@ -9,6 +9,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = std::env::args().collect();
     let drive = args.get(1).ok_or("usage: cloud_smoke <drive> [chat]")?;
     let mut client = Client::connect(Path::new(drive), "aidex-cloud-smoke")?;
+    if args.get(2).map(String::as_str) == Some("auto-local") {
+        let deadline = Instant::now() + Duration::from_secs(180);
+        let mut previous = String::new();
+        loop {
+            let status = client.call("inference.status", json!({}))?;
+            let state = status["state"].as_str().unwrap_or("unknown");
+            if state != previous {
+                println!("Automatic local startup: {state}");
+                previous = state.to_owned();
+            }
+            if state == "ready" {
+                let listing = client.call("model.list", json!({}))?;
+                let model = listing["models"]
+                    .as_array()
+                    .and_then(|models| {
+                        models
+                            .iter()
+                            .find(|model| model["model"]["provider_id"] == "local-llama")
+                    })
+                    .ok_or("autoload did not register the local model")?;
+                println!("Automatically available model: {}", model["display_name"]);
+                println!("Verified local endpoint: {}", status["endpoint"]);
+                return Ok(());
+            }
+            if state == "failed" {
+                return Err(format!(
+                    "automatic local startup failed: {}",
+                    status["startup_error"]
+                )
+                .into());
+            }
+            if Instant::now() >= deadline {
+                return Err("automatic local startup did not finish".into());
+            }
+            std::thread::sleep(Duration::from_millis(500));
+        }
+    }
     if args.get(2).map(String::as_str) == Some("workspace") {
         let path = args
             .get(3)

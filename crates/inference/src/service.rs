@@ -12,7 +12,10 @@ use aidex_sandbox::{
 use std::{
     net::TcpListener,
     path::Path,
-    sync::{Arc, Mutex, MutexGuard},
+    sync::{
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
     time::Duration,
 };
@@ -20,6 +23,17 @@ use std::{
 pub const LOCAL_PROVIDER_ID: &str = "local-llama";
 const START_TIMEOUT: Duration = Duration::from_secs(120);
 const SETTINGS: &str = "inference-settings.json";
+const BINDING: &str = "local-inference.json";
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PortableBinding {
+    version: u32,
+    autoload: bool,
+    settings_file: String,
+    model_id: String,
+    model_path: String,
+    runtime_path: String,
+}
 fn lock<T>(value: &Mutex<T>) -> MutexGuard<'_, T> {
     value.lock().unwrap_or_else(|p| p.into_inner())
 }
@@ -30,6 +44,9 @@ struct State {
     registered: bool,
     options: Option<StartOptions>,
     endpoint: Option<String>,
+    restoring: bool,
+    model_name: Option<String>,
+    startup_error: Option<String>,
 }
 
 /// One inference server per drive/service. Mutations fail with Conflict while
@@ -42,6 +59,8 @@ pub struct InferenceService {
     operation: Mutex<()>,
     cancel: Mutex<Option<CancelToken>>,
     state: Mutex<State>,
+    shutdown: AtomicBool,
+    restore_cancel: Mutex<Option<CancelToken>>,
 }
 struct Operation<'a> {
     service: &'a InferenceService,
@@ -64,10 +83,6 @@ impl InferenceService {
                 .ensure_dir(&dir)
                 .map_err(|e| InferenceError::Io(e.to_string()))?;
         }
-        let settings = paths.config().join(SETTINGS);
-        if settings.exists() {
-            let _: StartOptions = files::read_json(&settings)?;
-        }
         Ok(Self {
             paths,
             registry,
@@ -76,14 +91,23 @@ impl InferenceService {
             operation: Mutex::new(()),
             cancel: Mutex::new(None),
             state: Mutex::new(State::default()),
+            shutdown: AtomicBool::new(false),
+            restore_cancel: Mutex::new(None),
         })
     }
     fn begin(&self, cancel: &CancelToken) -> Result<Operation<'_>, InferenceError> {
         let guard = self.operation.try_lock().map_err(|_| {
             InferenceError::Conflict("another inference operation is in progress".into())
         })?;
+        // The shutdown latch and active token publication share the same lock:
+        // shutdown either sees this token or begin observes the closed latch.
+        let mut active_cancel = lock(&self.cancel);
+        if self.shutdown.load(Ordering::Acquire) {
+            return Err(InferenceError::Cancelled);
+        }
         files::check_cancel(cancel)?;
-        *lock(&self.cancel) = Some(cancel.clone());
+        *active_cancel = Some(cancel.clone());
+        drop(active_cancel);
         Ok(Operation {
             service: self,
             _guard: guard,
@@ -137,17 +161,60 @@ impl InferenceService {
         options: StartOptions,
         cancel: &CancelToken,
     ) -> Result<InferenceStatus, InferenceError> {
+        if lock(&self.state).restoring {
+            return Err(InferenceError::Conflict(
+                "saved local inference is still loading".into(),
+            ));
+        }
+        self.start_inner(options, cancel)
+    }
+    fn start_inner(
+        &self,
+        options: StartOptions,
+        cancel: &CancelToken,
+    ) -> Result<InferenceStatus, InferenceError> {
         let _operation = self.begin(cancel)?;
         if options.backend == Backend::Gpu {
             return Err(InferenceError::Unavailable(
                 "GPU backend cannot be proven available; select auto or CPU".into(),
             ));
         }
-        let status = self.status();
-        if status.state != "stopped" {
+        self.status();
+        let active = {
+            let state = lock(&self.state);
+            state.starting || state.process.is_some()
+        };
+        if active {
             return Err(InferenceError::Conflict(
                 "inference is already running; stop it before restarting".into(),
             ));
+        }
+        if lock(&self.state).restoring {
+            catalog::validate_id(&options.model_id)?;
+            let metadata_path = self
+                .paths
+                .models()
+                .join(&options.model_id)
+                .join("model.json");
+            let metadata: ManagedModel = files::read_json(&metadata_path)?;
+            if metadata.id != options.model_id
+                || metadata.path
+                    != catalog::relative(
+                        &self.paths,
+                        &self
+                            .paths
+                            .models()
+                            .join(&options.model_id)
+                            .join("model.gguf"),
+                    )?
+            {
+                return Err(InferenceError::Integrity(
+                    "saved model metadata does not match its portable location".into(),
+                ));
+            }
+            let mut state = lock(&self.state);
+            state.options = Some(options.clone());
+            state.model_name = Some(metadata.name.chars().take(128).collect());
         }
         if self
             .registry
@@ -159,18 +226,21 @@ impl InferenceService {
             ));
         }
         catalog::validate_id(&options.model_id)?;
-        let model = catalog::list(&self.paths)?
+        let model = catalog::list_with_cancel(&self.paths, cancel)?
             .into_iter()
             .find(|m| m.id == options.model_id)
             .ok_or_else(|| InferenceError::NotFound("model is not installed".into()))?;
+        lock(&self.state).model_name = Some(model.name.clone());
+        lock(&self.state).startup_error = None;
         if model.availability != Availability::Available {
             return Err(InferenceError::Integrity(
                 "model is missing or its digest changed".into(),
             ));
         }
-        let (runtime, manifest) = runtime::inspect(&self.paths)?.ok_or_else(|| {
-            InferenceError::NotFound("install the verified llama.cpp runtime first".into())
-        })?;
+        let (runtime, manifest) =
+            runtime::inspect_with_cancel(&self.paths, cancel)?.ok_or_else(|| {
+                InferenceError::NotFound("install the verified llama.cpp runtime first".into())
+            })?;
         if !runtime.verified {
             return Err(InferenceError::Integrity(
                 "runtime checksum verification failed".into(),
@@ -210,6 +280,25 @@ impl InferenceService {
         let result = self
             .launch(&actual, &manifest, &model.name, cancel)
             .and_then(|status| {
+                let binding = PortableBinding {
+                    version: 1,
+                    autoload: true,
+                    settings_file: SETTINGS.into(),
+                    model_id: configured.model_id.clone(),
+                    model_path: catalog::relative(
+                        &self.paths,
+                        &self
+                            .paths
+                            .models()
+                            .join(&configured.model_id)
+                            .join("model.gguf"),
+                    )?,
+                    runtime_path: catalog::relative(
+                        &self.paths,
+                        &runtime::directory(&self.paths)?,
+                    )?,
+                };
+                files::write_json(&self.paths.config().join(BINDING), &binding)?;
                 files::write_json(&self.paths.config().join(SETTINGS), &configured)?;
                 files::check_cancel(cancel)?;
                 Ok(status)
@@ -218,6 +307,72 @@ impl InferenceService {
             self.clear_process()?;
         }
         result
+    }
+    /// Queue saved portable inference without delaying Core's IPC readiness.
+    pub fn restore_saved(self: &Arc<Self>) -> Result<bool, InferenceError> {
+        if self.shutdown.load(Ordering::Acquire) {
+            return Err(InferenceError::Cancelled);
+        }
+        if !self.paths.config().join(SETTINGS).exists() {
+            return Ok(false);
+        }
+        let token = CancelToken::new();
+        {
+            let mut state = lock(&self.state);
+            if state.restoring || state.starting || state.process.is_some() {
+                return Ok(false);
+            }
+            state.restoring = true;
+            state.startup_error = None;
+            *lock(&self.restore_cancel) = Some(token.clone());
+        }
+        let service = self.clone();
+        let spawned = thread::Builder::new().name("aidex-inference-restore".into()).spawn(move || {
+            let options: Result<StartOptions, InferenceError> = files::read_json(&service.paths.config().join(SETTINGS));
+            let saved_options = options.as_ref().ok().cloned();
+            let result = options.and_then(|options| {
+                files::check_cancel(&token)?;
+                let binding_path = service.paths.config().join(BINDING);
+                if binding_path.exists() {
+                    let binding: PortableBinding = files::read_json(&binding_path)?;
+                    catalog::validate_id(&options.model_id)?;
+                    if binding.version != 1 || binding.settings_file != SETTINGS
+                        || binding.model_id != options.model_id
+                        || binding.model_path != catalog::relative(&service.paths, &service.paths.models().join(&options.model_id).join("model.gguf"))?
+                        || binding.runtime_path != catalog::relative(&service.paths, &runtime::directory(&service.paths)?)? {
+                        return Err(InferenceError::Integrity("saved inference binding does not match its portable settings".into()));
+                    }
+                    if !binding.autoload { return Ok(()); }
+                }
+                service.start_inner(options, &token).map(|_| ())
+            });
+            let mut state = lock(&service.state);
+            state.restoring = false;
+            if let Err(error) = result
+                && error != InferenceError::Cancelled
+                && !token.is_stopped()
+                && !service.shutdown.load(Ordering::Acquire) {
+                state.options = saved_options;
+                state.startup_error = Some(match error {
+                    InferenceError::Integrity(_) => "Saved model or runtime failed integrity verification.",
+                    InferenceError::NotFound(_) => "Saved local model or runtime is missing from this drive.",
+                    InferenceError::Invalid(_) => "Saved local inference settings are invalid.",
+                    _ => "Saved local inference could not start. Retry the installed model or inspect diagnostics.",
+                }.into());
+            }
+        });
+        if let Err(error) = spawned {
+            let mut state = lock(&self.state);
+            state.restoring = false;
+            state.startup_error = Some("Local inference startup worker could not start.".into());
+            return Err(InferenceError::Unavailable(error.to_string()));
+        }
+        Ok(true)
+    }
+    /// Terminal lifecycle barrier: queued restores and active launches cannot outlive Core.
+    pub fn shutdown(&self) -> Result<InferenceStatus, InferenceError> {
+        self.shutdown.store(true, Ordering::Release);
+        self.stop()
     }
     fn launch(
         &self,
@@ -313,6 +468,9 @@ impl InferenceService {
         Ok(self.status())
     }
     pub fn cancel_operations(&self) {
+        if let Some(cancel) = lock(&self.restore_cancel).as_ref() {
+            cancel.cancel();
+        }
         if let Some(cancel) = lock(&self.cancel).as_ref() {
             cancel.cancel();
         }
@@ -337,6 +495,8 @@ impl InferenceService {
         state.starting = false;
         state.options = None;
         state.endpoint = None;
+        state.model_name = None;
+        state.startup_error = None;
         if state.registered {
             let _ = self
                 .registry
@@ -349,6 +509,7 @@ impl InferenceService {
         self.cancel_operations();
         let _guard = lock(&self.operation);
         self.clear_process()?;
+        lock(&self.state).restoring = false;
         Ok(self.status())
     }
     pub fn status(&self) -> InferenceStatus {
@@ -364,7 +525,7 @@ impl InferenceService {
                 state.registered = false;
             }
         }
-        InferenceStatus{state:if state.starting{"starting"}else if state.process.is_some(){"ready"}else{"stopped"}.into(),model_id:state.options.as_ref().map(|o|o.model_id.clone()),backend:state.options.as_ref().map(|o|o.backend),endpoint:state.endpoint.clone(),pid:state.process.as_ref().map(|p|p.pid()),context_window:state.options.as_ref().and_then(|o|o.context_window),threads:state.options.as_ref().and_then(|o|o.threads),controls:state.process.as_ref().map(|p|p.plan().controls.clone()).unwrap_or_default(),limitations:vec!["GPU availability is not proven; auto uses CPU".into(),"Brokered runtime has a killable process tree and cleared environment; filesystem and network are not OS-confined".into(),"The runtime binds IPv4 loopback only; local applications can access its credential-free API".into()]}
+        InferenceStatus{state:if state.starting || state.restoring{"starting"}else if state.process.is_some(){"ready"}else if state.startup_error.is_some(){"failed"}else{"stopped"}.into(),model_name:state.model_name.clone(),startup_error:state.startup_error.clone(),model_id:state.options.as_ref().map(|o|o.model_id.clone()),backend:state.options.as_ref().map(|o|o.backend),endpoint:state.endpoint.clone(),pid:state.process.as_ref().map(|p|p.pid()),context_window:state.options.as_ref().and_then(|o|o.context_window),threads:state.options.as_ref().and_then(|o|o.threads),controls:state.process.as_ref().map(|p|p.plan().controls.clone()).unwrap_or_default(),limitations:vec!["GPU availability is not proven; auto uses CPU".into(),"Brokered runtime has a killable process tree and cleared environment; filesystem and network are not OS-confined".into(),"The runtime binds IPv4 loopback only; local applications can access its credential-free API".into()]}
     }
 }
 impl Drop for InferenceService {

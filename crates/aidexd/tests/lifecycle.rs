@@ -31,6 +31,33 @@ fn unused_port() -> u16 {
 }
 
 #[test]
+fn invalid_saved_inference_does_not_block_ipc_or_replace_settings() {
+    let root = common::temp_drive();
+    let paths = aidex_drive::DrivePaths::open(root.path()).unwrap();
+    paths.ensure_dir(&paths.config()).unwrap();
+    let settings = paths.config().join("inference-settings.json");
+    let invalid = b"{invalid saved settings}";
+    fs::write(&settings, invalid).unwrap();
+    let daemon = start(root.path(), options(), |_| {});
+    let mut connection = client(daemon.endpoint());
+    connection.call("daemon.ping", Value::Null).unwrap();
+    let deadline = std::time::Instant::now() + PATIENCE;
+    loop {
+        let status = connection.call("inference.status", Value::Null).unwrap();
+        if status["state"] == "failed" {
+            assert!(status["startup_error"].is_string());
+            assert!(status["pid"].is_null());
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline, "{status:?}");
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(fs::read(&settings).unwrap(), invalid);
+    daemon.stop();
+    daemon.wait().unwrap();
+}
+
+#[test]
 fn daemon_stop_notifies_subscribers_closes_connections_and_removes_endpoint() {
     let root = common::temp_drive();
     let (closed_tx, closed_rx) = mpsc::channel::<SinkError>();

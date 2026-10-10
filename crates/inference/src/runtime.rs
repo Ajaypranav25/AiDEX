@@ -82,18 +82,29 @@ fn verify(dir: &Path, m: &RuntimeManifest, cancel: &CancelToken) -> Result<(), I
 pub(crate) fn inspect(
     paths: &DrivePaths,
 ) -> Result<Option<(RuntimeInfo, RuntimeManifest)>, InferenceError> {
+    inspect_with_cancel(paths, &CancelToken::new())
+}
+pub(crate) fn inspect_with_cancel(
+    paths: &DrivePaths,
+    cancel: &CancelToken,
+) -> Result<Option<(RuntimeInfo, RuntimeManifest)>, InferenceError> {
+    files::check_cancel(cancel)?;
     let dir = directory(paths)?;
     if !dir.exists() {
         return Ok(None);
     }
     let manifest: RuntimeManifest = files::read_json(&dir.join(MANIFEST))?;
     validate(&manifest)?;
+    let verified = match verify(&dir, &manifest, cancel) {
+        Err(InferenceError::Cancelled) => return Err(InferenceError::Cancelled),
+        result => result.is_ok(),
+    };
     let info = RuntimeInfo {
         release: manifest.release.clone(),
         platform: manifest.platform.clone(),
         path: catalog::relative(paths, &dir)?,
         executable: manifest.executable.clone(),
-        verified: verify(&dir, &manifest, &CancelToken::new()).is_ok(),
+        verified,
         gpu_supported: false,
     };
     Ok(Some((info, manifest)))

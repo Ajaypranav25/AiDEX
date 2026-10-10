@@ -10,7 +10,6 @@ use aidex_sandbox::Sandbox;
 #[cfg(feature = "test-fixture")]
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
-#[cfg(feature = "test-fixture")]
 use std::{fs, time::Duration};
 
 #[test]
@@ -38,6 +37,44 @@ fn start_requires_runtime_and_gpu_fails_honestly() {
     assert!(e.to_string().contains("GPU"));
     assert!(registry.providers().is_empty());
     assert_eq!(s.status().state, "stopped");
+}
+
+#[test]
+fn saved_binding_cannot_redirect_inference_outside_the_drive() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = DrivePaths::from_layout(root.path().to_path_buf(), DriveLayout::default());
+    let gate = Arc::new(OfflineMode::new(true));
+    let registry = Arc::new(ProviderRegistry::in_memory(
+        Arc::new(NoVault::default()),
+        gate.clone(),
+    ));
+    let service = Arc::new(
+        InferenceService::open(paths.clone(), registry.clone(), gate, Sandbox::locate()).unwrap(),
+    );
+    let model_id = format!("m-{}", "0".repeat(64));
+    fs::write(
+        paths.config().join("inference-settings.json"),
+        serde_json::to_vec(&serde_json::json!({"model_id":model_id,"backend":"cpu"})).unwrap(),
+    )
+    .unwrap();
+    fs::write(paths.config().join("local-inference.json"), serde_json::to_vec(&serde_json::json!({"version":1,"autoload":true,"settings_file":"inference-settings.json","model_id":model_id,"model_path":"C:/unverified/model.gguf","runtime_path":"runtime/windows-x64/llama-cpp"})).unwrap()).unwrap();
+    service.restore_saved().unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while service.status().state == "starting" {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(service.status().state, "failed");
+    assert!(
+        service
+            .status()
+            .startup_error
+            .unwrap()
+            .contains("integrity")
+    );
+    assert!(service.status().pid.is_none());
+    assert!(registry.providers().is_empty());
+    service.shutdown().unwrap();
 }
 
 #[cfg(feature = "test-fixture")]
@@ -188,4 +225,193 @@ fn healthy_process_registers_local_provider_and_tears_down() {
     assert!(s.start(exited, &CancelToken::new()).is_err());
     assert_eq!(s.status().state, "stopped");
     assert!(registry.providers().is_empty());
+    // Saved IDs and relative manifest paths survive relocation without another import.
+    s.shutdown().unwrap();
+    let relocated = tempfile::tempdir().unwrap();
+    fn copy_tree(source: &std::path::Path, destination: &std::path::Path) {
+        fs::create_dir_all(destination).unwrap();
+        for entry in fs::read_dir(source).unwrap() {
+            let entry = entry.unwrap();
+            if entry.file_type().unwrap().is_dir() {
+                copy_tree(&entry.path(), &destination.join(entry.file_name()));
+            } else {
+                fs::copy(entry.path(), destination.join(entry.file_name())).unwrap();
+            }
+        }
+    }
+    copy_tree(root.path(), relocated.path());
+    let gate = Arc::new(OfflineMode::new(true));
+    let restored_registry = Arc::new(ProviderRegistry::in_memory(
+        Arc::new(NoVault::default()),
+        gate.clone(),
+    ));
+    let restored = Arc::new(
+        InferenceService::open(
+            DrivePaths::from_layout(relocated.path().to_path_buf(), DriveLayout::default()),
+            restored_registry.clone(),
+            gate,
+            Sandbox::locate(),
+        )
+        .unwrap(),
+    );
+    assert!(restored.restore_saved().unwrap());
+    assert_eq!(restored.status().state, "starting");
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while restored.status().state == "starting" {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(
+        restored.status().state,
+        "ready",
+        "{:?}",
+        restored.status().startup_error
+    );
+    assert_eq!(
+        restored.status().model_name.as_deref(),
+        Some("Tiny coding model")
+    );
+    assert_eq!(restored_registry.providers().len(), 1);
+    let paths = DrivePaths::from_layout(relocated.path().to_path_buf(), DriveLayout::default());
+    let binding: serde_json::Value =
+        serde_json::from_slice(&fs::read(paths.config().join("local-inference.json")).unwrap())
+            .unwrap();
+    assert_eq!(binding["model_path"], format!("models/{}/model.gguf", m.id));
+    assert_eq!(
+        binding["runtime_path"],
+        format!(
+            "runtime/{}/llama-cpp",
+            aidex_drive::platform_runtime_name().unwrap()
+        )
+    );
+    assert_eq!(binding["settings_file"], "inference-settings.json");
+    assert_eq!(binding["autoload"], true);
+    assert!(!binding.to_string().contains(root.path().to_str().unwrap()));
+    restored.shutdown().unwrap();
+    assert!(restored.restore_saved().is_err());
+    assert_eq!(restored.status().state, "stopped");
+
+    // Cancel a queued restore before it can start or publish a process.
+    let gate = Arc::new(OfflineMode::new(true));
+    let registry = Arc::new(ProviderRegistry::in_memory(
+        Arc::new(NoVault::default()),
+        gate.clone(),
+    ));
+    let cancelled = Arc::new(
+        InferenceService::open(
+            DrivePaths::from_layout(relocated.path().to_path_buf(), DriveLayout::default()),
+            registry.clone(),
+            gate,
+            Sandbox::locate(),
+        )
+        .unwrap(),
+    );
+    cancelled.restore_saved().unwrap();
+    cancelled.shutdown().unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    assert_eq!(cancelled.status().state, "stopped");
+    assert!(cancelled.status().pid.is_none());
+    assert!(registry.providers().is_empty());
+    let binding_path = paths.config().join("local-inference.json");
+    let mut binding = binding;
+    binding["autoload"] = serde_json::json!(false);
+    fs::write(&binding_path, serde_json::to_vec(&binding).unwrap()).unwrap();
+    let gate = Arc::new(OfflineMode::new(true));
+    let disabled_registry = Arc::new(ProviderRegistry::in_memory(
+        Arc::new(NoVault::default()),
+        gate.clone(),
+    ));
+    let disabled = Arc::new(
+        InferenceService::open(
+            paths.clone(),
+            disabled_registry.clone(),
+            gate,
+            Sandbox::locate(),
+        )
+        .unwrap(),
+    );
+    disabled.restore_saved().unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while disabled.status().state == "starting" {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(disabled.status().state, "stopped");
+    assert!(disabled_registry.providers().is_empty());
+    disabled.shutdown().unwrap();
+    binding["autoload"] = serde_json::json!(true);
+    fs::write(&binding_path, serde_json::to_vec(&binding).unwrap()).unwrap();
+    // Stopping during background loading tears down its child and permits retry.
+    let settings_path = paths.config().join("inference-settings.json");
+    let normal_settings: serde_json::Value =
+        serde_json::from_slice(&fs::read(&settings_path).unwrap()).unwrap();
+    let mut slow_settings = normal_settings.clone();
+    slow_settings["context_window"] = serde_json::json!(512);
+    fs::write(&settings_path, serde_json::to_vec(&slow_settings).unwrap()).unwrap();
+    let gate = Arc::new(OfflineMode::new(true));
+    let slow_registry = Arc::new(ProviderRegistry::in_memory(
+        Arc::new(NoVault::default()),
+        gate.clone(),
+    ));
+    let slow = Arc::new(
+        InferenceService::open(
+            paths.clone(),
+            slow_registry.clone(),
+            gate,
+            Sandbox::locate(),
+        )
+        .unwrap(),
+    );
+    slow.restore_saved().unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while slow.status().pid.is_none() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    slow.stop().unwrap();
+    assert_eq!(slow.status().state, "stopped");
+    assert!(slow.status().pid.is_none());
+    assert!(slow_registry.providers().is_empty());
+    slow.start(
+        serde_json::from_value(normal_settings).unwrap(),
+        &CancelToken::new(),
+    )
+    .unwrap();
+    assert_eq!(slow.status().state, "ready");
+    slow.shutdown().unwrap();
+    fs::write(
+        relocated
+            .path()
+            .join("models")
+            .join(&m.id)
+            .join("model.gguf"),
+        b"tampered",
+    )
+    .unwrap();
+    let gate = Arc::new(OfflineMode::new(true));
+    let failed_registry = Arc::new(ProviderRegistry::in_memory(
+        Arc::new(NoVault::default()),
+        gate.clone(),
+    ));
+    let failed = Arc::new(
+        InferenceService::open(
+            DrivePaths::from_layout(relocated.path().to_path_buf(), DriveLayout::default()),
+            failed_registry.clone(),
+            gate,
+            Sandbox::locate(),
+        )
+        .unwrap(),
+    );
+    failed.restore_saved().unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while failed.status().state == "starting" {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(failed.status().state, "failed");
+    assert!(failed.status().startup_error.unwrap().contains("integrity"));
+    assert_eq!(failed.status().model_id.as_deref(), Some(m.id.as_str()));
+    assert!(failed.status().pid.is_none());
+    assert!(failed_registry.providers().is_empty());
+    failed.shutdown().unwrap();
 }

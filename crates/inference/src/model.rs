@@ -82,6 +82,8 @@ pub struct RuntimeInfo {
 #[derive(Clone, Debug, Serialize)]
 pub struct InferenceStatus {
     pub state: String,
+    pub model_name: Option<String>,
+    pub startup_error: Option<String>,
     pub model_id: Option<String>,
     pub backend: Option<Backend>,
     pub endpoint: Option<String>,

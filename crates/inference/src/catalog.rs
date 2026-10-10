@@ -21,11 +21,18 @@ pub(crate) fn relative(paths: &DrivePaths, path: &Path) -> Result<String, Infere
         .replace('\\', "/"))
 }
 pub(crate) fn list(paths: &DrivePaths) -> Result<Vec<ManagedModel>, InferenceError> {
+    list_with_cancel(paths, &CancelToken::new())
+}
+pub(crate) fn list_with_cancel(
+    paths: &DrivePaths,
+    cancel: &CancelToken,
+) -> Result<Vec<ManagedModel>, InferenceError> {
     let mut models = Vec::new();
     let dir = paths
         .ensure_dir(&paths.models())
         .map_err(|e| InferenceError::Io(e.to_string()))?;
     for entry in fs::read_dir(dir)? {
+        files::check_cancel(cancel)?;
         let entry = entry?;
         let id = entry.file_name().to_string_lossy().into_owned();
         if !id.starts_with("m-") {
@@ -43,7 +50,7 @@ pub(crate) fn list(paths: &DrivePaths) -> Result<Vec<ManagedModel>, InferenceErr
         m.availability = if !path.exists() {
             Availability::Missing
         } else {
-            match files::digest(&path, &CancelToken::new()) {
+            match files::digest(&path, cancel) {
                 Ok((digest, size))
                     if digest == m.sha256
                         && size == m.size_bytes
@@ -51,6 +58,7 @@ pub(crate) fn list(paths: &DrivePaths) -> Result<Vec<ManagedModel>, InferenceErr
                 {
                     Availability::Available
                 }
+                Err(InferenceError::Cancelled) => return Err(InferenceError::Cancelled),
                 _ => Availability::Corrupt,
             }
         };

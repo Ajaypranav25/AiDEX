@@ -31,6 +31,8 @@ export type InferenceCatalog = {
 export type InferenceStatus = {
   state: string;
   model_id: string | null;
+  model_name: string | null;
+  startup_error: string | null;
   backend: InferenceBackend | null;
   endpoint: string | null;
   pid: number | null;

@@ -6,9 +6,11 @@ import { useState } from "react";
 import { useRpc } from "../../hooks/useRpc";
 import { usePreferences } from "../../app/providers/preferences";
 import { useNavigation } from "../../app/providers/navigation";
+import { useInferenceStatus } from "../../hooks/useInferenceStatus";
 
 export function ModelInventory({ localOnly = false }: { localOnly?: boolean }) {
   const models = useRpc("model.list");
+  const status = useInferenceStatus(models.refetch);
   const { setModelId } = usePreferences();
   const { navigate } = useNavigation();
   const [error, setError] = useState<string>();
@@ -17,8 +19,10 @@ export function ModelInventory({ localOnly = false }: { localOnly?: boolean }) {
   );
   return (
     <Stack gap={4}>
-      {(error || models.error) && (
-        <Notice tone="danger">{error ?? models.error?.message}</Notice>
+      {(error || models.error || status.error) && (
+        <Notice tone="danger">
+          {error ?? models.error?.message ?? status.error?.message}
+        </Notice>
       )}
       {(models.data?.failures ?? []).map((failure) => (
         <Notice key={failure.provider_id} tone="warning">
@@ -65,7 +69,11 @@ export function ModelInventory({ localOnly = false }: { localOnly?: boolean }) {
       {!models.loading && !listed.length && (
         <Text tone="muted">
           {localOnly
-            ? "No local model runtime is configured."
+            ? status.data?.state === "starting"
+              ? `Loading ${status.data.model_name ?? "your local model"}…`
+              : status.data?.state === "failed"
+                ? "Local chat will be available after the installed model starts."
+                : "Start an installed model above to make it available for chat."
             : "No models available. Connect a provider or configure model IDs."}
         </Text>
       )}
