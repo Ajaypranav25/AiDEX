@@ -33,4 +33,5 @@ Add its params/result types under `src/dto/` and an entry to `RpcMethods` in `sr
 
 ```sh
 bun run --cwd packages/client check
+bun run --cwd packages/client test   # fails below 80% coverage
 ```

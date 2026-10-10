@@ -117,4 +117,5 @@ Every component accepts its root element's props (including `ref` and `className
 
 ```sh
 bun run --cwd packages/ui check
+bun run --cwd packages/ui test
 ```

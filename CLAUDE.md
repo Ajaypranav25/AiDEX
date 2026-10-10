@@ -24,6 +24,17 @@ bun run --cwd packages/ui check
 bun run --cwd apps/desktop build
 ```
 
+## Tests
+
+Unit tests use Vitest and Testing Library and sit next to the code they cover (`*.test.ts`, `*.test.tsx`). Write the failing test first. Desktop tests that need AiDEX Core render inside `aidexWrapper` from `apps/desktop/src/test/aidex.tsx` and mock `@aidex/client/rpc` or `@aidex/client/desktop`.
+
+```sh
+bun run test                              # @aidex/client (80% coverage gate), @aidex/ui, apps/desktop
+bun run --cwd apps/desktop test:e2e       # Playwright smoke tests in apps/desktop/e2e
+```
+
+The smoke tests open the dev server in Chromium outside Tauri, where the app runs on its labelled sample data. Install the browser once with `bunx playwright install chromium` in `apps/desktop`.
+
 ## Commits
 
 Subject only, no body: `type(scope): imperative subject`, starting lowercase with no trailing period.
