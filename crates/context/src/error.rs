@@ -5,6 +5,8 @@ use std::{fmt, io};
 use aidex_core::{EntityId, ServiceErrorCode};
 use aidex_workspace::WorkspaceError;
 
+use crate::memory::MemoryError;
+
 /// Everything that can go wrong while indexing, searching, loading project rules,
 /// or assembling a context pack.
 #[derive(Debug)]
@@ -23,6 +25,8 @@ pub enum ContextError {
     Index(String),
     /// `.aidex/rules.toml` exists but is invalid, unsafe, or unreadable.
     Rules(String),
+    /// Memory store failure.
+    Memory(MemoryError),
     /// Work stopped because cancellation was requested.
     Cancelled,
     /// Filesystem failure.
@@ -37,6 +41,7 @@ impl ContextError {
                 ServiceErrorCode::InvalidArgument
             }
             Self::Workspace(error) => error.code(),
+            Self::Memory(error) => error.code(),
             Self::IndexBusy(_) => ServiceErrorCode::Conflict,
             Self::Cancelled => ServiceErrorCode::Unavailable,
             Self::Drive(_) | Self::Index(_) | Self::Io { .. } => ServiceErrorCode::Internal,
@@ -53,6 +58,7 @@ impl ContextError {
             Self::IndexBusy(_) => "index_busy",
             Self::Index(_) => "index",
             Self::Rules(_) => "invalid_rules",
+            Self::Memory(error) => error.reason(),
             Self::Cancelled => "cancelled",
             Self::Io { .. } => "io",
         }
@@ -82,6 +88,7 @@ impl fmt::Display for ContextError {
             }
             Self::Index(message) => write!(f, "index error: {message}"),
             Self::Rules(message) => write!(f, "invalid project rules: {message}"),
+            Self::Memory(error) => error.fmt(f),
             Self::Cancelled => f.write_str("the operation was cancelled"),
             Self::Io { context, source } => write!(f, "{context}: {source}"),
         }
@@ -92,6 +99,7 @@ impl std::error::Error for ContextError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Workspace(error) => Some(error),
+            Self::Memory(error) => Some(error),
             Self::Io { source, .. } => Some(source),
             _ => None,
         }
@@ -101,6 +109,12 @@ impl std::error::Error for ContextError {
 impl From<WorkspaceError> for ContextError {
     fn from(error: WorkspaceError) -> Self {
         Self::Workspace(error)
+    }
+}
+
+impl From<MemoryError> for ContextError {
+    fn from(error: MemoryError) -> Self {
+        Self::Memory(error)
     }
 }
 

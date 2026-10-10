@@ -23,6 +23,8 @@ mod error;
 pub mod exclude;
 mod fsio;
 mod index;
+pub mod memory;
+mod rules;
 mod tokens;
 
 pub use error::ContextError;
@@ -31,5 +33,13 @@ pub use index::{
     IndexProgress, IndexRecovery, IndexReport, IndexState, IndexSummary, IndexTarget, LineRange,
     MAX_QUERY_CHARS, MAX_SEARCH_LIMIT, Query, RecoveryKind, RepositoryMetadata, SCHEMA_VERSION,
     SearchHit, SearchMode, SkipCounts, SymbolKind, SymbolMatch, language_for,
+};
+pub use memory::{
+    FileMemoryStore, MemoryEdit, MemoryEntry, MemoryError, MemoryScope, MemoryScopeKind,
+    MemorySource, MemoryStore, NewMemory,
+};
+pub use rules::{
+    INSTRUCTION_FILES, MAX_INSTRUCTION_BYTES, ProjectCommands, ProjectInstructions, ProjectRules,
+    RulesView,
 };
 pub use tokens::{CharEstimator, TokenEstimator};
