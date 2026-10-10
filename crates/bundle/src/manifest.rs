@@ -231,7 +231,7 @@ pub struct BundleManifest {
     /// Minimum `aidex-drive.json` schema version the bundle can run on.
     pub min_drive_schema: u32,
     pub state: StatePaths,
-    /// Every file in the bundle except `bundle.json`, sorted by path.
+    /// Every file in the bundle except `bundle.json` and `bundle.sig`, sorted by path.
     pub files: Vec<BundleFile>,
     /// Components and their licenses, sorted by component and version.
     pub licenses: Vec<LicenseEntry>,
@@ -327,7 +327,7 @@ impl BundleManifest {
         for file in &self.files {
             validate_bundle_path(&file.path).map_err(invalid)?;
             let folded = fold(&file.path);
-            if folded == MANIFEST_FILE_NAME {
+            if folded == MANIFEST_FILE_NAME || folded == crate::SIGNATURE_FILE_NAME {
                 return Err(invalid(format!("`{}` is reserved", file.path)));
             }
             if !is_sha256_hex(&file.sha256) {

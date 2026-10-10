@@ -11,16 +11,19 @@
 //!
 //! Until `switch_pointer` completes the previous `app/current.json` is untouched, so an
 //! interruption at any earlier point leaves the previously active bundle runnable.
+//! [`install_signed`] additionally checks `bundle.sig` against a [`SignaturePolicy`]
+//! during `verify`; [`install`] and [`install_with`] check integrity only and leave
+//! the trust decision to the launcher, which refuses unsigned bundles by default.
 //! Version directories are never modified once committed; reinstalling the same build
 //! reuses a verified copy, and a different build of the same version (or a repair of a
 //! corrupted copy) is committed under a digest-suffixed name instead of overwriting.
 
 mod place;
 mod stage;
+pub mod steps;
 
 use std::{
     fmt, fs,
-    io::ErrorKind,
     path::{Path, PathBuf},
 };
 
@@ -31,12 +34,12 @@ use serde::Serialize;
 pub use place::{LauncherPlacement, PlacementAction};
 
 use crate::{
-    BundleError, CurrentPointer, Target, VerifiedBundle, VerifyScope, VersionRef,
+    BundleError, CurrentPointer, SignaturePolicy, SignatureState, Target, VerifyScope, VersionRef,
     digest::sha256_hex,
-    fsutil::sync_dir,
     layout::{STAGING_DIR, VERSIONS_DIR, pointer_path},
-    path::{pointer_dir, version_dir_name},
-    verify::{read_manifest, read_manifest_bytes, verify_bundle, verify_files},
+    path::pointer_dir,
+    signature::verify_signature,
+    verify::{read_manifest, read_manifest_bytes, verify_bundle},
 };
 
 /// Where a bundle comes from.
@@ -123,9 +126,11 @@ pub struct InstallReport {
     /// The bundle that was active for this target before (rollback candidate).
     pub previous: Option<VersionRef>,
     pub launchers: Vec<LauncherPlacement>,
+    /// How the signature was accepted ([`install_signed`] only).
+    pub signature: Option<SignatureState>,
 }
 
-/// Install `source` onto the initialized drive at `drive_root`.
+/// Install `source` onto the initialized drive at `drive_root` (integrity only).
 pub fn install(source: &InstallSource, drive_root: &Path) -> Result<InstallReport, BundleError> {
     install_with(source, drive_root, &mut |_| Ok(()))
 }
@@ -135,6 +140,26 @@ pub fn install(source: &InstallSource, drive_root: &Path) -> Result<InstallRepor
 pub fn install_with(
     source: &InstallSource,
     drive_root: &Path,
+    observer: &mut dyn FnMut(InstallStep) -> Result<(), BundleError>,
+) -> Result<InstallReport, BundleError> {
+    install_inner(source, drive_root, None, observer)
+}
+
+/// [`install_with`] that also requires `bundle.sig` to satisfy `policy` before
+/// anything is committed.
+pub fn install_signed(
+    source: &InstallSource,
+    drive_root: &Path,
+    policy: &SignaturePolicy,
+    observer: &mut dyn FnMut(InstallStep) -> Result<(), BundleError>,
+) -> Result<InstallReport, BundleError> {
+    install_inner(source, drive_root, Some(policy), observer)
+}
+
+fn install_inner(
+    source: &InstallSource,
+    drive_root: &Path,
+    policy: Option<&SignaturePolicy>,
     observer: &mut dyn FnMut(InstallStep) -> Result<(), BundleError>,
 ) -> Result<InstallReport, BundleError> {
     let paths = DrivePaths::open(drive_root)?;
@@ -154,7 +179,15 @@ pub fn install_with(
     fs::create_dir(&staging).map_err(|error| {
         BundleError::io(format!("cannot create `{}`", staging.display()), error)
     })?;
-    let result = run(&paths, source, &staging, &versions, &pointer_file, observer);
+    let result = run(
+        &paths,
+        source,
+        &staging,
+        &versions,
+        &pointer_file,
+        policy,
+        observer,
+    );
     // The staging directory is ours alone; remove whatever is left of it.
     let _ = fs::remove_dir_all(&staging);
     result
@@ -166,6 +199,7 @@ fn run(
     staging: &Path,
     versions: &Path,
     pointer_file: &Path,
+    policy: Option<&SignaturePolicy>,
     observer: &mut dyn FnMut(InstallStep) -> Result<(), BundleError>,
 ) -> Result<InstallReport, BundleError> {
     observer(InstallStep::Stage)?;
@@ -176,6 +210,23 @@ fn run(
     observer(InstallStep::Verify)?;
     stage::apply_modes(&staged, &manifest)?;
     let bundle = verify_bundle(&staged, VerifyScope::All)?;
+    let signature = match policy {
+        Some(policy) => {
+            let bytes = read_manifest_bytes(&staged)?;
+            if sha256_hex(&bytes) != bundle.manifest_sha256 {
+                return Err(BundleError::InvalidSource(
+                    "the staged bundle.json changed during verification".into(),
+                ));
+            }
+            Some(verify_signature(
+                &staged,
+                &bytes,
+                &bundle.manifest.created_at,
+                policy,
+            )?)
+        }
+        None => None,
+    };
     if bundle.manifest.min_drive_schema > CURRENT_SCHEMA_VERSION {
         return Err(BundleError::DriveSchemaTooOld {
             required: bundle.manifest.min_drive_schema,
@@ -187,7 +238,9 @@ fn run(
     }
 
     observer(InstallStep::Commit)?;
-    let (name, reused_existing) = commit(&staged, versions, &bundle)?;
+    let plan = steps::plan_commit(versions, &bundle)?;
+    steps::execute_commit(&staged, versions, &plan)?;
+    let (name, reused_existing) = (plan.name().to_owned(), plan.is_reuse());
 
     observer(InstallStep::PlaceLauncher)?;
     let launchers = place::place_launchers(paths, &versions.join(&name), &bundle.manifest)?;
@@ -214,56 +267,6 @@ fn run(
         reused_existing,
         previous: previous.filter(|previous| previous.dir != next.dir),
         launchers,
-    })
-}
-
-/// Move the verified staged bundle into `versions/`, or reuse a verified identical
-/// copy. Returns the directory name and whether an existing copy was reused.
-fn commit(
-    staged: &Path,
-    versions: &Path,
-    bundle: &VerifiedBundle,
-) -> Result<(String, bool), BundleError> {
-    let manifest = &bundle.manifest;
-    let base = version_dir_name(&manifest.version, manifest.target);
-    let suffixed = format!("{base}-{}", &bundle.manifest_sha256[..12]);
-    let candidates = std::iter::once(base)
-        .chain(std::iter::once(suffixed.clone()))
-        .chain((2..=8).map(|n| format!("{suffixed}-{n}")));
-    for name in candidates {
-        let destination = versions.join(&name);
-        match fs::symlink_metadata(&destination) {
-            Err(error) if error.kind() == ErrorKind::NotFound => {
-                fs::rename(staged, &destination).map_err(|error| {
-                    BundleError::io(
-                        format!(
-                            "cannot move the staged bundle to `{}`",
-                            destination.display()
-                        ),
-                        error,
-                    )
-                })?;
-                sync_dir(versions);
-                return Ok((name, false));
-            }
-            Err(error) => {
-                return Err(BundleError::io(
-                    format!("cannot inspect `{}`", destination.display()),
-                    error,
-                ));
-            }
-            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {
-                let identical = read_manifest_bytes(&destination)
-                    .is_ok_and(|bytes| sha256_hex(&bytes) == bundle.manifest_sha256);
-                if identical && verify_files(&destination, manifest, VerifyScope::All).is_ok() {
-                    return Ok((name, true));
-                }
-                // A different build, or a damaged copy: leave it and try the next name.
-            }
-            Ok(_) => {}
-        }
-    }
-    Err(BundleError::Occupied {
-        path: versions.join(suffixed),
+        signature,
     })
 }

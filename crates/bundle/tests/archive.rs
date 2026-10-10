@@ -46,8 +46,64 @@ fn archives_are_deterministic_and_install_onto_a_drive() {
         assert_eq!(report.target, target);
         assert_eq!(common::staging_leftovers(drive.path()), 0);
         let paths = DrivePaths::open(drive.path()).unwrap();
-        resolve_active(&paths, target, VerifyScope::All).unwrap();
+        resolve_active(&paths, target, VerifyScope::All, &common::unsigned()).unwrap();
     }
+}
+
+#[test]
+fn signed_archives_carry_bundle_sig_through_extraction_and_install() {
+    let key = aidex_bundle::KeyPair::generate("archive-tests").unwrap();
+    let target = common::host();
+    let (_source, dir) = common::bundle(target, "0.1.0", "a");
+    common::sign(&dir, &key);
+    let bundle = verify_bundle(&dir, VerifyScope::All).unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let archive = out.path().join(archive_file_name("0.1.0", target));
+    let summary = write_archive(&bundle, &archive, ArchiveFormat::for_target(target)).unwrap();
+    assert_eq!(summary.entries, bundle.manifest.files.len() + 3);
+    let destination = tempfile::tempdir().unwrap();
+    let extracted =
+        extract_archive(&archive, destination.path(), &ExtractLimits::default()).unwrap();
+    assert_eq!(
+        aidex_bundle::read_signature(&extracted).unwrap(),
+        aidex_bundle::read_signature(&dir).unwrap()
+    );
+    let drive = common::temp_drive();
+    let trust = aidex_bundle::TrustStore::empty()
+        .with_key(key.trusted_key(aidex_bundle::KeySource::Explicit));
+    let policy = aidex_bundle::SignaturePolicy::require(trust);
+    aidex_bundle::install_signed(
+        &InstallSource::from_path(&archive).unwrap(),
+        drive.path(),
+        &policy,
+        &mut |_| Ok(()),
+    )
+    .unwrap();
+    let paths = DrivePaths::open(drive.path()).unwrap();
+    let active = resolve_active(&paths, target, VerifyScope::All, &policy).unwrap();
+    assert!(active.signature.is_signed());
+}
+
+#[test]
+fn unsafe_entries_and_oversized_archives_have_typed_errors() {
+    let out = tempfile::tempdir().unwrap();
+    let archive = out.path().join("traversal.zip");
+    zip_with(&archive, &[("root/../../evil.txt", b"x")]);
+    assert!(matches!(
+        extract(&archive).unwrap_err(),
+        aidex_bundle::BundleError::ArchiveEntry { .. }
+    ));
+    let (_source, archive) = build_archive(Target::WindowsX64, out.path());
+    let destination = tempfile::tempdir().unwrap();
+    let tiny = ExtractLimits {
+        max_entries: 16_384,
+        max_total_bytes: 64,
+        max_file_bytes: 64,
+    };
+    assert!(matches!(
+        extract_archive(&archive, destination.path(), &tiny).unwrap_err(),
+        aidex_bundle::BundleError::ArchiveLimit(_)
+    ));
 }
 
 #[test]

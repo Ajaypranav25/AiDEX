@@ -29,10 +29,13 @@ pub enum Exit {
     Cancelled,
     /// CLI and daemon (or data) versions are incompatible.
     Incompatible,
+    /// An installed bundle or update package failed integrity or signature
+    /// verification (the launcher's code 11).
+    Integrity,
 }
 
 impl Exit {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Success,
         Self::Failure,
         Self::Usage,
@@ -44,6 +47,7 @@ impl Exit {
         Self::NotFound,
         Self::Cancelled,
         Self::Incompatible,
+        Self::Integrity,
     ];
 
     pub const fn code(self) -> u8 {
@@ -59,6 +63,7 @@ impl Exit {
             Self::NotFound => 8,
             Self::Cancelled => 9,
             Self::Incompatible => 10,
+            Self::Integrity => 11,
         }
     }
 
@@ -76,6 +81,7 @@ impl Exit {
             Self::NotFound => "not_found",
             Self::Cancelled => "cancelled",
             Self::Incompatible => "incompatible_version",
+            Self::Integrity => "integrity_failed",
         }
     }
 
@@ -196,7 +202,7 @@ mod tests {
     #[test]
     fn exit_codes_are_the_documented_stable_table() {
         let codes: Vec<u8> = Exit::ALL.iter().map(|exit| exit.code()).collect();
-        assert_eq!(codes, (0..=10).collect::<Vec<u8>>());
+        assert_eq!(codes, (0..=11).collect::<Vec<u8>>());
         let names: HashSet<_> = Exit::ALL.iter().map(|exit| exit.name()).collect();
         assert_eq!(names.len(), Exit::ALL.len());
         assert_eq!(Exit::DaemonUnavailable.code(), 3);

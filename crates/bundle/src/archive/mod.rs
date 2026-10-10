@@ -94,7 +94,8 @@ pub(crate) struct Member {
 }
 
 /// Write a fully verified bundle as a deterministic archive at `out` (via a temporary
-/// sibling and rename). The bundle must have been verified with [`VerifyScope::All`].
+/// sibling and rename), including its `bundle.sig` when it has one. The bundle must
+/// have been verified with [`VerifyScope::All`].
 pub fn write_archive(
     bundle: &VerifiedBundle,
     out: &Path,
@@ -112,6 +113,13 @@ pub fn write_archive(
         source: bundle.dir.join(MANIFEST_FILE_NAME),
         mode: 0o644,
     }];
+    if crate::read_signature(&bundle.dir)?.is_some() {
+        members.push(Member {
+            name: format!("{root}/{}", crate::SIGNATURE_FILE_NAME),
+            source: bundle.dir.join(crate::SIGNATURE_FILE_NAME),
+            mode: 0o644,
+        });
+    }
     for file in &manifest.files {
         members.push(Member {
             name: format!("{root}/{}", file.path),
@@ -202,6 +210,14 @@ pub fn extract_archive(
     Ok(bundle_dir)
 }
 
+/// An entry refused as unsafe (traversal, absolute path, link, special file, ...).
+pub(crate) fn unsafe_entry(name: &str, reason: impl Into<String>) -> BundleError {
+    BundleError::ArchiveEntry {
+        name: name.to_owned(),
+        reason: reason.into(),
+    }
+}
+
 /// Validating writer shared by both formats.
 pub(crate) struct Extractor {
     destination: PathBuf,
@@ -216,26 +232,30 @@ impl Extractor {
     fn admit(&mut self, raw: &str) -> Result<PathBuf, BundleError> {
         self.entries += 1;
         if self.entries > self.limits.max_entries {
-            return Err(BundleError::Archive(format!(
+            return Err(BundleError::ArchiveLimit(format!(
                 "more than {} entries",
                 self.limits.max_entries
             )));
         }
-        validate_bundle_path(raw).map_err(BundleError::Archive)?;
+        validate_bundle_path(raw).map_err(|reason| unsafe_entry(raw, reason))?;
         let (root, _) = raw.split_once('/').unwrap_or((raw, ""));
         match &self.root {
             None => self.root = Some(root.to_owned()),
             Some(existing) if existing == root => {}
             Some(existing) => {
-                return Err(BundleError::Archive(format!(
-                    "entries must share one top-level directory (`{existing}` and `{root}`)"
-                )));
+                return Err(unsafe_entry(
+                    raw,
+                    format!(
+                        "entries must share one top-level directory (`{existing}` and `{root}`)"
+                    ),
+                ));
             }
         }
         if !self.seen.insert(fold(raw)) {
-            return Err(BundleError::Archive(format!(
-                "`{raw}` appears more than once (names are compared case-insensitively)"
-            )));
+            return Err(unsafe_entry(
+                raw,
+                "appears more than once (names are compared case-insensitively)",
+            ));
         }
         Ok(join_relative(&self.destination, raw))
     }
@@ -255,15 +275,17 @@ impl Extractor {
     ) -> Result<(), BundleError> {
         let path = self.admit(raw)?;
         if !raw.contains('/') {
-            return Err(BundleError::Archive(format!(
-                "`{raw}` is not inside the bundle's top-level directory"
-            )));
+            return Err(unsafe_entry(
+                raw,
+                "is not inside the bundle's top-level directory",
+            ));
         }
         if declared_size > self.limits.max_file_bytes
             || self.total_bytes + declared_size > self.limits.max_total_bytes
         {
-            return Err(BundleError::Archive(format!(
-                "`{raw}` exceeds the extraction size limits"
+            return Err(BundleError::ArchiveLimit(format!(
+                "`{raw}` ({declared_size} bytes) exceeds the limits of {} bytes per file and {} bytes in total",
+                self.limits.max_file_bytes, self.limits.max_total_bytes
             )));
         }
         if let Some(parent) = path.parent() {

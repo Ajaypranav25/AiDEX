@@ -8,10 +8,22 @@ use std::{
 };
 
 use aidex_bundle::{
-    BundleFile, BundleManifest, FileRole, LAUNCHER_MARKER, LicenseEntry, MANIFEST_FILE_NAME,
-    MANIFEST_SCHEMA_VERSION, PRODUCT_NAME, StatePaths, Target, layout,
+    BundleFile, BundleManifest, FileRole, KeyPair, LAUNCHER_MARKER, LicenseEntry,
+    MANIFEST_FILE_NAME, MANIFEST_SCHEMA_VERSION, PRODUCT_NAME, SignaturePolicy, StatePaths, Target,
+    TrustStore, layout, read_manifest_bytes, sign_manifest, write_signature,
 };
 use aidex_core::Timestamp;
+
+/// Integrity-only verification (the #26 behaviour these tests were written for).
+pub fn unsigned() -> SignaturePolicy {
+    SignaturePolicy::allow_unsigned(TrustStore::empty())
+}
+
+/// Sign the bundle in `dir` with `key` (writes `bundle.sig`).
+pub fn sign(dir: &Path, key: &KeyPair) {
+    let bytes = read_manifest_bytes(dir).unwrap();
+    write_signature(dir, &sign_manifest(&bytes, key)).unwrap();
+}
 
 /// A temporary initialized drive (removable check skipped, as for developer folders).
 pub fn temp_drive() -> tempfile::TempDir {

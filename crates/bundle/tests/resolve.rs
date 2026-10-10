@@ -37,7 +37,7 @@ impl Installed {
     }
 
     fn resolve(&self, scope: VerifyScope) -> Result<aidex_bundle::ActiveBundle, BundleError> {
-        resolve_active(&self.paths(), self.target, scope)
+        resolve_active(&self.paths(), self.target, scope, &common::unsigned())
     }
 
     fn pointer_file(&self) -> PathBuf {
@@ -117,7 +117,13 @@ fn an_unlisted_file_beside_the_binaries_is_refused() {
 fn a_missing_pointer_or_target_entry_is_reported_as_not_installed() {
     let installed = Installed::new(common::host());
     let other = common::other_than(installed.target);
-    let error = resolve_active(&installed.paths(), other, VerifyScope::Critical).unwrap_err();
+    let error = resolve_active(
+        &installed.paths(),
+        other,
+        VerifyScope::Critical,
+        &common::unsigned(),
+    )
+    .unwrap_err();
     assert_eq!(error.kind(), BundleErrorKind::NotInstalled);
     assert!(
         error.to_string().contains(installed.target.as_str()),

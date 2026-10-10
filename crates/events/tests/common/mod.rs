@@ -304,6 +304,35 @@ pub fn samples(text: &str) -> Vec<EventKind> {
             extension_id: id("mcp_github"),
             kind: ExtensionKind::Mcp,
         },
+        EventKind::UpdateStaged {
+            update_id: id("upd_1"),
+            version: t(),
+            target: t(),
+        },
+        EventKind::UpdateVerified {
+            update_id: id("upd_1"),
+            version: t(),
+            signer_key_id: Some(t()),
+            unsigned_allowed: false,
+        },
+        EventKind::UpdateSwitched {
+            update_id: id("upd_1"),
+            operation: t(),
+            from_version: Some(t()),
+            to_version: t(),
+        },
+        EventKind::UpdateRolledBack {
+            update_id: id("upd_1"),
+            from_version: Some(t()),
+            to_version: None,
+            reason: t(),
+        },
+        EventKind::UpdateFailed {
+            update_id: None,
+            stage: t(),
+            code: t(),
+            message: t(),
+        },
         EventKind::LegacyV1 {
             record: LegacyRecord::ToolFinished,
             subject_id: Some(id("tool")),

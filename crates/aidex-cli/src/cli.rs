@@ -3,7 +3,7 @@
 
 use crate::commands::{
     agent::AgentCommand, daemon::DaemonCommand, events::EventsCommand, omp::SessionOptions,
-    session::SessionArgs, vault::VaultCommand, workspace::WorkspaceArgs,
+    session::SessionArgs, update::UpdateArgs, vault::VaultCommand, workspace::WorkspaceArgs,
 };
 use crate::commands::{
     context::{
@@ -102,6 +102,8 @@ pub enum Commands {
     Memory(MemoryArgs),
     /// Show the workspace's project rules and instruction files.
     Rules(RulesArgs),
+    /// Check, apply, verify, and roll back signed AiDEX updates on this drive.
+    Update(UpdateArgs),
 }
 
 impl Commands {
@@ -131,6 +133,7 @@ impl Commands {
             Some(Self::Context(args)) => args.command.label(),
             Some(Self::Memory(args)) => args.command.label(),
             Some(Self::Rules(args)) => args.command.label(),
+            Some(Self::Update(args)) => args.command.label(),
         }
     }
 }

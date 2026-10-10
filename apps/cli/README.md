@@ -65,6 +65,8 @@ bun run login:omp
 - `resume <ID>` prints the resume plan (checkpoint, messages since it, host changes, and what cannot be recovered: lost processes, interrupted tool calls, approvals, model state) and adopts an interrupted session on this host, leaving it `paused`. It says explicitly that continuing the work is not available yet: the native agent harness (#19) is not wired, and nothing is started. A session that is not interrupted or paused exits 1.
 - `cancel <ID>` cancels a session; `branch <ID> --checkpoint <C>` creates a child session from a checkpoint. An unknown session exits 8; an invalid state name exits 2.
 
+`aidex update` manages signed updates of the AiDEX bundle on the drive (`--drive PATH`, default `AIDEX_DRIVE_ROOT`; `--json`): `check <SOURCE>` verifies a package (a `.zip`/`.tar.gz`, an unpacked bundle, or a folder of packages, where the newest for this host is used) without changing anything; `apply <SOURCE> [--allow-downgrade] [--allow-unsigned]` stages, verifies (signature against the keys built into this AiDEX and the drive's revocation list, every file, target, drive schema, version rules), self-tests, and switches the drive to it — the new version takes effect the next time AiDEX starts, and the command says so; `rollback [--allow-unsigned]` switches back to the previous version after re-verifying it; `status` shows the active and previous versions, integrity (signer key id, SBOM), and the last or interrupted operation; `verify [--allow-unsigned]` re-verifies the installed version locally (signature, every file, SBOM). `check`, `apply`, `rollback`, and `status` go through the daemon (`update.*`), which also recovers interrupted updates when it starts. Integrity and signature refusals exit 11; downgrades, wrong platforms, and incompatible drive schemas exit 10; nothing is changed by a refusal. `--allow-unsigned` and `AIDEX_ALLOW_UNSIGNED=1` are development-only opt-ins for packages without a signature; a bad or untrusted signature is never accepted. `aidex doctor` also reports the installed bundle's version, signer key id, verification, and SBOM status, and fails (exit 1) when an installed bundle does not verify.
+
 `aidex workspace` (alias `aidex project`) manages workspaces through the daemon's `workspace.*` methods; every subcommand accepts `--drive PATH` (default `AIDEX_DRIVE_ROOT`) and `--json`:
 
 - `add <PATH> [--name N]` registers an existing host directory exactly as selected (relative paths resolve against the current directory). The drive root, a directory containing the drive, and AiDEX-managed directories are refused; an already registered root is a conflict (exit 1).
@@ -91,7 +93,7 @@ Interactive chat uses the user's existing OMP provider credentials. Configure th
 The source-tree `aidex run` adapter is `apps/cli/src/run.ts`. Packaged binaries must ship that script and set `AIDEX_RUNNER`; `AIDEX_BUN` can select a non-default Bun executable.
 ## Machine-readable output
 
-The global `--json` flag makes `init`, `status`, `daemon start|status|stop`, `events show`, `vault ...`, `workspace ...`, `doctor`, and `agent list` print exactly one compact JSON document on stdout. Failures never write to stdout: with `--json` the error is a single JSON line on stderr,
+The global `--json` flag makes `init`, `status`, `daemon start|status|stop`, `events show`, `vault ...`, `workspace ...`, `update ...`, `doctor`, and `agent list` print exactly one compact JSON document on stdout. Failures never write to stdout: with `--json` the error is a single JSON line on stderr,
 
 ```json
 {"error":{"code":"daemon_unavailable","exit_code":3,"message":"daemon not running on /media/aidex: ...","hint":"start it with `aidex daemon start --drive /media/aidex`"}}
@@ -115,6 +117,7 @@ Exit codes are stable (`crates/aidex-cli/src/exit.rs`, `Exit`); `error.code` in 
 | 7 | `model_unavailable` | No usable model or provider. |
 | 8 | `not_found` | The requested entity or history does not exist (e.g. an expired event cursor). |
 | 9 | `cancelled` | Cancelled or interrupted. |
-| 10 | `incompatible_version` | CLI and daemon speak different IPC contract versions, or the daemon lacks the method. |
+| 10 | `incompatible_version` | CLI and daemon speak different IPC contract versions, or the daemon lacks the method; or an update is a downgrade, for another platform, or needs a newer drive schema. |
+| 11 | `integrity_failed` | An installed bundle or update package failed integrity or signature verification (same meaning as the launcher's exit 11). |
 
 `chat` and `run` map the delegated Oh My Pi process status onto this table: 0 stays 0, an interrupt (status 130 or a signal) is 9, any other status is 1. Daemon JSON-RPC error codes map to exit codes as listed in `protocol/commands/README.md`.
