@@ -58,7 +58,7 @@ export function ModelsStep({ state, update, titleRef, customPathError, customPat
           />
         </Stack>
       </Grid>
-      <Text tone="muted">Models shown are sample package choices. This preview does not download or inspect files.</Text>
+      <Text tone="muted">Models shown are sample package choices. Setup does not download or import models yet (model import, issue #15).</Text>
     </>
   );
 }

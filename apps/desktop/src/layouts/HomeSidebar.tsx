@@ -36,7 +36,7 @@ export function HomeSidebar() {
         keyShortcuts: modifierKey === "⌘" ? "Meta+K" : "Control+K",
       }}
     >
-      <SidebarSection title="Pinned">
+      <SidebarSection title="Pinned (sample)">
         {sampleWorkspaces
           .filter((workspace) => workspace.pinned)
           .map(({ id, name, Icon, iconTone }) => (
@@ -58,7 +58,7 @@ export function HomeSidebar() {
             />
           ))}
       </SidebarSection>
-      <SidebarSection title="Workspaces">
+      <SidebarSection title="Workspaces (sample)">
         {sampleWorkspaces
           .filter((workspace) => !workspace.pinned)
           .slice(0, 4)
@@ -73,7 +73,7 @@ export function HomeSidebar() {
             />
           ))}
       </SidebarSection>
-      <SidebarSection title="Recents">
+      <SidebarSection title="Recents (sample)">
         {sampleSessions.slice(0, RECENT_LIMIT).map((session) => (
           <SidebarItem
             key={session.id}

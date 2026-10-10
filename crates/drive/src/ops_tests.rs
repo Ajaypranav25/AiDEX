@@ -181,3 +181,49 @@ fn init_with_developer_folder_initializes_a_v2_drive_that_services_can_open() {
         V1_MANIFEST
     );
 }
+
+#[test]
+fn status_with_reports_a_developer_folder_that_status_refuses() {
+    let root = tempfile::tempdir().unwrap();
+    init_with(
+        root.path(),
+        InitOptions {
+            require_removable: false,
+        },
+    )
+    .unwrap();
+    assert!(StatusOptions::default().require_removable);
+    assert!(
+        status(root.path()).is_err(),
+        "a temporary directory is not a removable drive root"
+    );
+
+    let manifest = fs::read(root.path().join(MANIFEST_FILE_NAME)).unwrap();
+    let report = status_with(
+        root.path(),
+        StatusOptions {
+            require_removable: false,
+        },
+    )
+    .unwrap();
+    assert_eq!(report.schema_version, Some(CURRENT_SCHEMA_VERSION));
+    assert!(report.writable);
+    assert!(!report.migration_required());
+    assert_eq!(report.root, fs::canonicalize(root.path()).unwrap());
+    assert_eq!(
+        fs::read(root.path().join(MANIFEST_FILE_NAME)).unwrap(),
+        manifest
+    );
+
+    let empty = tempfile::tempdir().unwrap();
+    assert!(matches!(
+        status_with(
+            empty.path(),
+            StatusOptions {
+                require_removable: false
+            }
+        ),
+        Err(DriveError::MissingManifest(_))
+    ));
+    assert_eq!(fs::read_dir(empty.path()).unwrap().count(), 0);
+}

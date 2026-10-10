@@ -6,6 +6,7 @@
   "workspaces": [
     "apps/desktop",
     "apps/installer",
+    "packages/client",
     "packages/ui"
   ],
   "scripts": {

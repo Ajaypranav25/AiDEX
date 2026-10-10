@@ -1,11 +1,6 @@
-//! Platform queries: removable-media detection, free space, and drive-letter roots.
+//! Platform queries: the removable-media gate, free space, and drive-letter roots.
 
-#[cfg(target_os = "linux")]
-use std::path::PathBuf;
 use std::{path::Path, process::Command};
-
-#[cfg(target_os = "linux")]
-use std::fs;
 
 use crate::DriveError;
 
@@ -51,89 +46,23 @@ pub(crate) fn available_bytes(root: &Path) -> Result<u64, DriveError> {
     bytes.ok_or_else(|| DriveError::Discovery("cannot parse free drive space".into()))
 }
 
+/// Refuse roots that are not portable media: the volume must be removable media or a
+/// USB-attached fixed disk (portable SSDs report themselves as fixed), and never the
+/// system volume. Internal SATA/NVMe disks and unclassified volumes are refused.
 pub(crate) fn require_removable(root: &Path) -> Result<(), DriveError> {
-    #[cfg(target_os = "linux")]
-    {
-        let canonical =
-            fs::canonicalize(root).map_err(|error| DriveError::Discovery(error.to_string()))?;
-        let mounts = fs::read_to_string("/proc/mounts").map_err(|error| {
-            DriveError::Discovery(format!("cannot identify removable filesystem: {error}"))
-        })?;
-        let mount = mounts
-            .lines()
-            .filter_map(|line| {
-                let fields: Vec<_> = line.split_whitespace().collect();
-                let point = fields.get(1)?.replace("\\040", " ");
-                let point_path = PathBuf::from(point);
-                canonical
-                    .starts_with(&point_path)
-                    .then(|| (fields[0], point_path))
-            })
-            .max_by_key(|(_, point)| point.components().count());
-        let (device, _) =
-            mount.ok_or_else(|| DriveError::NotRemovable(root.display().to_string()))?;
-        let block = device
-            .strip_prefix("/dev/")
-            .ok_or_else(|| DriveError::NotRemovable(root.display().to_string()))?;
-        let block = block.trim_end_matches(|character: char| character.is_ascii_digit());
-        if fs::read_to_string(PathBuf::from("/sys/block").join(block).join("removable"))
-            .ok()
-            .is_some_and(|value| value.trim() == "1")
-        {
-            return Ok(());
-        }
-        Err(DriveError::NotRemovable(root.display().to_string()))
-    }
     #[cfg(windows)]
-    {
-        if !is_windows_drive_root(root) {
-            return Err(DriveError::InvalidRoot(format!(
-                "{} is not a drive-letter root",
-                root.display()
-            )));
-        }
-        let letter = windows_drive_letter(root).unwrap_or_default().to_string();
-        let output = Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "(Get-CimInstance Win32_LogicalDisk -Filter (\"DeviceID='\" + $env:AIDEX_DRIVE_LETTER + \":'\")).DriveType",
-            ])
-            .env("AIDEX_DRIVE_LETTER", letter)
-            .output()
-            .map_err(|error| {
-                DriveError::Discovery(format!("cannot identify removable drive: {error}"))
-            })?;
-        if output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "2" {
-            return Ok(());
-        }
-        Err(DriveError::NotRemovable(root.display().to_string()))
+    if !is_windows_drive_root(root) {
+        return Err(DriveError::InvalidRoot(format!(
+            "{} is not a drive-letter root",
+            root.display()
+        )));
     }
-    #[cfg(target_os = "macos")]
-    {
-        let output = Command::new("diskutil")
-            .args(["info", &root.to_string_lossy()])
-            .output()
-            .map_err(|error| {
-                DriveError::Discovery(format!("cannot identify removable drive: {error}"))
-            })?;
-        let info = String::from_utf8_lossy(&output.stdout);
-        if output.status.success()
-            && info
-                .lines()
-                .any(|line| line.contains("Removable Media:") && line.contains("Removable"))
-        {
-            return Ok(());
-        }
-        Err(DriveError::NotRemovable(root.display().to_string()))
-    }
-    #[cfg(not(any(target_os = "linux", target_os = "windows", target_os = "macos")))]
-    {
-        let _ = root;
-        Err(DriveError::Discovery(
-            "removable-drive detection is unsupported on this platform".into(),
-        ))
+    let volume = crate::volume::raw_volume_for(root).map_err(|error| {
+        DriveError::Discovery(format!("cannot identify removable drive: {error}"))
+    })?;
+    match volume {
+        Some(volume) if volume.removable.is_portable() && !volume.system => Ok(()),
+        _ => Err(DriveError::NotRemovable(root.display().to_string())),
     }
 }
 
@@ -155,7 +84,7 @@ fn windows_drive_letter(path: &Path) -> Option<char> {
 
 /// The drive letter of any path on a lettered volume (`C:\x`, `\\?\C:\x`).
 #[cfg(windows)]
-fn volume_letter(path: &Path) -> Option<char> {
+pub(crate) fn volume_letter(path: &Path) -> Option<char> {
     use std::path::{Component, Prefix};
     match path.components().next()? {
         Component::Prefix(prefix) => match prefix.kind() {

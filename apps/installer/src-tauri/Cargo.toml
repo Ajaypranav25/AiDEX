@@ -5,15 +5,31 @@ license = "MIT"
 description = "AiDEX portable workspace setup guide"
 authors = ["AiDEX"]
 edition = "2021"
+rust-version = "1.85"
 
 [lib]
 name = "aidex_installer_lib"
-crate-type = ["staticlib", "cdylib", "rlib"]
+# Desktop builds link the library into the binary only; mobile targets are deferred.
+crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+aidex-core = { path = "../../../crates/core" }
+aidex-drive = { path = "../../../crates/drive" }
+aidex-host = { path = "../../../crates/host" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 tauri = { version = "2", features = [] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
 
 [workspace]

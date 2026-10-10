@@ -1,7 +1,10 @@
-// Sample data until AiDEX Core exposes the policy engine, vault, sandbox, and audit log.
+// Sample data until AiDEX Core exposes the policy engine, vault, and audit log through the daemon.
+// The sandbox capability matrix is live (`sandbox_capabilities`); the selected level is local state.
 // Secret values are never present: only masked fingerprints that could not be used as credentials.
+import type { BackendKind, SandboxLevel } from "@aidex/client/dto/sandbox";
 
-export type IsolationLevel = "off" | "standard" | "strict";
+/** The sandbox levels of crates/sandbox (`direct` 0 through `ephemeral` 3). */
+export type IsolationLevel = SandboxLevel;
 
 export type ActivePermission = { id: string; agent: string; permission: string; scope: string; granted: string };
 
@@ -15,7 +18,7 @@ export type VaultSecret = { id: string; name: string; type: SecretType; scope: s
 
 export type ConnectedAccount = { id: string; name: string; detail: string; status: { label: string; tone: "success" | "warning" } };
 
-export type SandboxBackend = { id: "windows" | "linux" | "macos"; platform: string; mechanism: string; detail: string };
+export type SandboxBackend = { id: BackendKind; platform: string; mechanism: string; detail: string };
 
 export type FilesystemRule = { id: string; path: string; access: "Read" | "Read and write" | "Deny"; scope: string };
 
@@ -26,9 +29,10 @@ export type SecurityAlert = { id: string; label: string; tab: "overview" | "vaul
 export const policyMode = { value: "Standard", hint: "Destructive and remote actions need approval" };
 
 export const isolationLabels: Record<IsolationLevel, { value: string; hint: string }> = {
-  off: { value: "Off", hint: "Commands run directly as you" },
-  standard: { value: "Restricted", hint: "Native OS limits · fails closed" },
-  strict: { value: "Ephemeral", hint: "Isolated environment · fails closed" },
+  direct: { value: "Direct", hint: "Commands run directly as you" },
+  brokered: { value: "Brokered", hint: "Broker, cleared environment, tree kill" },
+  restricted: { value: "Restricted", hint: "Native filesystem confinement · fails closed" },
+  ephemeral: { value: "Ephemeral", hint: "Disposable environment · fails closed" },
 };
 
 export const samplePermissions: readonly ActivePermission[] = [
@@ -63,24 +67,27 @@ export const sampleAccounts: readonly ConnectedAccount[] = [
   { id: "github", name: "GitHub", detail: "Git hosting · uses GITHUB_TOKEN · expires in 5 days", status: { label: "Expires soon", tone: "warning" } },
 ];
 
+/** How each OS backend isolates processes (crates/sandbox/README.md enforcement matrix). */
 export const sandboxBackends: readonly SandboxBackend[] = [
   {
-    id: "windows",
+    id: "windows_job_object",
     platform: "Windows",
-    mechanism: "AppContainer + job objects",
-    detail: "Restricted token in a low-privilege AppContainer, with job limits on CPU, memory, and process count.",
+    mechanism: "Job Objects",
+    detail:
+      "Each process tree runs in a Job Object with a cleared environment; process, memory, and CPU limits are watchdog-enforced. No filesystem or network confinement yet, so the maximum level is Brokered.",
   },
   {
-    id: "linux",
+    id: "linux_landlock",
     platform: "Linux",
-    mechanism: "Landlock + seccomp",
-    detail: "Landlock filesystem allowlists and a seccomp syscall filter, with namespaces where the kernel allows.",
+    mechanism: "Landlock + namespaces",
+    detail:
+      "Landlock filesystem rules (Linux 6.2+), rlimits, and private user and network namespaces where the kernel allows; up to Restricted.",
   },
   {
-    id: "macos",
+    id: "macos_seatbelt",
     platform: "macOS",
     mechanism: "Seatbelt",
-    detail: "A sandbox profile that limits file, process, and network access for each agent process.",
+    detail: "A sandbox-exec profile that denies writes outside the mounts and network when requested, plus rlimits; up to Brokered.",
   },
 ];
 

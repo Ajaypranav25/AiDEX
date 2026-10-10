@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
 import { AppShell, NavRail, TopBar } from "@aidex/ui/desktop";
 import { PanelLeftIcon } from "@aidex/ui/icons";
-import { Avatar, IconButton, SearchField, Select, StatusIndicator, Text } from "@aidex/ui/primitives";
+import { Avatar, Badge, IconButton, SearchField, Select, StatusIndicator, Text } from "@aidex/ui/primitives";
 import { useNavigation } from "../app/providers/navigation";
+import { useAidexStatus } from "../hooks/useAidexStatus";
 import { usePreferences } from "../app/providers/preferences";
 import { railIdFor, railItems, type RailId } from "../lib/navigation";
 import { placeholderAccount } from "../lib/placeholders";
-import { pageTitles, screenKeyOf } from "../lib/routes";
+import { pageTitles, samplePages, screenKeyOf } from "../lib/routes";
 import { modelOptions } from "../lib/sample/models";
 import { ShellContext, type Shell } from "./shell";
 
@@ -78,12 +79,13 @@ export function MainLayout({ Sidebar, onNewSession, children }: Props) {
               {pageTitles[route.page]}
             </Text>
           )}
+          {samplePages.has(route.page) ? <Badge tone="neutral">Sample data</Badge> : null}
         </>
       }
       center={<SearchField ref={searchRef} label="Search" placeholder="Search sessions, workspaces, or files..." />}
       end={
         <>
-          <StatusIndicator tone="success" label="Drive connected" />
+          <CoreIndicator />
           <Select
             label="Model"
             labelVisibility="hidden"
@@ -110,4 +112,14 @@ export function MainLayout({ Sidebar, onNewSession, children }: Props) {
       </AppShell>
     </ShellContext.Provider>
   );
+}
+
+/** Live drive and AiDEX Core state for the top bar. */
+function CoreIndicator() {
+  const { status, bridgeMissing, daemonRunning } = useAidexStatus();
+  if (bridgeMissing) return <StatusIndicator tone="neutral" label="Preview: AiDEX Core not reachable" />;
+  if (!status) return <StatusIndicator tone="neutral" label="Checking drive" />;
+  if (status.drive.state !== "resolved") return <StatusIndicator tone="warning" label="No drive" />;
+  if (daemonRunning) return <StatusIndicator tone="success" label="Drive connected" />;
+  return <StatusIndicator tone="warning" label={status.daemon.state === "stopped" ? "AiDEX Core stopped" : "AiDEX Core unavailable"} />;
 }
