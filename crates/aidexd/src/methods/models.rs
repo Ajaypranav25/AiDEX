@@ -259,9 +259,12 @@ fn route(services: &Services, params: RouteParams) -> Result<RouteResult, RpcErr
         secret_heavy: params.secret_heavy,
         user_override,
         preferred: models.registry().default_model(),
-        // Host RAM/GPU discovery is not available yet (aidex-host reports
-        // platform identifiers only), so RAM constraints are not applied.
-        host: HostSummary::default(),
+        // Local models declare a minimum RAM; GPU presence is opt-in to probe
+        // (`aidex runtime plan --probe-gpu`) and is not assumed here.
+        host: HostSummary {
+            ram_bytes: aidex_host::HostResources::current().total_ram_bytes,
+            gpu: false,
+        },
     };
     let decision = models
         .router()
@@ -284,6 +287,11 @@ fn route(services: &Services, params: RouteParams) -> Result<RouteResult, RpcErr
 }
 
 fn add(services: &Services, params: ProviderAddParams) -> Result<ProviderEntry, RpcError> {
+    if params.id == aidex_inference::LOCAL_PROVIDER_ID {
+        return Err(RpcError::invalid_params(
+            "provider id `local` is reserved for AiDEX's managed llama.cpp runtime",
+        ));
+    }
     let mut config = ProviderConfig::new(provider_id(&params.id)?, params.kind, params.base_url);
     config.locality = params.locality;
     config.discover_models = params.discover_models;
@@ -423,7 +431,7 @@ mod tests {
     }
 
     fn register_fake(services: &Services) {
-        let id = ProviderId::new("local").unwrap();
+        let id = ProviderId::new("lan").unwrap();
         let provider = FakeProvider::new(id.clone(), Locality::Local).with_model(
             ModelDescriptor::new(
                 ModelRef::new(id, ModelId::new("coder").unwrap()),
@@ -454,7 +462,7 @@ mod tests {
                 .unwrap(),
         )
         .unwrap();
-        assert_eq!(routed.decision.primary.to_string(), "local/coder");
+        assert_eq!(routed.decision.primary.to_string(), "lan/coder");
         assert_eq!(routed.model.context_window, 16_384);
         assert!(!routed.decision.reasons.is_empty());
 
@@ -473,18 +481,18 @@ mod tests {
             .call(
                 &context,
                 MODEL_USE,
-                json!({"provider_id": "local", "model_id": "coder"}),
+                json!({"provider_id": "lan", "model_id": "coder"}),
             )
             .unwrap();
         let default: DefaultModel =
             serde_json::from_value(router.call(&context, MODEL_DEFAULT, json!({})).unwrap())
                 .unwrap();
-        assert_eq!(default.default_model.unwrap().to_string(), "local/coder");
+        assert_eq!(default.default_model.unwrap().to_string(), "lan/coder");
         let missing = router
             .call(
                 &context,
                 MODEL_USE,
-                json!({"provider_id": "local", "model_id": "nope"}),
+                json!({"provider_id": "lan", "model_id": "nope"}),
             )
             .unwrap_err();
         assert_eq!(missing.kind(), Some(ErrorCode::NotFound));

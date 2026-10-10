@@ -10,8 +10,10 @@ aidex-core = { path = "../core" }
 aidex-drive = { path = "../drive" }
 aidex-events = { path = "../events" }
 aidex-host = { path = "../host" }
+aidex-inference = { path = "../inference" }
 aidex-providers = { path = "../providers" }
 aidex-router = { path = "../router" }
+aidex-sandbox = { path = "../sandbox" }
 aidex-vault = { path = "../vault" }
 aidex-workspace = { path = "../workspace" }
 getrandom = "0.3"

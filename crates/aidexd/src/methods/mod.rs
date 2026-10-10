@@ -8,6 +8,7 @@
 
 pub mod daemon;
 pub mod events;
+pub mod inference;
 pub mod models;
 pub mod vault;
 pub mod workspace;
@@ -25,6 +26,7 @@ pub(crate) fn register_all(
 ) -> Result<(), RouterError> {
     daemon::register(router, services)?;
     events::register(router, services)?;
+    inference::register(router, services)?;
     models::register(router, services)?;
     vault::register(router, services)?;
     workspace::register(router, services)?;

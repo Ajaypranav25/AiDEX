@@ -223,7 +223,7 @@ fn provider_credentials_come_from_vault_handles_scoped_to_the_provider() {
 fn routing_and_network_state_are_inspectable_over_ipc() {
     let root = common::temp_drive();
     let daemon = start(root.path(), options(), |daemon| {
-        let id = ProviderId::new("local").unwrap();
+        let id = ProviderId::new("lan").unwrap();
         let fake = FakeProvider::new(id.clone(), Locality::Local).with_model(
             ModelDescriptor::new(
                 ModelRef::new(id, ModelId::new("coder").unwrap()),
@@ -249,7 +249,7 @@ fn routing_and_network_state_are_inspectable_over_ipc() {
             json!({"task": "code", "needs_tools": true, "privacy": "local_only"}),
         )
         .unwrap();
-    assert_eq!(routed.decision.primary.to_string(), "local/coder");
+    assert_eq!(routed.decision.primary.to_string(), "lan/coder");
     assert_eq!(routed.model.context_window, 32_768);
     assert_eq!(
         routed.model.capabilities.tool_calls,

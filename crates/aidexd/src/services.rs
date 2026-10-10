@@ -13,6 +13,9 @@ use crate::{endpoint, lifecycle::ShutdownSignal};
 use aidex_core::ServiceErrorCode;
 use aidex_drive::DrivePaths;
 use aidex_events::{EventLog, RetentionPolicy};
+use aidex_inference::{InferenceOptions, LocalInference};
+use aidex_providers::RegistryError;
+use aidex_sandbox::Sandbox;
 use aidex_vault::{VaultService, VaultServiceConfig};
 use aidex_workspace::WorkspaceRegistry;
 use std::{
@@ -55,6 +58,7 @@ pub struct Services {
     vault: Arc<VaultService>,
     workspaces: WorkspaceRegistry,
     models: ModelServices,
+    inference: LocalInference,
 }
 
 impl Services {
@@ -94,6 +98,7 @@ impl Services {
             Arc::clone(&vault),
             Arc::new(EventsModelObserver::new(Arc::new(events.clone()))),
         )?;
+        let inference = open_inference(&paths, &models, &events)?;
         Ok(Self {
             drive_root: drive_root.to_path_buf(),
             paths,
@@ -104,6 +109,7 @@ impl Services {
             vault,
             workspaces,
             models,
+            inference,
         })
     }
 
@@ -150,6 +156,48 @@ impl Services {
     /// (`aidex-providers`, `aidex-router`).
     pub fn models(&self) -> &ModelServices {
         &self.models
+    }
+
+    /// Local GGUF inference (`aidex-inference`): the model registry, runtime
+    /// installs, and managed llama-server processes. Its provider is registered
+    /// in [`Self::models`] as `local`.
+    pub fn inference(&self) -> &LocalInference {
+        &self.inference
+    }
+}
+
+/// Open local inference and register its `local` provider. A configured
+/// provider that already uses the id `local` keeps it (local models are then
+/// reachable only through the `model.*` local methods).
+fn open_inference(
+    paths: &DrivePaths,
+    models: &ModelServices,
+    events: &EventLog,
+) -> Result<LocalInference, ServicesError> {
+    let inference = LocalInference::open(
+        paths,
+        Sandbox::locate(),
+        Arc::new(events.clone()),
+        InferenceOptions::default(),
+    )
+    .map_err(|error| ServicesError::new("inference", error.code(), error.to_string()))?;
+    match models
+        .registry()
+        .register_shared(Arc::new(inference.provider()))
+    {
+        Ok(()) | Err(RegistryError::Duplicate(_)) => Ok(inference),
+        Err(error) => Err(ServicesError::new(
+            "inference",
+            error.code(),
+            error.to_string(),
+        )),
+    }
+}
+
+impl Drop for Services {
+    /// Stop managed model servers with the daemon.
+    fn drop(&mut self) {
+        self.inference.shutdown();
     }
 }
 
