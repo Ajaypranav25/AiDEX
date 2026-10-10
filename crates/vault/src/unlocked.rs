@@ -422,7 +422,7 @@ impl UnlockedVault {
     /// Best-effort removal of temporary files and record files no longer referenced.
     pub(crate) fn collect_garbage(&self) {
         self.dir.remove_temp_files();
-        let Ok(on_disk) = self.dir.record_blobs() else {
+        let Ok(on_disk) = self.dir.record_blobs(None) else {
             return;
         };
         let referenced: HashSet<&BlobId> =

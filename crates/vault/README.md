@@ -83,6 +83,8 @@ Types:
 - Unauthenticated KDF parameters are capped at 64 MiB, three Argon2id iterations,
   and four lanes. Headers above that budget are rejected before key derivation,
   including vaults created with previously accepted oversized parameters.
+- Restore accepts at most 4096 well-named record files and rejects excess records
+  before collecting references or copying files into the destination.
 
 ## Limitations
 

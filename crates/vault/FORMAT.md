@@ -249,6 +249,8 @@ a new passphrase without the old one (`reset_passphrase`).
   the header and all well-formed record files, compares them byte-for-byte, and
   returns the restored vault locked. Cryptographic verification needs a credential:
   unlock it and call `UnlockedVault::verify()`.
+  Enumeration rejects more than 4096 well-named records before constructing the
+  reference collection or copying any record, bounding damaged-backup restores.
 - A backup is protected exactly like the live vault: the same passphrase and the
   same recovery key unlock it, and changing the passphrase later does not change
   the backup's slot (the old passphrase keeps opening the old backup).

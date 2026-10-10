@@ -108,7 +108,8 @@ impl VaultDir {
     }
 
     /// Well-formed record files present on disk (temporary and foreign files excluded).
-    pub(crate) fn record_blobs(&self) -> Result<Vec<BlobId>, VaultError> {
+    /// When a limit is supplied, reject excess entries before collecting them.
+    pub(crate) fn record_blobs(&self, limit: Option<usize>) -> Result<Vec<BlobId>, VaultError> {
         let records = self.records_dir();
         match fs::symlink_metadata(&records) {
             Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
@@ -123,6 +124,9 @@ impl VaultDir {
             let entry =
                 entry.map_err(|error| VaultError::io("list records directory", &records, error))?;
             if let Some(blob) = entry.file_name().to_str().and_then(BlobId::from_file_name) {
+                if limit.is_some_and(|limit| blobs.len() >= limit) {
+                    return Err(VaultError::LimitExceeded("too many record files to restore"));
+                }
                 blobs.push(blob);
             }
         }
@@ -143,7 +147,7 @@ impl VaultDir {
                 ));
             }
         }
-        Ok(!self.record_blobs()?.is_empty())
+        Ok(!self.record_blobs(None)?.is_empty())
     }
 
     /// Best-effort removal of temporary files left by interrupted writes.
