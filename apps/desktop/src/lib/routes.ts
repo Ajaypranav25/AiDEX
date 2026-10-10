@@ -62,3 +62,14 @@ export function tabOf<Page extends TabbedPage>(route: Route, page: Page): PageTa
   const tabs: readonly string[] = pageTabs[page];
   return (route.tab && tabs.includes(route.tab) ? route.tab : tabs[0]) as PageTab<Page>;
 }
+
+/** Pages whose `id` is an in-page selection (a file, a checkpoint, a filter) rather than the record shown. */
+const selectionPages: ReadonlySet<PageId> = new Set(["review", "checkpoints", "history", "remote", "extensions"]);
+
+/**
+ * Identity of the screen a route shows. Changing it remounts the page, resets scroll, and moves focus
+ * to the new title; tab switches and in-page selections keep the same identity.
+ */
+export function screenKeyOf(route: Route): string {
+  return selectionPages.has(route.page) ? route.page : `${route.page}:${route.id ?? ""}`;
+}

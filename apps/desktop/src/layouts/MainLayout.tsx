@@ -6,7 +6,7 @@ import { useNavigation } from "../app/providers/navigation";
 import { usePreferences } from "../app/providers/preferences";
 import { railIdFor, railItems, type RailId } from "../lib/navigation";
 import { placeholderAccount } from "../lib/placeholders";
-import { pageTitles } from "../lib/routes";
+import { pageTitles, screenKeyOf } from "../lib/routes";
 import { modelOptions } from "../lib/sample/models";
 import { ShellContext, type Shell } from "./shell";
 
@@ -27,8 +27,9 @@ export function MainLayout({ Sidebar, onNewSession, children }: Props) {
   const showSidebarRef = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLElement>(null);
   const sidebarToggled = useRef(false);
-  const firstRoute = useRef(true);
-  const pageKey = `${route.page}:${route.id ?? ""}`;
+  const pageKey = screenKeyOf(route);
+  // Compared against the current key rather than a first-mount flag, which StrictMode's double effect defeats.
+  const previousPageKey = useRef(pageKey);
 
   // The toggle that was pressed unmounts, so hand focus to its counterpart.
   useEffect(() => {
@@ -39,10 +40,8 @@ export function MainLayout({ Sidebar, onNewSession, children }: Props) {
 
   // A new page starts at the top, and its title takes focus so the change is announced.
   useEffect(() => {
-    if (firstRoute.current) {
-      firstRoute.current = false;
-      return;
-    }
+    if (previousPageKey.current === pageKey) return;
+    previousPageKey.current = pageKey;
     contentRef.current?.scrollTo({ top: 0 });
     contentRef.current?.querySelector<HTMLElement>("h1[tabindex='-1']")?.focus();
   }, [pageKey]);

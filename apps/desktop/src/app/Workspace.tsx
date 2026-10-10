@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { HomePage } from "../features/home/HomePage";
 import { useCommandShortcut } from "../hooks/useCommandShortcut";
 import { MainLayout } from "../layouts/MainLayout";
+import { screenKeyOf } from "../lib/routes";
 import { NavigationProvider, useNavigation } from "./providers/navigation";
 import { PreferencesProvider } from "./providers/preferences";
 import { ToastProvider } from "./providers/toast";
@@ -43,8 +44,8 @@ function WorkspaceScreens() {
   const { Page, Sidebar } = screens[route.page];
   return (
     <MainLayout Sidebar={Sidebar} onNewSession={startNewSession}>
-      {/* Keyed by record so local state resets when the same page opens another workspace, agent, or model. */}
-      <Page key={`${route.page}:${route.id ?? ""}`} />
+      {/* Keyed by screen so local state resets when the same page opens another workspace, agent, or model. */}
+      <Page key={screenKeyOf(route)} />
     </MainLayout>
   );
 }
