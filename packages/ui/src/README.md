@@ -1,3 +1,4 @@
 # Shared UI source
 
-Source for the shared design-system package will live here once a second frontend consumes common components.
+Shared components for desktop, installer, and mobile belong in `components/`.
+Target-specific UI belongs in `desktop/`, `installer/`, or `mobile/`.
