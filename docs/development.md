@@ -14,11 +14,15 @@ The frontend development servers bind to loopback on `3311` (desktop) and `3312`
 ```sh
 bun install
 bun run dev:cli -- --help
+bun run dev:cli -- init --drive /path/to/removable-drive
+bun run dev:cli -- status --drive /path/to/removable-drive
 bun run dev:cli -- doctor
 bun run dev:desktop
 bun run dev:installer
 cargo check --workspace
 ```
+
+The drive contract is the root-level schema-v1 JSON `aidex-drive.json`; `aidex init` and `aidex status` operate on that manifest and never use a second metadata format.
 
 Run the narrowest relevant checks after changing a surface. Do not treat a successful frontend build as proof of drive provisioning, encryption, broker enforcement, or model inference; those behaviors require their own integration scenarios when implemented.
 
