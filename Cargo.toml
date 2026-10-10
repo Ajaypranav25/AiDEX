@@ -12,6 +12,7 @@ members = [
     "crates/sessions",
     "crates/storage",
     "crates/vault",
+    "crates/workspace",
 ]
 
 [workspace.package]

@@ -6,9 +6,11 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+aidex-core = { path = "../core" }
 aidex-drive = { path = "../drive" }
 aidex-events = { path = "../events" }
 aidex-host = { path = "../host" }
+aidex-workspace = { path = "../workspace" }
 aidexd = { path = "../aidexd" }
 clap.workspace = true
 rpassword = "7"

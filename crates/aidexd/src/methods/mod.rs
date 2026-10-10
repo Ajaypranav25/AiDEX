@@ -9,6 +9,7 @@
 pub mod daemon;
 pub mod events;
 pub mod vault;
+pub mod workspace;
 
 use crate::{
     router::{Router, RouterError},
@@ -24,5 +25,6 @@ pub(crate) fn register_all(
     daemon::register(router, services)?;
     events::register(router, services)?;
     vault::register(router, services)?;
+    workspace::register(router, services)?;
     Ok(())
 }

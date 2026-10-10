@@ -8,7 +8,7 @@ AiDEX is a portable AI development environment: its agent workflows, tools, mode
 - `apps/desktop` — Tauri desktop client; retained while the shared Rust crates take priority.
 - `apps/installer` — Tauri drive-setup preview; it does not yet provision a drive.
 - `apps/mobile` — reserved future client; not implemented yet.
-- `crates/` — active Rust workspace for the CLI, host, portable paths, sessions, storage, events, and daemon foundations.
+- `crates/` — active Rust workspace for the CLI, host, portable paths, sessions, storage, events, workspaces, and daemon foundations.
 - `packages/` — shared frontend packages; `packages/ui` (`@aidex/ui`) provides the design tokens and components the desktop screens are built from.
 - `protocol/` — reserved versioned API-contract boundary; no generated client exists yet.
 - `integrations/` — reserved metadata and definitions for adapters, MCP, skills, plugins, and providers.

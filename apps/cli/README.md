@@ -34,6 +34,8 @@ bun run dev:cli -- vault set openai --consumer provider:openai --kind api_key --
 bun run dev:cli -- vault list --drive /path/to/drive
 bun run dev:cli -- vault lock --drive /path/to/drive
 bun run dev:cli -- daemon stop --drive /path/to/drive
+bun run dev:cli -- workspace add ~/src/project --name project --drive /path/to/drive
+bun run dev:cli -- workspace ephemeral create project --drive /path/to/drive
 bun run dev:cli -- chat
 bun run dev:cli -- run "Explain this repository"
 bun run login:omp
@@ -48,6 +50,14 @@ bun run login:omp
 `aidex events --workspace ID [--after N] [--follow] [--drive PATH]` prints the workspace's durable events as newline-delimited JSON using `events.replay`, strictly after cursor `N`. With `--follow` it keeps polling from the last flushed event and reconnects after daemon restarts; an expired cursor is a permanent error (exit 8) rather than a silent gap.
 
 `aidex vault init [--recovery-key]`, `unlock [--recovery-key]`, `lock`, `status`, `set <NAME> --consumer <SCOPE>... [--kind KIND]`, `list`, `delete <NAME>`, and `passphrase change` (all with `[--drive PATH]`) manage the drive's encrypted vault through the daemon (`vault.*` methods). Passphrases, recovery keys, and secret values are read from the terminal without echo, or from stdin only with `--passphrase-stdin` (`init`, `unlock`, `passphrase change`: one line each; `passphrase change` reads the old then the new passphrase, or only the new one after a recovery-key unlock) or `--from-stdin` (`set`: all of stdin, one trailing newline removed). They are never accepted as arguments or environment variables; without a terminal and without the flag the command exits 2 before connecting. `init` prints the recovery key once (store it offline); `list` shows names, kinds, consumers, and update times, never values. `--consumer` takes `provider:<id>`, `mcp:<server-id>`, `process:<tool-id>`, or `git:<host>`; model, prompt, agent, session, log, env, and shell scopes are refused (exit 6). A wrong passphrase or a locked vault exits 5; a missing vault or secret exits 8. Secret values are only handed to consumers by the broker through scoped handles; the CLI has no command that prints a stored value.
+`aidex workspace` (alias `aidex project`) manages workspaces through the daemon's `workspace.*` methods; every subcommand accepts `--drive PATH` (default `AIDEX_DRIVE_ROOT`) and `--json`:
+
+- `add <PATH> [--name N]` registers an existing host directory exactly as selected (relative paths resolve against the current directory). The drive root, a directory containing the drive, and AiDEX-managed directories are refused; an already registered root is a conflict (exit 1).
+- `create <NAME>` creates an empty drive workspace under the drive's `workspaces/`; `list` shows every workspace with its availability (a missing host root is reported, never recreated); `show [ID|NAME]` defaults to the selected workspace; `select <ID|NAME>` persists the selection on the drive, so it survives daemon restarts.
+- `remove <ID>` only unregisters; host files are never deleted. `--delete-data` also deletes an AiDEX-created (drive or ephemeral) workspace directory after verifying its ownership marker.
+- `discover <PATH>` reports the enclosing Git repository and nested repositories (bounded scan, links not followed).
+- `ephemeral create <SOURCE>` copies a workspace (honouring `.gitignore`, skipping `.git/` and `.aidex/`, never following links); `ephemeral review <ID>` lists added/modified/deleted files with conflicts and unified diffs; `ephemeral apply <ID> [--path P ...]` re-reviews, shows the changes, asks for confirmation, and applies only the selected non-conflicting files, refusing if the workspace changed since that review (exit 1 when any selected change was skipped or failed); `ephemeral discard <ID>` deletes only the ephemeral directory.
+- `remove --delete-data`, `ephemeral apply`, and `ephemeral discard` need `--yes` or an interactive confirmation; without a terminal (or with `--json`) and without `--yes` they refuse with exit 2 and change nothing. Declining the prompt exits 9.
 
 `aidex` and `aidex chat` open Oh My Pi's interactive terminal UI. AiDEX passes `--approval-mode always-ask`, disables OMP extensions, MCP, LSP, skills, session persistence, and automatic title generation, and requests a limited tool set. OMP still owns its CLI tool lifecycle and approval implementation; this is not an AiDEX sandbox or policy boundary.
 
@@ -58,7 +68,7 @@ Interactive chat uses the user's existing OMP provider credentials. Configure th
 The source-tree `aidex run` adapter is `apps/cli/src/run.ts`. Packaged binaries must ship that script and set `AIDEX_RUNNER`; `AIDEX_BUN` can select a non-default Bun executable.
 ## Machine-readable output
 
-The global `--json` flag makes `init`, `status`, `daemon start|status|stop`, `vault ...`, `doctor`, and `agent list` print exactly one compact JSON document on stdout. Failures never write to stdout: with `--json` the error is a single JSON line on stderr,
+The global `--json` flag makes `init`, `status`, `daemon start|status|stop`, `vault ...`, `workspace ...`, `doctor`, and `agent list` print exactly one compact JSON document on stdout. Failures never write to stdout: with `--json` the error is a single JSON line on stderr,
 
 ```json
 {"error":{"code":"daemon_unavailable","exit_code":3,"message":"daemon not running on /media/aidex: ...","hint":"start it with `aidex daemon start --drive /media/aidex`"}}

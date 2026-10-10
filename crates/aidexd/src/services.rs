@@ -10,6 +10,7 @@ use aidex_core::ServiceErrorCode;
 use aidex_drive::DrivePaths;
 use aidex_events::EventLog;
 use aidex_vault::{VaultService, VaultServiceConfig};
+use aidex_workspace::WorkspaceRegistry;
 use std::{
     fmt,
     path::{Path, PathBuf},
@@ -30,6 +31,7 @@ pub struct Services {
     shutdown: ShutdownSignal,
     events: EventLog,
     vault: Arc<VaultService>,
+    workspaces: WorkspaceRegistry,
 }
 
 impl Services {
@@ -64,6 +66,8 @@ impl Services {
             .map_err(|error| ServicesError::new("vault", error.code(), error.to_string()))?;
         let vault = VaultService::open(vault_dir, VaultServiceConfig::default())
             .map_err(|error| ServicesError::new("vault", error.code(), error.to_string()))?;
+        let workspaces = WorkspaceRegistry::open(&paths)
+            .map_err(|error| ServicesError::new("workspace", error.code(), error.to_string()))?;
         Ok(Self {
             drive_root: drive_root.to_path_buf(),
             paths,
@@ -72,6 +76,7 @@ impl Services {
             shutdown,
             events,
             vault: Arc::new(vault),
+            workspaces,
         })
     }
 
@@ -107,6 +112,11 @@ impl Services {
     /// broker are Rust methods on [`VaultService`]; they are not RPC methods.
     pub fn vault(&self) -> &Arc<VaultService> {
         &self.vault
+    }
+
+    /// Workspace registry and confinement (`aidex-workspace`).
+    pub fn workspaces(&self) -> &WorkspaceRegistry {
+        &self.workspaces
     }
 }
 
