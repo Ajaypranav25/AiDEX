@@ -1,0 +1,63 @@
+use super::*;
+
+
+#[test]
+fn current_host_smoke_reports_a_versioned_profile() {
+    let profile = HostProfile::current();
+    println!("current host capability profile: {profile:#?}");
+    assert_eq!(profile.version, PROFILE_VERSION);
+    assert!(!profile.os.is_empty());
+    assert!(!profile.architecture.is_empty());
+}
+
+#[test]
+fn reports_found_and_missing_tools_from_synthetic_path() {
+    let root = PathBuf::from("synthetic");
+    let paths = [root.clone()];
+    let found = locate_tool_with(Some(&paths), &["git"], |path| {
+        Ok(path == Path::new("synthetic/git"))
+    });
+    assert_eq!(found, Probe::Available(root.join("git")));
+    let missing = locate_tool_with(Some(&paths), &["rustc", "cargo"], |_| {
+        Err(std::io::ErrorKind::NotFound)
+    });
+    assert_eq!(missing, Probe::Unavailable);
+}
+
+#[test]
+fn reports_unknown_for_unavailable_probes() {
+    assert_eq!(locate_tool(None, &["git"]), Probe::Unknown);
+    let paths = [PathBuf::from("synthetic")];
+    assert_eq!(
+        locate_tool_with(Some(&paths), &["git"], |_| {
+            Err(std::io::ErrorKind::PermissionDenied)
+        }),
+        Probe::Unknown
+    );
+    let profile = HostProfile::from_path_entries(None, None, Some(&[]));
+    assert_eq!(profile.network, Probe::Unknown);
+    assert_eq!(profile.gpu, Probe::Unknown);
+    assert_eq!(profile.sandbox, Probe::Unknown);
+    assert_eq!(profile.temporary_filesystem.writable, Probe::Unknown);
+}
+
+#[test]
+fn bounded_path_search_does_not_claim_missing_after_truncation() {
+    let paths = (0..=MAX_PATH_ENTRIES)
+        .map(|i| PathBuf::from(format!("missing-{i}")))
+        .collect::<Vec<_>>();
+    let result = locate_tool_with(Some(&paths), &["git"], |_| {
+        Err(std::io::ErrorKind::NotFound)
+    });
+    assert_eq!(result, Probe::Unknown);
+}
+
+#[test]
+fn manifest_version_and_json_serialization_are_stable() {
+    let profile = HostProfile::from_path_entries(None, None, Some(&[]));
+    let first = serde_json::to_string(&profile).unwrap();
+    let second = serde_json::to_string(&profile).unwrap();
+    assert!(first.starts_with("{\"version\":1,"));
+    assert_eq!(first, second);
+    assert!(first.contains("\"network\":{\"state\":\"unknown\"}"));
+}
