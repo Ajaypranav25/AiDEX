@@ -5,7 +5,7 @@
 The Cargo workspace contains only code that has a concrete implementation today:
 
 - `aidex-core` owns small cross-domain value types (`EntityId`), with no domain or platform dependencies.
-- `aidex-drive` validates lexical relative paths and resolves them beneath a caller-provided root. Resolution is lexical and does not claim symlink containment.
+- `aidex-drive` validates portable relative paths, defines the schema-v1 root-level `aidex-drive.json` manifest, and provides safe init/status operations that create only manifest-declared directories.
 - `aidex-host` reports compile-time platform identifiers and best-effort process paths; it does not discover hardware or configure the operating system.
 - `aidex-events` broadcasts byte-payload events to in-process subscribers. It is not a durable event log or IPC transport.
 - `aidex-storage` provides a file-backed key/value API and recursive key listing. It is not an encrypted database or transactional store.

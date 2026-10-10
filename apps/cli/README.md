@@ -22,12 +22,18 @@ The dependency is pinned to `@oh-my-pi/pi-coding-agent` `18.8.7`, installed by B
 ```sh
 bun install
 bun run dev:cli -- --help
+bun run dev:cli -- init --drive /path/to/removable-drive
+bun run dev:cli -- status --drive /path/to/removable-drive
 bun run dev:cli -- doctor
 bun run dev:cli -- agent list
 bun run dev:cli -- chat
 bun run dev:cli -- run "Explain this repository"
 bun run login:omp
 ```
+
+`aidex init --drive PATH` requires an existing removable-drive root, verifies writability and at least 10 MiB free space, then idempotently creates only the directories listed by `aidex-drive.json`. It never formats a drive or replaces existing files. The root-level `aidex-drive.json` is the canonical schema-v1 JSON manifest; malformed and unsupported manifests are reported and left untouched.
+
+`aidex status [--drive PATH]` reads drive health without creating directories or repairing the manifest. Without `--drive`, status and doctor use `AIDEX_DRIVE_ROOT`, which a portable launcher can set. Status reports the resolved root, manifest schema version, writability, and available space; a missing or invalid manifest is an error. Doctor retains its host and Oh My Pi checks and adds actionable active-drive health output.
 
 `aidex` and `aidex chat` open Oh My Pi's interactive terminal UI. AiDEX passes `--approval-mode always-ask`, disables OMP extensions, MCP, LSP, skills, session persistence, and automatic title generation, and requests a limited tool set. OMP still owns its CLI tool lifecycle and approval implementation; this is not an AiDEX sandbox or policy boundary.
 
