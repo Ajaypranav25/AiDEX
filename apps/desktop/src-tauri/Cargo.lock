@@ -40,6 +40,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "aidex-context"
+version = "0.1.0"
+dependencies = [
+ "aidex-core",
+ "aidex-drive",
+ "aidex-events",
+ "aidex-policy",
+ "aidex-workspace",
+ "ignore",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "toml 0.8.2",
+]
+
+[[package]]
 name = "aidex-core"
 version = "0.1.0"
 dependencies = [
@@ -89,6 +107,17 @@ name = "aidex-host"
 version = "0.1.0"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "aidex-policy"
+version = "0.1.0"
+dependencies = [
+ "aidex-core",
+ "globset",
+ "serde",
+ "sha2",
+ "toml 0.8.2",
 ]
 
 [[package]]
@@ -187,6 +216,7 @@ dependencies = [
 name = "aidexd"
 version = "0.1.0"
 dependencies = [
+ "aidex-context",
  "aidex-core",
  "aidex-drive",
  "aidex-events",
