@@ -11,6 +11,7 @@ pub mod doctor;
 pub mod drive;
 pub mod events;
 pub mod omp;
+pub mod vault;
 
 use crate::{
     cli::Commands,
@@ -29,5 +30,6 @@ pub fn dispatch(command: Option<Commands>, output: Output) -> Result<Exit, CliEr
         Some(Commands::Daemon { command }) => daemon::run(command, output),
         Some(Commands::Events(args)) => events::run(args, output),
         Some(Commands::Doctor) => doctor::run(output),
+        Some(Commands::Vault { command }) => vault::run(command, output),
     }
 }

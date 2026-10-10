@@ -11,10 +11,13 @@ aidex-events = { path = "../events" }
 aidex-host = { path = "../host" }
 aidexd = { path = "../aidexd" }
 clap.workspace = true
+rpassword = "7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+zeroize = "1.7"
 
 [dev-dependencies]
+aidex-vault = { path = "../vault" }
 tempfile = "3"
 
 [lints]
