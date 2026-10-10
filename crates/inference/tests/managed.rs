@@ -325,8 +325,10 @@ fn idle_models_are_unloaded_after_the_timeout() {
         .service
         .load(&id, &LoadOptions::default(), &CancelToken::new())
         .unwrap();
+    // The reaper takes the model out of the resident set, then stops its
+    // server and records the event.
     wait_until("the idle unload", Duration::from_secs(10), || {
-        fixture.service.loaded().is_empty()
+        fixture.service.loaded().is_empty() && fixture.event_names().len() == 2
     });
     assert!(port_is_closed(report.server.port));
     assert_eq!(
