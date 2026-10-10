@@ -90,8 +90,8 @@ handlers without sockets.
 ## Limitations
 
 - Methods: `daemon.status|ping|stop`, `events.replay|latest|subscribe`, `workspace.*`,
-  `vault.*`, and `model.*`/`provider.*`/`network.*` exist; every other domain is
-  future work.
+  `vault.*`, `model.*`/`provider.*`/`network.*`, `session.*`, `context.*`,
+  `memory.*`, and `rules.show` exist; every other domain is future work.
 - The event log is `DrivePaths::sessions()/events.sqlite3` (100 000 events, 90
   days). PR #40's `.aidex/runtime/events.sqlite` is superseded: it is imported once,
   read-only, into an empty new log and then left untouched (safe to delete).

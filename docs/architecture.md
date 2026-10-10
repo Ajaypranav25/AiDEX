@@ -16,7 +16,8 @@ crates/aidexd (`aidexd`)
    ├── transport: handshake, Router (`<domain>.<verb>`), bounded streams
    └── Services ── crates/core, drive, events, sessions, storage, workspace, vault
         ├── events: typed catalog, one cursor per drive, replay + push stream
-        └── sessions: durable sessions, checkpoints, startup recovery, resume plans
+        ├── sessions: durable sessions, checkpoints, startup recovery, resume plans
+        └── context: local index + search, project rules, memory, budgeted context packs
 
 crates/policy (`aidex-policy`)
    └── pure policy evaluation; not yet wired into the daemon (broker work, #17)
@@ -35,11 +36,13 @@ Every important state transition is a typed `aidex-events` event (`protocol/even
 
 Sessions are durable drive state (`aidex-sessions`, `private_sessions/sessions.sqlite3` plus content-addressed blobs). Logical state (messages, tool calls, approvals, artifacts, and hash-verified checkpoints) is portable across restarts, drive moves, and hosts; host-bound state (processes, approval prompts, model memory) is never serialized. At startup the daemon interrupts sessions that were active, marks running tool calls lost, and records event gaps explicitly; `session.resume_plan` reports what a resume restores and what must be recreated. Continuing a session is the native harness's job (#19).
 
+Repository context is local drive state (`aidex-context`): a rebuildable per-workspace index in `private_index/<workspace>/`, memory in `private_memory/`, and project rules read from the workspace's `.aidex/rules.toml`. The harness asks for a context pack per task; packs are bounded by a token budget and select relevant chunks rather than whole repositories, and every item is delimited and labelled with its trust level so repository text is never mistaken for instructions.
+
 The desktop and installer are independent Tauri v2 projects. Their Rust shells own desktop integration only; domain services belong in the Rust workspace. `crates/aidex-cli` owns the first Rust command surface and treats Oh My Pi as an external agent runtime, not as AiDEX core. `protocol/` is the intended source of frontend/backend contracts. The daemon IPC transport (framing, handshake, error codes, method naming) is defined by `crates/aidexd`'s Rust types and specified in `protocol/commands/README.md`; frontends use `aidexd::Client` or follow that document. Until generation and compatibility checks exist, no other handwritten duplicate contract should be treated as canonical.
 
 ## Rust workspace boundaries
 
-The Rust workspace remains the primary implementation focus. Its first layer is intentionally small: shared core types, portable-drive paths, host capability discovery, events, durable storage/session foundations, the workspace registry and path confinement (`aidex-workspace`: explicitly selected host, drive, and reviewable ephemeral workspaces), the `aidex-sandbox` process isolation library, typed two-phase workspace tools (`aidex-tools`), the encrypted vault (`aidex-vault`), model providers and routing (`aidex-providers`, `aidex-router`: provider registry, OpenAI-compatible streaming provider, offline egress gate, privacy-aware selection with explicit fallback), the `aidexd` process boundary, and the `aidex` CLI. Depend on lower-level shared contracts rather than creating cycles. Future domains listed in the specification—harness, inference, context/memory/indexing, agent adapters, MCP/skills/plugins, broker/policy, identity/approvals/remote, cleanup/updater—must be introduced when there is a real API and consumer, not as empty service crates.
+The Rust workspace remains the primary implementation focus. Its first layer is intentionally small: shared core types, portable-drive paths, host capability discovery, events, durable storage/session foundations, the workspace registry and path confinement (`aidex-workspace`: explicitly selected host, drive, and reviewable ephemeral workspaces), the `aidex-sandbox` process isolation library, typed two-phase workspace tools (`aidex-tools`), the encrypted vault (`aidex-vault`), model providers and routing (`aidex-providers`, `aidex-router`: provider registry, OpenAI-compatible streaming provider, offline egress gate, privacy-aware selection with explicit fallback), repository context (`aidex-context`: offline index and search, project rules, memory, budgeted context packs), the `aidexd` process boundary, and the `aidex` CLI. Depend on lower-level shared contracts rather than creating cycles. Future domains listed in the specification—harness, inference, agent adapters, MCP/skills/plugins, broker/policy, identity/approvals/remote, cleanup/updater—must be introduced when there is a real API and consumer, not as empty service crates.
 
 ## Portable-drive data is not repository source
 
