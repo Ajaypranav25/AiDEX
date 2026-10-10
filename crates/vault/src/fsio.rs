@@ -212,13 +212,26 @@ pub(crate) fn write_atomic(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), V
         .collect();
     let temporary = dir.join(format!(".{name}.{suffix}{TEMP_SUFFIX}"));
     let written = write_new_file(&temporary, bytes)
-        .and_then(|()| fs::rename(&temporary, &target))
+        .and_then(|()| {
+            #[cfg(test)]
+            test_write_failure(dir, WriteFailure::BeforeRename)?;
+            fs::rename(&temporary, &target)
+        })
         .map_err(|error| VaultError::io("write vault file", &target, error));
     if written.is_err() {
         let _ = fs::remove_file(&temporary);
     }
     written?;
-    sync_dir(dir)
+    sync_dir_io(dir).map_err(|source| {
+        if name == HEADER_FILE {
+            VaultError::CommitUncertain {
+                path: target,
+                source,
+            }
+        } else {
+            VaultError::io("sync vault directory", dir, source)
+        }
+    })
 }
 
 fn write_new_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
@@ -255,15 +268,54 @@ pub(crate) fn create_private_dir(path: &Path) -> Result<(), VaultError> {
 /// Persist directory entries (renames, creations) on Unix. Windows has no directory
 /// handle flush through `std`; NTFS journals metadata, FAT/exFAT do not (see FORMAT.md).
 pub(crate) fn sync_dir(dir: &Path) -> Result<(), VaultError> {
+    sync_dir_io(dir).map_err(|error| VaultError::io("sync vault directory", dir, error))
+}
+
+fn sync_dir_io(dir: &Path) -> io::Result<()> {
+    #[cfg(test)]
+    test_write_failure(dir, WriteFailure::AfterRename)?;
     #[cfg(unix)]
     {
-        File::open(dir)
-            .and_then(|handle| handle.sync_all())
-            .map_err(|error| VaultError::io("sync vault directory", dir, error))?;
+        File::open(dir)?.sync_all()?;
     }
     #[cfg(not(unix))]
     let _ = dir;
     Ok(())
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(crate) enum WriteFailure {
+    BeforeRename,
+    AfterRename,
+}
+
+#[cfg(test)]
+thread_local! {
+    static WRITE_FAILURE: std::cell::RefCell<Option<(PathBuf, WriteFailure)>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Inject one filesystem failure on this thread, without affecting other vaults.
+#[cfg(test)]
+pub(crate) fn fail_next_write(dir: &Path, stage: WriteFailure) {
+    WRITE_FAILURE.with(|failure| *failure.borrow_mut() = Some((dir.to_path_buf(), stage)));
+}
+
+#[cfg(test)]
+fn test_write_failure(dir: &Path, stage: WriteFailure) -> io::Result<()> {
+    WRITE_FAILURE.with(|failure| {
+        let mut failure = failure.borrow_mut();
+        if failure
+            .as_ref()
+            .is_some_and(|(path, at)| path == dir && *at == stage)
+        {
+            *failure = None;
+            Err(io::Error::other("injected vault filesystem failure"))
+        } else {
+            Ok(())
+        }
+    })
 }
 
 #[cfg(test)]
