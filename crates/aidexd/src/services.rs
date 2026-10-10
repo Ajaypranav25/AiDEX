@@ -10,6 +10,7 @@ mod models;
 pub use models::{EventsModelObserver, ModelServices, VaultCredentials, model_event_kind};
 
 use crate::{endpoint, lifecycle::ShutdownSignal};
+use aidex_broker::{Broker, BrokerConfig};
 use aidex_core::ServiceErrorCode;
 use aidex_drive::DrivePaths;
 use aidex_events::{EventLog, EventSink, RetentionPolicy};
@@ -54,7 +55,8 @@ pub struct Services {
     shutdown: ShutdownSignal,
     events: EventLog,
     vault: Arc<VaultService>,
-    workspaces: WorkspaceRegistry,
+    workspaces: Arc<WorkspaceRegistry>,
+    broker: Arc<Broker>,
     models: ModelServices,
     sessions: Arc<SessionStore>,
     session_recovery: RecoveryReport,
@@ -88,13 +90,18 @@ impl Services {
             .map_err(|error| ServicesError::new("vault", error.code(), error.to_string()))?;
         let vault = VaultService::open(vault_dir, VaultServiceConfig::default())
             .map_err(|error| ServicesError::new("vault", error.code(), error.to_string()))?;
-        let workspaces = WorkspaceRegistry::open(&paths)
-            .map_err(|error| ServicesError::new("workspace", error.code(), error.to_string()))?;
+        let workspaces =
+            Arc::new(WorkspaceRegistry::open(&paths).map_err(|error| {
+                ServicesError::new("workspace", error.code(), error.to_string())
+            })?);
         let vault = Arc::new(vault);
-        // Model notifications are recorded as typed `model.*` events.
+        let broker = open_broker(&paths, &events, &workspaces, &vault)?;
+        spawn_approval_expiry(&broker, &shutdown);
+        // Model notifications are recorded as typed `model.*` events; remote provider
+        // calls and their credentials pass the broker's policy.
         let models = ModelServices::open(
             &paths,
-            Arc::clone(&vault),
+            Arc::clone(&broker),
             Arc::new(EventsModelObserver::new(Arc::new(events.clone()))),
         )?;
         let (sessions, session_recovery) = open_sessions(&paths, &events)?;
@@ -107,6 +114,7 @@ impl Services {
             events,
             vault,
             workspaces,
+            broker,
             models,
             sessions: Arc::new(sessions),
             session_recovery,
@@ -152,6 +160,12 @@ impl Services {
         &self.workspaces
     }
 
+    /// The execution broker (`aidex-broker`): the only path to tool execution,
+    /// approvals, policy settings, and emergency stop.
+    pub fn broker(&self) -> &Arc<Broker> {
+        &self.broker
+    }
+
     /// Model providers, the router, and the offline switch
     /// (`aidex-providers`, `aidex-router`).
     pub fn models(&self) -> &ModelServices {
@@ -166,6 +180,49 @@ impl Services {
     pub fn session_recovery(&self) -> &RecoveryReport {
         &self.session_recovery
     }
+}
+
+/// How often pending approvals are checked for expiry.
+const APPROVAL_EXPIRY_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Compose the execution broker over the drive: approvals in `private_sessions/`,
+/// settings in `private_config/policy.toml`, policy documents in `policies/`, the
+/// sandbox helper next to the daemon executable, and the drive vault.
+fn open_broker(
+    paths: &DrivePaths,
+    events: &EventLog,
+    workspaces: &Arc<WorkspaceRegistry>,
+    vault: &Arc<VaultService>,
+) -> Result<Arc<Broker>, ServicesError> {
+    let broker_error = |error: aidex_broker::BrokerError| {
+        ServicesError::new("broker", error.code(), error.to_string())
+    };
+    let config = BrokerConfig::for_drive(paths).map_err(broker_error)?;
+    let sink: Arc<dyn EventSink> = Arc::new(events.clone());
+    let broker = Broker::builder(config, Arc::clone(workspaces) as _, sink)
+        .vault(Arc::clone(vault))
+        .open()
+        .map_err(broker_error)?;
+    Ok(Arc::new(broker))
+}
+
+/// Expire due approvals in the background until shutdown (or the broker is gone).
+fn spawn_approval_expiry(broker: &Arc<Broker>, shutdown: &ShutdownSignal) {
+    let broker = Arc::downgrade(broker);
+    let shutdown = shutdown.clone();
+    // Expiry is also enforced when an approval is resolved, so a failed spawn only
+    // delays `approval.expired` events.
+    let _ = std::thread::Builder::new()
+        .name("aidexd-approval-expiry".into())
+        .spawn(move || {
+            while !shutdown.is_requested() {
+                std::thread::sleep(APPROVAL_EXPIRY_INTERVAL);
+                let Some(broker) = broker.upgrade() else {
+                    break;
+                };
+                let _ = broker.expire_due();
+            }
+        });
 }
 
 /// Open the session store with the drive event log as its sink, then recover from an

@@ -6,13 +6,16 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+aidex-broker = { path = "../broker" }
 aidex-core = { path = "../core" }
 aidex-drive = { path = "../drive" }
 aidex-events = { path = "../events" }
 aidex-host = { path = "../host" }
+aidex-policy = { path = "../policy" }
 aidex-providers = { path = "../providers" }
 aidex-router = { path = "../router" }
 aidex-sessions = { path = "../sessions" }
+aidex-tools = { path = "../tools" }
 aidex-vault = { path = "../vault" }
 aidex-workspace = { path = "../workspace" }
 getrandom = "0.3"

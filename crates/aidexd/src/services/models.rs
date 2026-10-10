@@ -2,6 +2,7 @@
 //! router, and the vault-backed credential resolver.
 
 use super::ServicesError;
+use aidex_broker::{Broker, ModelEgress};
 use aidex_core::EntityId;
 use aidex_drive::DrivePaths;
 use aidex_events::{EventKind, EventScope, EventSink};
@@ -21,6 +22,10 @@ const CREDENTIAL_HANDLE_TTL: Duration = Duration::from_secs(30);
 /// revoked for every request, so a secret is released only to the provider
 /// its policy names. Nothing is cached and nothing is read from the
 /// environment or configuration.
+///
+/// The daemon itself uses `aidex_broker::ModelEgress`, which adds policy
+/// evaluation and audit events; this resolver remains for embedders that run
+/// providers without a broker.
 pub struct VaultCredentials {
     vault: Arc<VaultService>,
 }
@@ -186,23 +191,27 @@ pub struct ModelServices {
 }
 
 impl ModelServices {
-    /// Load the offline switch and configured providers from the drive.
+    /// Load the offline switch and configured providers from the drive. Remote
+    /// provider calls pass the offline switch and then the broker's policy
+    /// (`model.invoke`); credentials are released through broker-issued vault
+    /// handles (`secret.use`, `secret.granted`).
     pub fn open(
         paths: &DrivePaths,
-        vault: Arc<VaultService>,
+        broker: Arc<Broker>,
         observer: Arc<dyn ModelObserver>,
     ) -> Result<Self, ServicesError> {
         let offline = Arc::new(
             OfflineMode::load(paths)
                 .map_err(|error| ServicesError::new("network", error.code(), error.to_string()))?,
         );
-        let registry = ProviderRegistry::load(
-            paths,
-            Arc::new(VaultCredentials::new(vault)),
-            Arc::clone(&offline) as _,
-        )
-        .map_err(|error| ServicesError::new("providers", error.code(), error.to_string()))?
-        .with_observer(Arc::clone(&observer));
+        let egress = Arc::new(
+            ModelEgress::new(broker)
+                .map_err(|error| ServicesError::new("broker", error.code(), error.to_string()))?
+                .with_offline_switch(Arc::clone(&offline) as _),
+        );
+        let registry = ProviderRegistry::load(paths, Arc::clone(&egress) as _, egress as _)
+            .map_err(|error| ServicesError::new("providers", error.code(), error.to_string()))?
+            .with_observer(Arc::clone(&observer));
         Ok(Self {
             registry: Arc::new(registry),
             offline,

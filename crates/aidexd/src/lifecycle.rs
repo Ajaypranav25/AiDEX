@@ -261,6 +261,7 @@ impl Daemon {
                 error.to_string(),
             )));
         }
+        let broker = Arc::clone(self.services.broker());
         drop(self.services);
         let root = self.root.clone();
         let options = self.options;
@@ -271,7 +272,11 @@ impl Daemon {
                     &root,
                     options.poll_interval,
                     &options.drive_present,
-                    |outcome| record_stopping(&events, outcome),
+                    |outcome| {
+                        record_stopping(&events, outcome);
+                        // No tool process outlives the daemon (or the drive).
+                        broker.shutdown_processes(matches!(outcome, Ok(StopReason::DriveRemoved)));
+                    },
                 );
                 let cleanup = endpoint::remove(&root);
                 match (outcome, cleanup) {
