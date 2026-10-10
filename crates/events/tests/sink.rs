@@ -92,3 +92,35 @@ fn every_sink_applies_the_log_validation_and_redaction() {
         Cursor::new(2)
     );
 }
+
+#[test]
+fn every_sink_rejects_aggregate_payloads_over_the_envelope_limit() {
+    let fixture = temp_log(RetentionPolicy::UNBOUNDED);
+    let memory = MemoryEventSink::new();
+    let null = NullEventSink;
+    let oversized = EventKind::DiffCreated {
+        diff_id: id("diff_large"),
+        files: (0..20_000)
+            .map(|index| {
+                aidex_core::WorkspacePath::new(format!("src/module_{index}/file.rs")).unwrap()
+            })
+            .collect(),
+        additions: 1,
+        deletions: 0,
+    };
+    for (sink, expected) in [
+        (&fixture.log as &dyn EventSink, Cursor::new(1)),
+        (&memory as &dyn EventSink, Cursor::new(1)),
+        (&null as &dyn EventSink, Cursor::ZERO),
+    ] {
+        assert!(matches!(
+            sink.emit(EventScope::workspace(id("wsp_one")), oversized.clone()),
+            Err(EventError::TooLarge { limit, .. }) if limit == aidex_events::MAX_EVENT_BYTES
+        ));
+        assert_eq!(
+            sink.emit(session_scope(), task_started("after_rejection"))
+                .unwrap(),
+            expected
+        );
+    }
+}

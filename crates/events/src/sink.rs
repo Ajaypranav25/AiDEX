@@ -34,7 +34,10 @@ pub struct NullEventSink;
 
 impl EventSink for NullEventSink {
     fn emit(&self, scope: EventScope, event: EventKind) -> Result<Cursor, EventError> {
-        sanitize::prepare(&scope, event).map(|_| Cursor::ZERO)
+        let event = sanitize::prepare(&scope, event)?;
+        let envelope = EventEnvelope::new(Cursor::ZERO, scope, Timestamp::now(), event);
+        sanitize::encode(&envelope)?;
+        Ok(Cursor::ZERO)
     }
 }
 
