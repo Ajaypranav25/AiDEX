@@ -6,6 +6,7 @@
 //! Daemon-backed commands obtain a client with [`daemon::connect`].
 
 pub mod agent;
+pub mod context;
 pub mod daemon;
 pub mod doctor;
 pub mod drive;
@@ -14,7 +15,6 @@ pub mod model;
 pub mod offline;
 pub mod omp;
 pub mod provider;
-pub mod runtime;
 pub mod session;
 pub mod vault;
 pub mod workspace;
@@ -40,8 +40,12 @@ pub fn dispatch(command: Option<Commands>, output: Output) -> Result<Exit, CliEr
         Some(Commands::Workspace(args)) => workspace::run(args, output),
         Some(Commands::Model(args)) => model::run(args, output),
         Some(Commands::Provider(args)) => provider::run(args, output),
-        Some(Commands::Runtime(args)) => runtime::run(args, output),
         Some(Commands::Offline(args)) => offline::run(args, output),
         Some(Commands::Session(args)) => session::run(args, output),
+        Some(Commands::Index(args)) => context::index::run(args, output),
+        Some(Commands::Search(args)) => context::search::run(args, output),
+        Some(Commands::Context(args)) => context::pack::run(args, output),
+        Some(Commands::Memory(args)) => context::memory::run(args, output),
+        Some(Commands::Rules(args)) => context::rules::run(args, output),
     }
 }

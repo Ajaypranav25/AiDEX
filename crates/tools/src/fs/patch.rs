@@ -203,13 +203,13 @@ impl Tool for FsPatch {
         }
         let (before, text) = read_text(ctx, &path, &absolute)?;
         let before_sha256 = sha256_hex(&before);
-        if let Some(expected) = &input.expected_sha256 {
-            if !expected.eq_ignore_ascii_case(&before_sha256) {
-                return Err(ToolError::conflict(
-                    path.as_str(),
-                    "its SHA-256 differs from expected_sha256",
-                ));
-            }
+        if let Some(expected) = &input.expected_sha256
+            && !expected.eq_ignore_ascii_case(&before_sha256)
+        {
+            return Err(ToolError::conflict(
+                path.as_str(),
+                "its SHA-256 differs from expected_sha256",
+            ));
         }
         let after = apply(&input, &text)?;
         if after.len() as u64 > ctx.limits.max_write_bytes {

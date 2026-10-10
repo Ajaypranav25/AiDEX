@@ -47,6 +47,7 @@ pub enum Reply {
     Sse(Vec<(Duration, String)>),
     /// Status, extra headers, and body.
     Raw(u16, Vec<(String, String)>, String),
+    Binary(Vec<u8>),
 }
 
 impl Reply {
@@ -201,6 +202,15 @@ fn serve(
     let reply =
         reply.unwrap_or_else(|| Reply::Json(500, r#"{"error":{"code":"no_reply"}}"#.into()));
     let _ = match reply {
+        Reply::Binary(body) => {
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/vnd.amazon.eventstream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream
+                .write_all(head.as_bytes())
+                .and_then(|()| stream.write_all(&body))
+        }
         Reply::Json(status, body) => write!(
             stream,
             "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",

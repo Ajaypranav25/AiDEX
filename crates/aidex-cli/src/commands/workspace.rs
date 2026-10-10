@@ -3,7 +3,7 @@
 //! review/apply/discard ephemeral copies. Every command goes through the daemon's
 //! `workspace.*` methods.
 
-pub(crate) mod ephemeral;
+mod ephemeral;
 mod render;
 
 use crate::{

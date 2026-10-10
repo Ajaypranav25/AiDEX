@@ -8,7 +8,7 @@ AiDEX is a portable AI development environment: its agent workflows, tools, mode
 - `apps/desktop` — Tauri desktop client. Its Rust bridge talks to `aidexd` (drive resolution, daemon start/stop, a generic RPC proxy, and event subscriptions); launch, vault unlock, Home status, diagnostics, drive, and sandbox screens are live, and the remaining screens are labelled sample data.
 - `apps/installer` — Tauri drive setup: lists real volumes (removable drives and USB SSDs only; never the system drive) and initializes the AiDEX drive layout. Copying the app bundle, models, and agents is not available yet.
 - `apps/mobile` — reserved future client; not implemented yet.
-- `crates/` — active Rust workspace for the CLI, host, portable paths, sessions, storage, events, workspaces, local inference, and daemon foundations.
+- `crates/` — active Rust workspace for the CLI, host, portable paths, sessions, storage, events, workspaces, repository context (index, search, rules, memory), and daemon foundations.
 - `packages/` — shared frontend packages; `packages/ui` (`@aidex/ui`) provides the design tokens and components the app screens are built from, and `packages/client` (`@aidex/client`) the typed client for the Tauri bridges and daemon RPC.
 - `protocol/` — reserved versioned API-contract boundary; no generated client exists yet.
 - `integrations/` — reserved metadata and definitions for adapters, MCP, skills, plugins, and providers.
@@ -21,7 +21,7 @@ The directory structure separates real foundation code from planned product doma
 ## Prerequisites
 
 - Bun 1.3.14+
-- Rust stable toolchain
+- Rust stable toolchain (1.88 or newer)
 - Tauri v2 platform prerequisites only when building the GUI apps
 
 ## Run the CLI
@@ -50,20 +50,6 @@ H:\AiDEX.exe doctor          # Windows; on Linux and macOS: /media/<drive>/aidex
 ```
 
 The launcher verifies the drive manifest and the bundle's binaries against `bundle.json` before running the CLI, and passes the drive root to it; nothing is installed on the host. Windows x64, Linux x64, and macOS arm64 bundles are built and smoke-tested in CI; other targets are not supported yet. Layout, manifest format, verification limits, and the support matrix: [portable packaging](portable/packaging/README.md).
-
-## Local models
-
-AiDEX runs GGUF models itself through a pinned, hash-verified llama.cpp runtime stored on the drive (no third-party agent, and no network access once the files are on the drive):
-
-```sh
-aidex daemon start --drive H:\
-aidex runtime install llama-b11205-bin-win-cpu-x64.zip      # pinned in inference/runtimes.toml
-aidex model import qwen2.5-coder-0.5b-instruct-q4_k_m.gguf --license Apache-2.0 --source https://huggingface.co/Qwen/Qwen2.5-Coder-0.5B-Instruct-GGUF
-aidex runtime plan qwen2.5-coder-0.5b-instruct-q4_k_m --probe-gpu
-aidex model run qwen2.5-coder-0.5b-instruct-q4_k_m "Write a Rust function that reverses a string."
-```
-
-Windows x64 is validated; other platforms are not yet (their `.tar.gz` runtimes cannot be installed by this build). Imported models are listed as `local/<id>` by `aidex model list` and work with `aidex offline on`. See [`crates/inference`](crates/inference/README.md) and [`inference/`](inference/README.md) for verification, licensing, and platform details.
 
 ## Rust workspace
 

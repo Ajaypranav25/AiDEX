@@ -1,0 +1,18 @@
+[package]
+name = "aidex-preferences"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+aidex-vault = { path = "../vault" }
+aidex-native-sessions = { path = "../native-sessions" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

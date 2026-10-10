@@ -1,16 +1,15 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { RuntimeDetectionPage } from "../features/launch/RuntimeDetectionPage";
 import { SelectDrivePage } from "../features/launch/SelectDrivePage";
 import { UnlockPage } from "../features/launch/UnlockPage";
 import { useAidexStatus } from "../hooks/useAidexStatus";
 import { AidexProvider } from "../services/AidexProvider";
 import { Workspace } from "./Workspace";
 
-type Stage = "drive" | "unlock" | "detect" | "workspace";
+type Stage = "drive" | "unlock" | "workspace";
 
-/** Launch flow: find the drive, check it and its vault, review host detection, then enter the workspace. */
+/** Launch flow: find the drive, start Core, unlock the vault, then enter chat. */
 export function App() {
   return (
     <AidexProvider>
@@ -29,8 +28,9 @@ function Launch() {
     if (stage === "drive" && driveResolved) setStage("unlock");
   }, [stage, driveResolved]);
 
-  if (stage === "drive") return <SelectDrivePage onSkip={() => setStage("unlock")} />;
-  if (stage === "unlock") return <UnlockPage onContinue={() => setStage("detect")} />;
-  if (stage === "detect") return <RuntimeDetectionPage onContinue={() => setStage("workspace")} />;
+  if (stage === "drive")
+    return <SelectDrivePage onSkip={() => setStage("unlock")} />;
+  if (stage === "unlock")
+    return <UnlockPage onContinue={() => setStage("workspace")} />;
   return <Workspace />;
 }

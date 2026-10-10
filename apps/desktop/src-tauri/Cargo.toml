@@ -5,7 +5,7 @@ license = "MIT"
 description = "Portable AI development environment"
 authors = ["AiDEX"]
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.88"
 
 [lib]
 name = "aidex_desktop_lib"

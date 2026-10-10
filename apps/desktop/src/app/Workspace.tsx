@@ -4,14 +4,14 @@ import { useCommandShortcut } from "../hooks/useCommandShortcut";
 import { MainLayout } from "../layouts/MainLayout";
 import { screenKeyOf } from "../lib/routes";
 import { NavigationProvider, useNavigation } from "./providers/navigation";
-import { PreferencesProvider } from "./providers/preferences";
+import { PreferencesProvider, usePreferences } from "./providers/preferences";
 import { ToastProvider } from "./providers/toast";
 import { homeSidebar, screens } from "./registry";
 
 /** The signed-in workspace: providers plus the route-driven shell. */
 export function Workspace() {
   return (
-    <NavigationProvider initialRoute={{ page: "home" }}>
+    <NavigationProvider initialRoute={{ page: "chat" }}>
       <PreferencesProvider>
         <ToastProvider>
           <WorkspaceScreens />
@@ -23,13 +23,16 @@ export function Workspace() {
 
 function WorkspaceScreens() {
   const { route, navigate } = useNavigation();
-  // Remounting the home page gives each new session an empty composer; it takes focus on entry too.
+  const { setPendingPrompt, setPendingWorkspaceId } = usePreferences();
+  // A new chat resets its draft and optional project context.
   const [sessionKey, setSessionKey] = useState(0);
 
   const startNewSession = useCallback(() => {
-    navigate({ page: "home" });
+    setPendingPrompt(null);
+    setPendingWorkspaceId(null);
+    navigate({ page: "chat" });
     setSessionKey((key) => key + 1);
-  }, [navigate]);
+  }, [navigate, setPendingPrompt, setPendingWorkspaceId]);
 
   useCommandShortcut("k", startNewSession);
 
@@ -45,7 +48,9 @@ function WorkspaceScreens() {
   return (
     <MainLayout Sidebar={Sidebar} onNewSession={startNewSession}>
       {/* Keyed by screen so local state resets when the same page opens another workspace, agent, or model. */}
-      <Page key={screenKeyOf(route)} />
+      <Page
+        key={`${screenKeyOf(route)}:${route.page === "chat" && !route.id ? sessionKey : 0}`}
+      />
     </MainLayout>
   );
 }

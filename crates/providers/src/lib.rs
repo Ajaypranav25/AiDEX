@@ -10,6 +10,7 @@
 //! context.
 
 mod chat;
+mod cloud;
 mod config;
 mod credentials;
 mod egress;
@@ -19,6 +20,7 @@ mod ids;
 mod model;
 mod observer;
 mod openai;
+mod presets;
 mod provider;
 mod registry;
 
@@ -48,6 +50,7 @@ pub use openai::{
     BaseUrl, DiscoveredModel, HttpOptions, InvalidProvider, InvalidUrl, OpenAiClient,
     OpenAiCompatibleProvider, Scheme,
 };
+pub use presets::{ProviderPreset, provider_presets};
 pub use provider::{HealthStatus, ModelProvider, ProviderDescriptor, ProviderHealth};
 pub use registry::{
     ModelListing, ProviderEntry, ProviderFailure, ProviderOrigin, ProviderRegistry, RegistryError,

@@ -5,17 +5,16 @@
 //! are added here as fields constructed in [`Services::open`]; their JSON-RPC
 //! adapters live in `methods/<domain>.rs`.
 
+mod inference;
 mod models;
 
 pub use models::{EventsModelObserver, ModelServices, VaultCredentials, model_event_kind};
 
 use crate::{endpoint, lifecycle::ShutdownSignal};
+use aidex_context::ContextService;
 use aidex_core::ServiceErrorCode;
 use aidex_drive::DrivePaths;
 use aidex_events::{EventLog, EventSink, RetentionPolicy};
-use aidex_inference::{InferenceOptions, LocalInference};
-use aidex_providers::RegistryError;
-use aidex_sandbox::Sandbox;
 use aidex_sessions::{RecoveryReport, SessionStore};
 use aidex_vault::{VaultService, VaultServiceConfig};
 use aidex_workspace::WorkspaceRegistry;
@@ -57,11 +56,13 @@ pub struct Services {
     shutdown: ShutdownSignal,
     events: EventLog,
     vault: Arc<VaultService>,
-    workspaces: WorkspaceRegistry,
+    workspaces: Arc<WorkspaceRegistry>,
     models: ModelServices,
-    inference: LocalInference,
     sessions: Arc<SessionStore>,
     session_recovery: RecoveryReport,
+    context: Arc<ContextService>,
+    native: Arc<aidex_harness::NativeEngine>,
+    inference: Arc<aidex_inference::InferenceService>,
 }
 
 impl Services {
@@ -92,8 +93,10 @@ impl Services {
             .map_err(|error| ServicesError::new("vault", error.code(), error.to_string()))?;
         let vault = VaultService::open(vault_dir, VaultServiceConfig::default())
             .map_err(|error| ServicesError::new("vault", error.code(), error.to_string()))?;
-        let workspaces = WorkspaceRegistry::open(&paths)
-            .map_err(|error| ServicesError::new("workspace", error.code(), error.to_string()))?;
+        let workspaces =
+            Arc::new(WorkspaceRegistry::open(&paths).map_err(|error| {
+                ServicesError::new("workspace", error.code(), error.to_string())
+            })?);
         let vault = Arc::new(vault);
         // Model notifications are recorded as typed `model.*` events.
         let models = ModelServices::open(
@@ -101,8 +104,24 @@ impl Services {
             Arc::clone(&vault),
             Arc::new(EventsModelObserver::new(Arc::new(events.clone()))),
         )?;
-        let inference = open_inference(&paths, &models, &events)?;
         let (sessions, session_recovery) = open_sessions(&paths, &events)?;
+        let context = ContextService::open(&paths, Arc::new(events.clone()))
+            .map_err(|error| ServicesError::new("context", error.code(), error.to_string()))?;
+        let private_sessions = Arc::new(
+            aidex_native_sessions::SessionStore::open(
+                paths.sessions().join("native.sqlite3"),
+                vault.clone(),
+            )
+            .map_err(|e| ServicesError::new("native", ServiceErrorCode::Unavailable, e))?,
+        );
+        let native = aidex_harness::NativeEngine::new(
+            private_sessions,
+            models.registry().clone(),
+            workspaces.clone(),
+            Arc::new(events.clone()),
+            runtime.join("native-processes"),
+        );
+        let inference = inference::open_inference(&paths, &models)?;
         Ok(Self {
             drive_root: drive_root.to_path_buf(),
             paths,
@@ -113,9 +132,11 @@ impl Services {
             vault,
             workspaces,
             models,
-            inference,
             sessions: Arc::new(sessions),
             session_recovery,
+            context: Arc::new(context),
+            native,
+            inference,
         })
     }
 
@@ -163,14 +184,6 @@ impl Services {
     pub fn models(&self) -> &ModelServices {
         &self.models
     }
-
-    /// Local GGUF inference (`aidex-inference`): the model registry, runtime
-    /// installs, and managed llama-server processes. Its provider is registered
-    /// in [`Self::models`] as `local`.
-    pub fn inference(&self) -> &LocalInference {
-        &self.inference
-    }
-
     /// Durable sessions, checkpoints, and resume plans (`aidex-sessions`).
     pub fn sessions(&self) -> &Arc<SessionStore> {
         &self.sessions
@@ -180,40 +193,17 @@ impl Services {
     pub fn session_recovery(&self) -> &RecoveryReport {
         &self.session_recovery
     }
-}
 
-/// Open local inference and register its `local` provider. A configured
-/// provider that already uses the id `local` keeps it (local models are then
-/// reachable only through the `model.*` local methods).
-fn open_inference(
-    paths: &DrivePaths,
-    models: &ModelServices,
-    events: &EventLog,
-) -> Result<LocalInference, ServicesError> {
-    let inference = LocalInference::open(
-        paths,
-        Sandbox::locate(),
-        Arc::new(events.clone()),
-        InferenceOptions::default(),
-    )
-    .map_err(|error| ServicesError::new("inference", error.code(), error.to_string()))?;
-    match models
-        .registry()
-        .register_shared(Arc::new(inference.provider()))
-    {
-        Ok(()) | Err(RegistryError::Duplicate(_)) => Ok(inference),
-        Err(error) => Err(ServicesError::new(
-            "inference",
-            error.code(),
-            error.to_string(),
-        )),
+    /// Local index, search, project rules, memory, and context packs
+    /// (`aidex-context`). Dropping the services cancels running index jobs.
+    pub fn context(&self) -> &Arc<ContextService> {
+        &self.context
     }
-}
-
-impl Drop for Services {
-    /// Stop managed model servers with the daemon.
-    fn drop(&mut self) {
-        self.inference.shutdown();
+    pub fn native(&self) -> &Arc<aidex_harness::NativeEngine> {
+        &self.native
+    }
+    pub fn inference(&self) -> &Arc<aidex_inference::InferenceService> {
+        &self.inference
     }
 }
 

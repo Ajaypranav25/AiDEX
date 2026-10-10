@@ -25,6 +25,8 @@ pub struct ProviderDescriptor {
 pub enum HealthStatus {
     /// The provider answered.
     Ready,
+    /// Configure/unlock a vault credential or authenticate the account.
+    AuthRequired,
     /// The provider was contacted (or a credential was needed) and failed.
     Unavailable,
     /// Nothing was contacted because offline mode or policy refused it.
@@ -58,6 +60,9 @@ impl ProviderHealth {
     /// Health for a failed check; refusals that opened no connection are `Refused`.
     pub fn from_error(error: &ProviderError) -> Self {
         let status = match error {
+            ProviderError::Credential(_) | ProviderError::Unauthorized => {
+                HealthStatus::AuthRequired
+            }
             ProviderError::OfflineRefused { .. } | ProviderError::PolicyDenied { .. } => {
                 HealthStatus::Refused
             }

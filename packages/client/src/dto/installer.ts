@@ -3,6 +3,27 @@
 import type { BridgeErrorPayload } from "../errors";
 import type { DriveHealth, VolumeInfo } from "./drive";
 
+/** Verified distribution metadata, canonical in aidex-bundle. */
+export type BundleCatalog = {
+  source: string;
+  version: string;
+  target: string;
+  installed_bytes: number;
+  required_free_bytes: number;
+  file_count: number;
+  manifest_sha256: string;
+};
+export type InstallJob = {
+  id: string;
+  drive_root: string;
+  state: "running" | "completed" | "failed" | "cancelled" | "interrupted";
+  step: string;
+  completed_steps: number;
+  total_steps: number;
+  report: { version: string; dir: string } | null;
+  error: string | null;
+};
+
 /** `inspect_drive`: the volume, whether it can be initialized, and any existing AiDEX state. */
 export type DriveInspection = {
   root: string;

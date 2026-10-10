@@ -6,10 +6,11 @@
 //! manage their own server and key); [`OpenAiCompatibleProvider`] adds the
 //! configured descriptor, the egress gate, and per-request vault credentials.
 
-mod sse;
-mod transport;
+mod eventstream;
+pub(crate) mod sse;
+pub(crate) mod transport;
 mod url;
-mod wire;
+pub(crate) mod wire;
 
 use std::{
     fmt,
@@ -137,9 +138,11 @@ impl OpenAiClient {
                 url: self.base.join("models"),
                 method: Method::Get,
                 authorization,
+                headers: Vec::new(),
                 stream: false,
             },
             self.limits(),
+            &cancel,
         )?;
         let Frame::Head {
             status,
@@ -165,6 +168,14 @@ impl OpenAiClient {
         on_event: &mut dyn FnMut(&StreamEvent),
         cancel: &CancelToken,
     ) -> Result<ChatResponse, ProviderError> {
+        if let Err(error) = transport::check_cancel(cancel) {
+            if matches!(error, ProviderError::Cancelled) {
+                on_event(&StreamEvent::Done {
+                    finish_reason: FinishReason::Cancelled,
+                });
+            }
+            return Err(error);
+        }
         let authorization = bearer(credential)?;
         self.chat_with(request, authorization, on_event, cancel)
     }
@@ -176,19 +187,23 @@ impl OpenAiClient {
         on_event: &mut dyn FnMut(&StreamEvent),
         cancel: &CancelToken,
     ) -> Result<ChatResponse, ProviderError> {
-        let result = request.validate().and_then(|()| {
-            let exchange = Exchange::start(
-                &self.agent,
-                HttpRequest {
-                    url: self.base.join("chat/completions"),
-                    method: Method::Post(wire::request_body(request, true)),
-                    authorization,
-                    stream: true,
-                },
-                self.limits(),
-            )?;
-            consume_chat(&exchange, request, on_event, cancel)
-        });
+        let result = transport::check_cancel(cancel)
+            .and_then(|()| request.validate())
+            .and_then(|()| {
+                let exchange = Exchange::start(
+                    &self.agent,
+                    HttpRequest {
+                        url: self.base.join("chat/completions"),
+                        method: Method::Post(wire::request_body(request, true)),
+                        authorization,
+                        headers: Vec::new(),
+                        stream: true,
+                    },
+                    self.limits(),
+                    cancel,
+                )?;
+                consume_chat(&exchange, request, on_event, cancel)
+            });
         if matches!(result, Err(ProviderError::Cancelled)) {
             on_event(&StreamEvent::Done {
                 finish_reason: FinishReason::Cancelled,
@@ -253,7 +268,7 @@ fn consume_chat(
     loop {
         match exchange.next(cancel)? {
             Frame::Line(line) => {
-                if let Some(payload) = decoder.push_line(&line) {
+                if let Some(payload) = decoder.push_line(&line)? {
                     accumulator.apply(&payload, on_event)?;
                     if accumulator.is_done() {
                         break;
@@ -317,6 +332,11 @@ impl OpenAiCompatibleProvider {
         options: HttpOptions,
     ) -> Result<Self, InvalidProvider> {
         config.validate().map_err(InvalidProvider)?;
+        if config.kind != crate::ProviderKind::OpenaiCompatible {
+            return Err(InvalidProvider(
+                "OpenAiCompatibleProvider requires openai-compatible kind".into(),
+            ));
+        }
         let base = BaseUrl::parse(&config.base_url)
             .map_err(|error| InvalidProvider(format!("provider `{}`: {error}", config.id)))?;
         let locality = match (base.is_loopback(), config.locality) {
@@ -430,12 +450,11 @@ impl ModelProvider for OpenAiCompatibleProvider {
         // Gate first even when cached, so an offline listing reports the refusal.
         self.admit()?;
         let ttl = self.client.options.model_cache_ttl;
-        if let Ok(cache) = self.cache.lock() {
-            if let Some((at, models)) = cache.as_ref() {
-                if at.elapsed() < ttl {
-                    return Ok(models.clone());
-                }
-            }
+        if let Ok(cache) = self.cache.lock()
+            && let Some((at, models)) = cache.as_ref()
+            && at.elapsed() < ttl
+        {
+            return Ok(models.clone());
         }
         let discovered = self
             .client
@@ -453,15 +472,22 @@ impl ModelProvider for OpenAiCompatibleProvider {
         on_event: &mut dyn FnMut(&StreamEvent),
         cancel: &CancelToken,
     ) -> Result<ChatResponse, ProviderError> {
-        let prepared = request
-            .validate()
+        let prepared = transport::check_cancel(cancel)
+            .and_then(|()| request.validate())
             .and_then(|()| self.admit())
             .and_then(|()| self.authorization());
         match prepared {
             Ok(authorization) => self
                 .client
                 .chat_with(request, authorization, on_event, cancel),
-            Err(error) => Err(error),
+            Err(error) => {
+                if matches!(error, ProviderError::Cancelled) {
+                    on_event(&StreamEvent::Done {
+                        finish_reason: FinishReason::Cancelled,
+                    });
+                }
+                Err(error)
+            }
         }
     }
 

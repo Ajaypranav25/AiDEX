@@ -1,9 +1,5 @@
 //! `aidex model list|use|route|default`: inspect models (context limits, tool
-//! support, locality), choose the default, and explain routing decisions; and
-//! the local model commands (`import`, `verify`, `remove`, `load`, `unload`,
-//! `loaded`, `benchmark`, `run`) in [`local`].
-
-pub(crate) mod local;
+//! support, locality), choose the default, and explain routing decisions.
 
 use crate::{
     commands::daemon::connect,
@@ -66,94 +62,6 @@ pub enum ModelCommand {
     },
     /// Show the default model.
     Default,
-    /// Import a GGUF model file onto the drive (hashed, checked, never overwriting).
-    Import {
-        #[arg(value_name = "FILE")]
-        file: PathBuf,
-        /// Registry id (lowercase letters, digits, `.`, `_`, `-`); derived from the file name by default.
-        #[arg(long)]
-        id: Option<String>,
-        /// Display name.
-        #[arg(long)]
-        name: Option<String>,
-        /// Licence name or SPDX id (the GGUF `general.license` is used otherwise).
-        #[arg(long)]
-        license: Option<String>,
-        /// Licence text to store next to the model.
-        #[arg(long, value_name = "FILE")]
-        license_file: Option<PathBuf>,
-        /// Where the model came from (https URL).
-        #[arg(long, value_name = "URL")]
-        source: Option<String>,
-        /// Upstream revision of the source.
-        #[arg(long)]
-        revision: Option<String>,
-        /// Refuse the import unless the file has this SHA-256.
-        #[arg(long, value_name = "HEX")]
-        sha256: Option<String>,
-    },
-    /// Verify a local model's SHA-256 (uses the verification cache unless --force).
-    Verify {
-        #[arg(value_name = "ID")]
-        id: String,
-        #[arg(long)]
-        force: bool,
-    },
-    /// Remove a local model and the files AiDEX imported for it.
-    Remove {
-        #[arg(value_name = "ID")]
-        id: String,
-        /// Do not ask for confirmation.
-        #[arg(long)]
-        yes: bool,
-    },
-    /// Start a managed llama-server for a local model.
-    Load {
-        #[arg(value_name = "ID")]
-        id: String,
-        /// Context tokens to require.
-        #[arg(long, value_name = "TOKENS")]
-        context: Option<u32>,
-        /// Never offload to a GPU.
-        #[arg(long)]
-        cpu_only: bool,
-        /// Read the model into RAM instead of memory-mapping it.
-        #[arg(long)]
-        no_mmap: bool,
-        /// Run the opt-in GPU probe (`nvidia-smi`) first.
-        #[arg(long)]
-        probe_gpu: bool,
-    },
-    /// Stop a local model's server.
-    Unload {
-        #[arg(value_name = "ID")]
-        id: String,
-    },
-    /// List loaded local models.
-    Loaded,
-    /// Measure load time and token rates on this host (cached per host).
-    Benchmark {
-        #[arg(value_name = "ID")]
-        id: String,
-        /// Measure again even when a cached result exists.
-        #[arg(long)]
-        force: bool,
-    },
-    /// One-shot local completion (smoke test), streamed to stdout.
-    Run {
-        #[arg(value_name = "ID")]
-        id: String,
-        /// The prompt (quote it).
-        #[arg(value_name = "PROMPT")]
-        prompt: String,
-        /// System message.
-        #[arg(long)]
-        system: Option<String>,
-        #[arg(long, value_name = "TOKENS")]
-        max_tokens: Option<u32>,
-        #[arg(long)]
-        temperature: Option<f32>,
-    },
 }
 
 impl ModelCommand {
@@ -163,14 +71,6 @@ impl ModelCommand {
             Self::Use { .. } => "aidex model use",
             Self::Route { .. } => "aidex model route",
             Self::Default => "aidex model default",
-            Self::Import { .. } => "aidex model import",
-            Self::Verify { .. } => "aidex model verify",
-            Self::Remove { .. } => "aidex model remove",
-            Self::Load { .. } => "aidex model load",
-            Self::Unload { .. } => "aidex model unload",
-            Self::Loaded => "aidex model loaded",
-            Self::Benchmark { .. } => "aidex model benchmark",
-            Self::Run { .. } => "aidex model run",
         }
     }
 }
@@ -226,78 +126,6 @@ pub fn run(args: ModelArgs, output: Output) -> Result<Exit, CliError> {
                 }
             };
             output.emit(&routed, || print_route(&routed))?;
-        }
-        ModelCommand::Import {
-            file,
-            id,
-            name,
-            license,
-            license_file,
-            source,
-            revision,
-            sha256,
-        } => {
-            return local::import(
-                &mut client,
-                local::ImportArgs {
-                    file,
-                    id,
-                    name,
-                    license,
-                    license_file,
-                    source,
-                    revision,
-                    sha256,
-                },
-                output,
-            );
-        }
-        ModelCommand::Verify { id, force } => {
-            return local::verify(&mut client, &id, force, output);
-        }
-        ModelCommand::Remove { id, yes } => return local::remove(&mut client, &id, yes, output),
-        ModelCommand::Load {
-            id,
-            context,
-            cpu_only,
-            no_mmap,
-            probe_gpu,
-        } => {
-            return local::load(
-                &mut client,
-                &local::LoadArgs {
-                    id,
-                    context,
-                    cpu_only,
-                    no_mmap,
-                    probe_gpu,
-                },
-                output,
-            );
-        }
-        ModelCommand::Unload { id } => return local::unload(&mut client, &id, output),
-        ModelCommand::Loaded => return local::loaded(&mut client, output),
-        ModelCommand::Benchmark { id, force } => {
-            return local::benchmark(&mut client, &id, force, output);
-        }
-        ModelCommand::Run {
-            id,
-            prompt,
-            system,
-            max_tokens,
-            temperature,
-        } => {
-            return local::run(
-                &mut client,
-                local::RunArgs {
-                    id,
-                    prompt,
-                    system,
-                    max_tokens,
-                    temperature,
-                },
-                output,
-            );
         }
         ModelCommand::Default => {
             let result: DefaultModel = client.call_as(MODEL_DEFAULT, Value::Null)?;

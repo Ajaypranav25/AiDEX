@@ -147,10 +147,10 @@ fn check(
     model: &ModelDescriptor,
     explicit: bool,
 ) -> Result<(), RejectReason> {
-    if model.locality == Locality::Remote {
-        if let Some(cause) = request.remote_block() {
-            return Err(RejectReason::RemoteForbidden { cause });
-        }
+    if model.locality == Locality::Remote
+        && let Some(cause) = request.remote_block()
+    {
+        return Err(RejectReason::RemoteForbidden { cause });
     }
     let capabilities = &model.capabilities;
     if request.task == TaskKind::Embed {
@@ -176,15 +176,14 @@ fn check(
     if request.needs_json_schema && !capabilities.json_schema_output {
         return Err(RejectReason::NoJsonSchema);
     }
-    if model.locality == Locality::Local {
-        if let (Some(required), Some(available)) = (model.min_ram_bytes, request.host.ram_bytes) {
-            if required > available {
-                return Err(RejectReason::InsufficientMemory {
-                    required,
-                    available,
-                });
-            }
-        }
+    if model.locality == Locality::Local
+        && let (Some(required), Some(available)) = (model.min_ram_bytes, request.host.ram_bytes)
+        && required > available
+    {
+        return Err(RejectReason::InsufficientMemory {
+            required,
+            available,
+        });
     }
     if !explicit && model.source == CapabilitySource::Assumed {
         return Err(RejectReason::UnverifiedCapabilities);

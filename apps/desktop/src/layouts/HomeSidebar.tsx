@@ -1,87 +1,66 @@
 import { SidebarItem, SidebarSection } from "@aidex/ui/desktop";
-import { MoreHorizontalIcon, PlusCircleIcon } from "@aidex/ui/icons";
-import { IconButton, Kbd } from "@aidex/ui/primitives";
+import { ChatIcon, FolderIcon, PlusCircleIcon } from "@aidex/ui/icons";
+import { Text } from "@aidex/ui/primitives";
 import { useNavigation } from "../app/providers/navigation";
 import { usePreferences } from "../app/providers/preferences";
-import { useToast } from "../app/providers/toast";
-import { useModifierKeyLabel } from "../hooks/useModifierKeyLabel";
-import { sampleSessions } from "../lib/sample/sessions";
-import { sampleWorkspaces } from "../lib/sample/workspaces";
+import { useRpc } from "../hooks/useRpc";
 import { SectionSidebar } from "./SectionSidebar";
 import { useShell } from "./shell";
-
-const RECENT_LIMIT = 7;
-
 export function HomeSidebar() {
   const { navigate } = useNavigation();
-  const { workspaceId, setWorkspaceId } = usePreferences();
-  const notify = useToast();
+  const preferences = usePreferences();
   const shell = useShell();
-  const modifierKey = useModifierKeyLabel();
-
-  const openWorkspace = (id: string) => {
-    setWorkspaceId(id);
-    navigate({ page: "workspace", id });
-  };
-
+  const workspaces = useRpc("workspace.list");
+  const sessions = useRpc("conversation.list");
   return (
     <SectionSidebar
       title="AiDEX"
       brandSize="lg"
       action={{
-        label: "New session",
+        label: "New chat",
         icon: <PlusCircleIcon />,
         onClick: shell.startNewSession,
-        trailing: <Kbd aria-hidden="true">{modifierKey} K</Kbd>,
-        keyShortcuts: modifierKey === "⌘" ? "Meta+K" : "Control+K",
       }}
     >
-      <SidebarSection title="Pinned (sample)">
-        {sampleWorkspaces
-          .filter((workspace) => workspace.pinned)
-          .map(({ id, name, Icon, iconTone }) => (
+      <SidebarSection title="Projects">
+        {workspaces.data?.workspaces.slice(0, 7).map((workspace) => (
+          <SidebarItem
+            key={workspace.id}
+            label={workspace.name}
+            icon={<FolderIcon />}
+            active={preferences.workspaceId === workspace.id}
+            onSelect={() => {
+              preferences.setWorkspaceId(workspace.id);
+              navigate({ page: "workspace", id: workspace.id });
+            }}
+          />
+        ))}
+        {!workspaces.loading && !workspaces.data?.workspaces.length && (
+          <Text tone="muted">No projects added.</Text>
+        )}
+        <SidebarItem
+          label="Add workspace"
+          icon={<PlusCircleIcon />}
+          onSelect={() => navigate({ page: "workspace-create" })}
+        />
+      </SidebarSection>
+      <SidebarSection title="Recent chats">
+        {sessions.data?.sessions
+          .filter((s) => !s.locked)
+          .slice(0, 7)
+          .map((session) => (
             <SidebarItem
-              key={id}
-              label={name}
-              icon={<Icon />}
-              iconTone={iconTone}
-              active={id === workspaceId}
-              onSelect={() => openWorkspace(id)}
-              actions={
-                <IconButton
-                  size="sm"
-                  label={`More actions for ${name}`}
-                  icon={<MoreHorizontalIcon />}
-                  onClick={() => notify(`Workspace actions for ${name} will open here.`)}
-                />
+              key={session.id}
+              label={session.title || "Untitled chat"}
+              icon={<ChatIcon />}
+              onSelect={() =>
+                navigate({
+                  page: session.mode === "agent" ? "agent" : "chat",
+                  id: session.id,
+                })
               }
             />
           ))}
-      </SidebarSection>
-      <SidebarSection title="Workspaces (sample)">
-        {sampleWorkspaces
-          .filter((workspace) => !workspace.pinned)
-          .slice(0, 4)
-          .map(({ id, name, Icon, iconTone }) => (
-            <SidebarItem
-              key={id}
-              label={name}
-              icon={<Icon />}
-              iconTone={iconTone}
-              active={id === workspaceId}
-              onSelect={() => openWorkspace(id)}
-            />
-          ))}
-      </SidebarSection>
-      <SidebarSection title="Recents (sample)">
-        {sampleSessions.slice(0, RECENT_LIMIT).map((session) => (
-          <SidebarItem
-            key={session.id}
-            label={session.title}
-            size="sm"
-            onSelect={() => navigate({ page: session.kind === "agent" ? "agent" : "chat", id: session.id })}
-          />
-        ))}
       </SidebarSection>
     </SectionSidebar>
   );

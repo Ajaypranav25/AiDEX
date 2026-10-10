@@ -46,6 +46,7 @@ impl FakeTurn {
         Self::from(FakeOutcome::ToolCalls {
             text: String::new(),
             calls: vec![ToolCall {
+                provider_metadata: None,
                 id: String::new(),
                 name: name.into(),
                 arguments: arguments.into(),

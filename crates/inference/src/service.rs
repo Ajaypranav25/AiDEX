@@ -1,645 +1,536 @@
-//! [`LocalInference`]: the local model service the daemon composes (spec §96).
-//! It owns the registry, the runtime catalog, the resident servers, and the
-//! idle reaper, and emits `model.loaded` / `model.unloaded` / `model.error`.
-
+use crate::{catalog, files, runtime, *};
+use aidex_core::CancelToken;
+use aidex_drive::DrivePaths;
+use aidex_providers::{
+    EgressGate, ModelConfig, ModelId, NoVault, OpenAiCompatibleProvider, ProviderConfig,
+    ProviderId, ProviderKind, ProviderRegistry,
+};
+use aidex_sandbox::{
+    CommandSpec, ManagedProcess, Mount, NetworkMode, ResourceLimits, Sandbox, SandboxLevel,
+    SandboxRequest,
+};
 use std::{
-    path::{Path, PathBuf},
-    sync::{Arc, Mutex, Weak},
+    net::TcpListener,
+    path::Path,
+    sync::{
+        Arc, Mutex, MutexGuard,
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
     time::Duration,
 };
 
-use aidex_core::{CancelReason, CancelToken, EntityId};
-use aidex_drive::DrivePaths;
-use aidex_events::{EventKind, EventScope, EventSink};
-use aidex_host::{GpuProbeOptions, GpuStatus, HostResources, probe_gpus};
-use aidex_providers::{ChatRequest, ChatResponse, FinishReason, ProviderId, StreamEvent};
-use aidex_sandbox::Sandbox;
-use serde::{Deserialize, Serialize};
-
-use crate::{
-    ComposeRequest, HostSnapshot, ImportOptions, ImportProgress, InferenceError, LaunchPlan,
-    LocalModelId, ModelRegistry, RegistryEntry, RegistryListing, RemovedModel, Result, Verified,
-    compose,
-    import::import_model_with,
-    runtime::{
-        CatalogEntry, InstallPhase, InstalledListing, InstalledRuntime, RuntimeCatalog,
-        install_from_catalog, list_installed,
-    },
-    scheduler::{Admission, Lease, LoadedModel, LoadedSummary, Residency, SchedulerPolicy, Slot},
-    server::{ManagedServer, ServerConfig, ServerInfo, ServerLaunch},
-    verify::{VerificationCache, verify_model_with},
-};
-
-/// The provider id local models are served under (`local/<model>`).
-pub const LOCAL_PROVIDER_ID: &str = "local";
-/// Server logs directory under `DrivePaths::logs()`.
-pub const LOGS_DIR: &str = "inference";
-/// Scratch directory under `DrivePaths::tmp()`.
-pub const SCRATCH_DIR: &str = "inference";
-/// How long a waiter sleeps between residency checks.
-const WAIT_STEP: Duration = Duration::from_millis(100);
-
-/// Service settings.
-#[derive(Clone, Debug)]
-pub struct InferenceOptions {
-    /// Unload a model unused this long (`None` keeps models until unloaded).
-    pub idle_timeout: Option<Duration>,
-    /// How often the idle reaper runs.
-    pub reaper_interval: Duration,
-    pub scheduler: SchedulerPolicy,
-    pub server: ServerConfig,
-    /// Fixed host memory/CPU facts instead of reading them for each plan
-    /// (deterministic tests and diagnostics); `None` reads the live host.
-    pub resources: Option<HostResources>,
-}
-
-impl Default for InferenceOptions {
-    fn default() -> Self {
-        Self {
-            idle_timeout: Some(Duration::from_secs(10 * 60)),
-            reaper_interval: Duration::from_secs(5),
-            scheduler: SchedulerPolicy::default(),
-            server: ServerConfig::default(),
-            resources: None,
-        }
-    }
-}
-
-/// Runtimes for this host: what the catalog pins and what the drive has.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub const LOCAL_PROVIDER_ID: &str = "local-llama";
+const START_TIMEOUT: Duration = Duration::from_secs(120);
+const SETTINGS: &str = "inference-settings.json";
+const BINDING: &str = "local-inference.json";
+#[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct RuntimeInventory {
-    /// This host's runtime platform (`None` when unsupported).
-    pub platform: Option<String>,
-    /// Pinned archives for this platform.
-    pub catalog: Vec<CatalogEntry>,
-    /// Installs on the drive (every platform).
-    pub installed: InstalledListing,
+struct PortableBinding {
+    version: u32,
+    autoload: bool,
+    settings_file: String,
+    model_id: String,
+    model_path: String,
+    runtime_path: String,
+}
+fn lock<T>(value: &Mutex<T>) -> MutexGuard<'_, T> {
+    value.lock().unwrap_or_else(|p| p.into_inner())
+}
+#[derive(Default)]
+struct State {
+    process: Option<Arc<ManagedProcess>>,
+    starting: bool,
+    registered: bool,
+    options: Option<StartOptions>,
+    endpoint: Option<String>,
+    restoring: bool,
+    model_name: Option<String>,
+    startup_error: Option<String>,
 }
 
-/// A launch plan with the host facts it was computed from.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PlanReport {
-    pub plan: LaunchPlan,
-    pub host: HostSnapshot,
-}
-
-/// The outcome of `load`.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LoadReport {
-    pub model: LocalModelId,
-    /// The model was already resident; its existing plan is reported.
-    pub already_loaded: bool,
-    pub plan: LaunchPlan,
-    pub server: ServerInfo,
-    /// Present when this call verified the model file.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub verification: Option<Verified>,
-}
-
-/// Load-time choices.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct LoadOptions {
-    #[serde(default)]
-    pub compose: ComposeRequest,
-    /// Run the opt-in GPU probe before planning (the result is reused afterwards).
-    #[serde(default)]
-    pub probe_gpu: bool,
-}
-
-pub(crate) struct Inner {
+/// One inference server per drive/service. Mutations fail with Conflict while
+/// another operation runs; stop cancels active work before waiting for teardown.
+pub struct InferenceService {
     paths: DrivePaths,
-    registry: ModelRegistry,
-    catalog: RuntimeCatalog,
+    registry: Arc<ProviderRegistry>,
+    gate: Arc<dyn EgressGate>,
     sandbox: Sandbox,
-    events: Arc<dyn EventSink>,
-    options: InferenceOptions,
-    residency: Arc<Residency>,
-    gpu: Mutex<GpuStatus>,
-    import_lock: Mutex<()>,
-    install_lock: Mutex<()>,
-    provider_id: ProviderId,
-    provider_entity: EntityId,
+    operation: Mutex<()>,
+    cancel: Mutex<Option<CancelToken>>,
+    state: Mutex<State>,
+    shutdown: AtomicBool,
+    restore_cancel: Mutex<Option<CancelToken>>,
 }
-
-/// The local model service. Cloning shares it.
-#[derive(Clone)]
-pub struct LocalInference {
-    pub(crate) inner: Arc<Inner>,
+struct Operation<'a> {
+    service: &'a InferenceService,
+    _guard: MutexGuard<'a, ()>,
 }
-
-impl std::fmt::Debug for LocalInference {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LocalInference")
-            .field("drive", &self.inner.paths.root())
-            .finish_non_exhaustive()
+impl Drop for Operation<'_> {
+    fn drop(&mut self) {
+        *lock(&self.service.cancel) = None;
     }
 }
-
-impl LocalInference {
-    /// Open the service on a drive with the built-in runtime catalog.
+impl InferenceService {
     pub fn open(
-        paths: &DrivePaths,
+        paths: DrivePaths,
+        registry: Arc<ProviderRegistry>,
+        gate: Arc<dyn EgressGate>,
         sandbox: Sandbox,
-        events: Arc<dyn EventSink>,
-        options: InferenceOptions,
-    ) -> Result<Self> {
-        Self::with_catalog(paths, sandbox, events, options, RuntimeCatalog::builtin()?)
-    }
-
-    /// Open with an explicit catalog (tests and embedders).
-    pub fn with_catalog(
-        paths: &DrivePaths,
-        sandbox: Sandbox,
-        events: Arc<dyn EventSink>,
-        options: InferenceOptions,
-        catalog: RuntimeCatalog,
-    ) -> Result<Self> {
-        let registry = ModelRegistry::open(paths)?;
-        let provider_id = ProviderId::new(LOCAL_PROVIDER_ID)
-            .map_err(|error| InferenceError::InvalidArgument(error.to_string()))?;
-        let provider_entity = provider_id.as_entity_id().clone();
-        let inner = Arc::new(Inner {
-            paths: paths.clone(),
-            registry,
-            catalog,
-            sandbox,
-            events,
-            options,
-            residency: Arc::new(Residency::default()),
-            gpu: Mutex::new(GpuStatus::NotProbed),
-            import_lock: Mutex::new(()),
-            install_lock: Mutex::new(()),
-            provider_id,
-            provider_entity,
-        });
-        if let Some(timeout) = inner.options.idle_timeout {
-            start_reaper(
-                Arc::downgrade(&inner),
-                timeout,
-                inner.options.reaper_interval,
-            )?;
+    ) -> Result<Self, InferenceError> {
+        for dir in [paths.models(), paths.config(), paths.tmp()] {
+            paths
+                .ensure_dir(&dir)
+                .map_err(|e| InferenceError::Io(e.to_string()))?;
         }
-        Ok(Self { inner })
+        Ok(Self {
+            paths,
+            registry,
+            gate,
+            sandbox,
+            operation: Mutex::new(()),
+            cancel: Mutex::new(None),
+            state: Mutex::new(State::default()),
+            shutdown: AtomicBool::new(false),
+            restore_cancel: Mutex::new(None),
+        })
     }
-
-    pub fn paths(&self) -> &DrivePaths {
-        &self.inner.paths
+    fn begin(&self, cancel: &CancelToken) -> Result<Operation<'_>, InferenceError> {
+        let guard = self.operation.try_lock().map_err(|_| {
+            InferenceError::Conflict("another inference operation is in progress".into())
+        })?;
+        // The shutdown latch and active token publication share the same lock:
+        // shutdown either sees this token or begin observes the closed latch.
+        let mut active_cancel = lock(&self.cancel);
+        if self.shutdown.load(Ordering::Acquire) {
+            return Err(InferenceError::Cancelled);
+        }
+        files::check_cancel(cancel)?;
+        *active_cancel = Some(cancel.clone());
+        drop(active_cancel);
+        Ok(Operation {
+            service: self,
+            _guard: guard,
+        })
     }
-
-    pub fn registry(&self) -> &ModelRegistry {
-        &self.inner.registry
-    }
-
-    pub fn catalog(&self) -> &RuntimeCatalog {
-        &self.inner.catalog
-    }
-
-    pub fn options(&self) -> &InferenceOptions {
-        &self.inner.options
-    }
-
-    /// `local`.
-    pub fn provider_id(&self) -> &ProviderId {
-        &self.inner.provider_id
-    }
-
-    /// The `ModelProvider` serving registered models as `local/<id>`.
-    pub fn provider(&self) -> crate::LocalLlamaProvider {
-        crate::LocalLlamaProvider::new(self.clone())
-    }
-
-    pub fn models(&self) -> Result<RegistryListing> {
-        self.inner.registry.list()
-    }
-
     pub fn import(
         &self,
         source: &Path,
-        options: &ImportOptions,
-        progress: &mut dyn FnMut(&ImportProgress),
+        name: Option<&str>,
         cancel: &CancelToken,
-    ) -> Result<RegistryEntry> {
-        let _guard = self
-            .inner
-            .import_lock
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        import_model_with(&self.inner.paths, source, options, progress, cancel)
+    ) -> Result<ManagedModel, InferenceError> {
+        let _operation = self.begin(cancel)?;
+        catalog::import(&self.paths, source, name, cancel)
     }
-
-    /// Verify a model; `force` rehashes even when a cached result applies.
-    pub fn verify(
-        &self,
-        id: &LocalModelId,
-        force: bool,
-        progress: &mut dyn FnMut(u64),
-        cancel: &CancelToken,
-    ) -> Result<Verified> {
-        let entry = self.inner.registry.get(id)?;
-        verify_model_with(&self.inner.paths, &entry, force, progress, cancel)
-    }
-
-    /// Unload (if resident) and delete the registry entry and imported files.
-    pub fn remove(&self, id: &LocalModelId) -> Result<RemovedModel> {
-        let entry = self.inner.registry.get(id)?;
-        self.unload(id);
-        let removed = self.inner.registry.remove(id)?;
-        if let Ok(cache) = VerificationCache::open(&self.inner.paths) {
-            let _ = cache.forget(&entry.file);
-        }
-        Ok(removed)
-    }
-
-    pub fn runtimes(&self) -> Result<RuntimeInventory> {
-        let platform = aidex_drive::platform_runtime_name().map(str::to_owned);
-        let catalog = platform
-            .as_deref()
-            .map(|platform| self.inner.catalog.for_platform(platform).cloned().collect())
-            .unwrap_or_default();
-        Ok(RuntimeInventory {
-            platform,
-            catalog,
-            installed: list_installed(&self.inner.paths)?,
+    pub fn catalog(&self) -> Result<Catalog, InferenceError> {
+        let path = self.paths.config().join(SETTINGS);
+        let settings = if path.exists() {
+            Some(files::read_json(&path)?)
+        } else {
+            None
+        };
+        Ok(Catalog {
+            models: catalog::list(&self.paths)?,
+            runtime: runtime::inspect(&self.paths)?.map(|p| p.0),
+            settings,
         })
     }
-
-    /// Install a pinned runtime archive (matched to the catalog by SHA-256).
+    pub fn remove_model(&self, id: &str) -> Result<(), InferenceError> {
+        let _operation = self.begin(&CancelToken::new())?;
+        if lock(&self.state)
+            .options
+            .as_ref()
+            .is_some_and(|o| o.model_id == id)
+        {
+            return Err(InferenceError::Conflict(
+                "stop the loaded model before removing it".into(),
+            ));
+        }
+        catalog::remove(&self.paths, id)
+    }
     pub fn install_runtime(
         &self,
-        archive: &Path,
-        progress: &mut dyn FnMut(InstallPhase),
+        source: Option<&Path>,
         cancel: &CancelToken,
-    ) -> Result<InstalledRuntime> {
-        let _guard = self
-            .inner
-            .install_lock
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        install_from_catalog(
-            &self.inner.paths,
-            archive,
-            &self.inner.catalog,
-            progress,
-            cancel,
-        )
+    ) -> Result<RuntimeInfo, InferenceError> {
+        let _operation = self.begin(cancel)?;
+        runtime::install(&self.paths, source, cancel)
     }
-
-    /// Host facts; runs the opt-in GPU probe once when `probe_gpu` is set.
-    pub fn host(&self, probe_gpu: bool) -> HostSnapshot {
-        let gpu = {
-            let mut cached = self
-                .inner
-                .gpu
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            if probe_gpu && *cached == GpuStatus::NotProbed {
-                *cached = probe_gpus(&GpuProbeOptions::default());
-            }
-            cached.clone()
-        };
-        let mut host = HostSnapshot::current(gpu);
-        if let Some(resources) = &self.inner.options.resources {
-            host.resources = resources.clone();
-        }
-        host
-    }
-
-    /// Explain how `id` would be launched on this host now.
-    pub fn plan(&self, id: &LocalModelId, options: &LoadOptions) -> Result<PlanReport> {
-        let entry = self.inner.registry.get(id)?;
-        let host = self.host(options.probe_gpu);
-        let plan = self.compose_for(&entry, &host, &options.compose)?.0;
-        Ok(PlanReport { plan, host })
-    }
-
-    fn compose_for(
+    pub fn start(
         &self,
-        entry: &RegistryEntry,
-        host: &HostSnapshot,
-        request: &ComposeRequest,
-    ) -> Result<(LaunchPlan, InstalledRuntime)> {
-        let installed = list_installed(&self.inner.paths)?.runtimes;
-        let plan = compose(entry, host, &installed, request).map_err(|error| match error {
-            InferenceError::RuntimeNotInstalled { platform, reason } => {
-                let pinned: Vec<&str> = self
-                    .inner
-                    .catalog
-                    .for_platform(&platform)
-                    .map(|entry| entry.archive.as_str())
-                    .collect();
-                let reason = if pinned.is_empty() {
-                    format!("{reason}; the catalog pins no runtime for {platform}")
-                } else {
-                    format!("{reason}; pinned archives: {}", pinned.join(", "))
-                };
-                InferenceError::RuntimeNotInstalled { platform, reason }
+        options: StartOptions,
+        cancel: &CancelToken,
+    ) -> Result<InferenceStatus, InferenceError> {
+        if lock(&self.state).restoring {
+            return Err(InferenceError::Conflict(
+                "saved local inference is still loading".into(),
+            ));
+        }
+        self.start_inner(options, cancel)
+    }
+    fn start_inner(
+        &self,
+        options: StartOptions,
+        cancel: &CancelToken,
+    ) -> Result<InferenceStatus, InferenceError> {
+        let _operation = self.begin(cancel)?;
+        if options.backend == Backend::Gpu {
+            return Err(InferenceError::Unavailable(
+                "GPU backend cannot be proven available; select auto or CPU".into(),
+            ));
+        }
+        self.status();
+        let active = {
+            let state = lock(&self.state);
+            state.starting || state.process.is_some()
+        };
+        if active {
+            return Err(InferenceError::Conflict(
+                "inference is already running; stop it before restarting".into(),
+            ));
+        }
+        if lock(&self.state).restoring {
+            catalog::validate_id(&options.model_id)?;
+            let metadata_path = self
+                .paths
+                .models()
+                .join(&options.model_id)
+                .join("model.json");
+            let metadata: ManagedModel = files::read_json(&metadata_path)?;
+            if metadata.id != options.model_id
+                || metadata.path
+                    != catalog::relative(
+                        &self.paths,
+                        &self
+                            .paths
+                            .models()
+                            .join(&options.model_id)
+                            .join("model.gguf"),
+                    )?
+            {
+                return Err(InferenceError::Integrity(
+                    "saved model metadata does not match its portable location".into(),
+                ));
             }
-            other => other,
-        })?;
-        let runtime = installed
+            let mut state = lock(&self.state);
+            state.options = Some(options.clone());
+            state.model_name = Some(metadata.name.chars().take(128).collect());
+        }
+        if self
+            .registry
+            .provider(&ProviderId::new(LOCAL_PROVIDER_ID).unwrap())
+            .is_some()
+        {
+            return Err(InferenceError::Conflict(
+                "local-llama provider id is already registered".into(),
+            ));
+        }
+        catalog::validate_id(&options.model_id)?;
+        let model = catalog::list_with_cancel(&self.paths, cancel)?
             .into_iter()
-            .find(|runtime| runtime.relative_dir == plan.runtime.dir)
-            .ok_or_else(|| InferenceError::RuntimeNotInstalled {
-                platform: plan.runtime.platform.clone(),
-                reason: "the planned runtime disappeared".into(),
+            .find(|m| m.id == options.model_id)
+            .ok_or_else(|| InferenceError::NotFound("model is not installed".into()))?;
+        lock(&self.state).model_name = Some(model.name.clone());
+        lock(&self.state).startup_error = None;
+        if model.availability != Availability::Available {
+            return Err(InferenceError::Integrity(
+                "model is missing or its digest changed".into(),
+            ));
+        }
+        let (runtime, manifest) =
+            runtime::inspect_with_cancel(&self.paths, cancel)?.ok_or_else(|| {
+                InferenceError::NotFound("install the verified llama.cpp runtime first".into())
             })?;
-        Ok((plan, runtime))
-    }
-
-    /// Make `id` resident (verifying it and its runtime first).
-    pub fn load(
-        &self,
-        id: &LocalModelId,
-        options: &LoadOptions,
-        cancel: &CancelToken,
-    ) -> Result<LoadReport> {
-        let (lease, verification) = self.acquire(id, options, cancel)?;
-        let model = lease.model();
-        Ok(LoadReport {
-            model: id.clone(),
-            already_loaded: verification.is_none(),
-            plan: model.plan.clone(),
-            server: model.server.info(),
-            verification,
-        })
-    }
-
-    /// Stop `id`'s server. Returns whether it was resident.
-    pub fn unload(&self, id: &LocalModelId) -> bool {
-        let model = {
-            let mut resident = self.inner.residency.lock();
-            resident.take_ready(id)
-        };
-        self.inner.residency.notify();
-        match model {
-            Some(model) => {
-                self.inner.stop_model(&model);
-                true
-            }
-            None => false,
+        if !runtime.verified {
+            return Err(InferenceError::Integrity(
+                "runtime checksum verification failed".into(),
+            ));
         }
-    }
-
-    /// Resident models.
-    pub fn loaded(&self) -> Vec<LoadedSummary> {
-        let resident = self.inner.residency.lock();
-        resident
-            .models
-            .values()
-            .filter_map(|slot| match slot {
-                Slot::Ready(model) => Some(model.summary()),
-                Slot::Loading { .. } => None,
-            })
-            .collect()
-    }
-
-    /// Context window the provider advertises for `entry`: the running plan's,
-    /// else the recommended context.
-    pub(crate) fn context_window(&self, entry: &RegistryEntry) -> u32 {
-        let resident = self.inner.residency.lock();
-        match resident.models.get(&entry.id) {
-            Some(Slot::Ready(model)) => model.plan.ctx_size,
-            _ => entry.memory.recommended_context,
+        let context = options
+            .context_window
+            .unwrap_or_else(|| model.context_window.unwrap_or(4096).min(4096));
+        if !(512..=262144).contains(&context)
+            || model.context_window.is_some_and(|limit| context > limit)
+        {
+            return Err(InferenceError::Invalid(
+                "context window must be 512-262144 and within model metadata limit".into(),
+            ));
         }
-    }
-
-    /// Chat with `id`, loading it on first use.
-    pub fn chat(
-        &self,
-        id: &LocalModelId,
-        request: &ChatRequest,
-        on_event: &mut dyn FnMut(&StreamEvent),
-        cancel: &CancelToken,
-    ) -> Result<ChatResponse> {
-        let lease = match self.acquire(id, &LoadOptions::default(), cancel) {
-            Ok((lease, _)) => lease,
-            Err(error) => {
-                if error == InferenceError::Cancelled {
-                    // The client reports this itself once a request is in flight.
-                    on_event(&StreamEvent::Done {
-                        finish_reason: FinishReason::Cancelled,
-                    });
-                }
-                return Err(error);
-            }
-        };
-        lease
-            .model()
-            .server
-            .chat(request, on_event, cancel)
-            .map_err(InferenceError::Provider)
-    }
-
-    /// Stop every resident server and refuse new loads.
-    pub fn shutdown(&self) {
-        let models: Vec<Arc<LoadedModel>> = {
-            let mut resident = self.inner.residency.lock();
-            resident.closed = true;
-            let ids: Vec<LocalModelId> = resident.models.keys().cloned().collect();
-            ids.iter()
-                .filter_map(|id| resident.take_ready(id))
-                .collect()
-        };
-        self.inner.residency.notify();
-        for model in models {
-            self.inner.stop_model(&model);
-        }
-    }
-
-    /// A lease on a resident `id`, loading it if needed. The second value is
-    /// the verification performed when this call loaded the model.
-    pub(crate) fn acquire(
-        &self,
-        id: &LocalModelId,
-        options: &LoadOptions,
-        cancel: &CancelToken,
-    ) -> Result<(Lease, Option<Verified>)> {
-        let entry = self.inner.registry.get(id)?;
-        let large = entry.size_bytes >= self.inner.options.scheduler.large_model_bytes;
-        let policy = self.inner.options.scheduler;
-        let mut resident = self.inner.residency.lock();
-        loop {
-            if resident.closed {
-                return Err(InferenceError::Busy {
-                    reason: "local inference is shutting down".into(),
-                });
-            }
-            match resident.admit(id, large, &policy) {
-                Admission::Ready(model) => {
-                    return Ok((Lease::new(model, Arc::clone(&self.inner.residency)), None));
-                }
-                Admission::Wait(reason) => {
-                    match cancel.state() {
-                        Some(CancelReason::Cancelled) => return Err(InferenceError::Cancelled),
-                        Some(CancelReason::DeadlineExceeded) => {
-                            return Err(InferenceError::Busy { reason });
-                        }
-                        None => {}
-                    }
-                    resident = self.inner.residency.wait(resident, WAIT_STEP);
-                }
-                Admission::Load { evict } => {
-                    let evicted: Vec<Arc<LoadedModel>> = evict
-                        .iter()
-                        .filter_map(|other| {
-                            let model = resident.take_ready(other);
-                            resident.models.remove(other);
-                            model
-                        })
-                        .collect();
-                    resident.models.insert(id.clone(), Slot::Loading { large });
-                    drop(resident);
-                    for model in evicted {
-                        self.inner.stop_model(&model);
-                    }
-                    let started = self.start_model(&entry, large, options, cancel);
-                    let mut resident = self.inner.residency.lock();
-                    resident.models.remove(id);
-                    let mut discard = None;
-                    let outcome = match started {
-                        Ok((model, verified)) if !resident.closed => {
-                            resident
-                                .models
-                                .insert(id.clone(), Slot::Ready(Arc::clone(&model)));
-                            let lease =
-                                Lease::new(Arc::clone(&model), Arc::clone(&self.inner.residency));
-                            self.inner.emit(EventKind::ModelLoaded {
-                                provider_id: self.inner.provider_entity.clone(),
-                                model_id: id.entity_id().clone(),
-                            });
-                            Ok((lease, Some(verified)))
-                        }
-                        Ok((model, _)) => {
-                            discard = Some(model);
-                            Err(InferenceError::Busy {
-                                reason: "local inference is shutting down".into(),
-                            })
-                        }
-                        Err(error) => {
-                            if error != InferenceError::Cancelled {
-                                self.inner.emit(EventKind::ModelError {
-                                    provider_id: self.inner.provider_entity.clone(),
-                                    model_id: id.entity_id().clone(),
-                                    code: error.kind().into(),
-                                    message: error.to_string(),
-                                });
-                            }
-                            Err(error)
-                        }
-                    };
-                    drop(resident);
-                    self.inner.residency.notify();
-                    if let Some(model) = discard {
-                        model.server.stop();
-                    }
-                    return outcome;
-                }
-            }
-        }
-    }
-
-    fn start_model(
-        &self,
-        entry: &RegistryEntry,
-        large: bool,
-        options: &LoadOptions,
-        cancel: &CancelToken,
-    ) -> Result<(Arc<LoadedModel>, Verified)> {
-        let paths = &self.inner.paths;
-        let verified = verify_model_with(paths, entry, false, &mut |_| {}, cancel)?;
-        let host = self.host(options.probe_gpu);
-        let (plan, runtime) = self.compose_for(entry, &host, &options.compose)?;
-        runtime.verify(&self.inner.catalog, cancel)?;
-        let model_path = entry.model_path(paths)?;
-        let logs_dir = paths.ensure_dir(&paths.logs().join(LOGS_DIR))?;
-        let scratch_root = paths.ensure_dir(&paths.tmp().join(SCRATCH_DIR))?;
-        let launch = ServerLaunch {
-            runtime: &runtime,
-            model_id: &entry.id,
-            model_path: &model_path,
-            plan: &plan,
-            logs_dir: &logs_dir,
-            scratch_root: &scratch_root,
-        };
-        let server = ManagedServer::start(
-            &self.inner.sandbox,
-            &launch,
-            &self.inner.options.server,
-            cancel,
-        )?;
-        Ok((
-            Arc::new(LoadedModel::new(entry.id.clone(), server, plan, large)),
-            verified,
-        ))
-    }
-
-    /// Logs directory of managed servers.
-    pub fn logs_dir(&self) -> PathBuf {
-        self.inner.paths.logs().join(LOGS_DIR)
-    }
-}
-
-impl Inner {
-    fn emit(&self, event: EventKind) {
-        // Best effort: an event failure never fails the model operation.
-        let _ = self.events.emit(EventScope::global(), event);
-    }
-
-    fn stop_model(&self, model: &LoadedModel) {
-        model.server.stop();
-        self.emit(EventKind::ModelUnloaded {
-            provider_id: self.provider_entity.clone(),
-            model_id: model.id.entity_id().clone(),
+        let threads = options.threads.unwrap_or_else(|| {
+            thread::available_parallelism()
+                .map(|n| n.get() as u32)
+                .unwrap_or(1)
+                .min(8)
         });
-    }
-
-    fn reap(&self, timeout: Duration) {
-        let idle = self.residency.lock().take_idle(timeout);
-        if !idle.is_empty() {
-            self.residency.notify();
+        if !(1..=256).contains(&threads) {
+            return Err(InferenceError::Invalid("threads must be 1-256".into()));
         }
-        for model in idle {
-            self.stop_model(&model);
-        }
-    }
-}
-
-impl Drop for Inner {
-    fn drop(&mut self) {
-        let models: Vec<Arc<LoadedModel>> = {
-            let mut resident = self.residency.lock();
-            resident.closed = true;
-            let ids: Vec<LocalModelId> = resident.models.keys().cloned().collect();
-            ids.iter()
-                .filter_map(|id| resident.take_ready(id))
-                .collect()
+        let configured = options.clone();
+        let actual = StartOptions {
+            backend: Backend::Cpu,
+            context_window: Some(context),
+            threads: Some(threads),
+            ..options
         };
-        for model in models {
-            self.stop_model(&model);
+        {
+            let mut state = lock(&self.state);
+            state.starting = true;
+            state.options = Some(actual.clone());
+        }
+        let result = self
+            .launch(&actual, &manifest, &model.name, cancel)
+            .and_then(|status| {
+                let binding = PortableBinding {
+                    version: 1,
+                    autoload: true,
+                    settings_file: SETTINGS.into(),
+                    model_id: configured.model_id.clone(),
+                    model_path: catalog::relative(
+                        &self.paths,
+                        &self
+                            .paths
+                            .models()
+                            .join(&configured.model_id)
+                            .join("model.gguf"),
+                    )?,
+                    runtime_path: catalog::relative(
+                        &self.paths,
+                        &runtime::directory(&self.paths)?,
+                    )?,
+                };
+                files::write_json(&self.paths.config().join(BINDING), &binding)?;
+                files::write_json(&self.paths.config().join(SETTINGS), &configured)?;
+                files::check_cancel(cancel)?;
+                Ok(status)
+            });
+        if result.is_err() {
+            self.clear_process()?;
+        }
+        result
+    }
+    /// Queue saved portable inference without delaying Core's IPC readiness.
+    pub fn restore_saved(self: &Arc<Self>) -> Result<bool, InferenceError> {
+        if self.shutdown.load(Ordering::Acquire) {
+            return Err(InferenceError::Cancelled);
+        }
+        if !self.paths.config().join(SETTINGS).exists() {
+            return Ok(false);
+        }
+        let token = CancelToken::new();
+        {
+            let mut state = lock(&self.state);
+            if state.restoring || state.starting || state.process.is_some() {
+                return Ok(false);
+            }
+            state.restoring = true;
+            state.startup_error = None;
+            *lock(&self.restore_cancel) = Some(token.clone());
+        }
+        let service = self.clone();
+        let spawned = thread::Builder::new().name("aidex-inference-restore".into()).spawn(move || {
+            let options: Result<StartOptions, InferenceError> = files::read_json(&service.paths.config().join(SETTINGS));
+            let saved_options = options.as_ref().ok().cloned();
+            let result = options.and_then(|options| {
+                files::check_cancel(&token)?;
+                let binding_path = service.paths.config().join(BINDING);
+                if binding_path.exists() {
+                    let binding: PortableBinding = files::read_json(&binding_path)?;
+                    catalog::validate_id(&options.model_id)?;
+                    if binding.version != 1 || binding.settings_file != SETTINGS
+                        || binding.model_id != options.model_id
+                        || binding.model_path != catalog::relative(&service.paths, &service.paths.models().join(&options.model_id).join("model.gguf"))?
+                        || binding.runtime_path != catalog::relative(&service.paths, &runtime::directory(&service.paths)?)? {
+                        return Err(InferenceError::Integrity("saved inference binding does not match its portable settings".into()));
+                    }
+                    if !binding.autoload { return Ok(()); }
+                }
+                service.start_inner(options, &token).map(|_| ())
+            });
+            let mut state = lock(&service.state);
+            state.restoring = false;
+            if let Err(error) = result
+                && error != InferenceError::Cancelled
+                && !token.is_stopped()
+                && !service.shutdown.load(Ordering::Acquire) {
+                state.options = saved_options;
+                state.startup_error = Some(match error {
+                    InferenceError::Integrity(_) => "Saved model or runtime failed integrity verification.",
+                    InferenceError::NotFound(_) => "Saved local model or runtime is missing from this drive.",
+                    InferenceError::Invalid(_) => "Saved local inference settings are invalid.",
+                    _ => "Saved local inference could not start. Retry the installed model or inspect diagnostics.",
+                }.into());
+            }
+        });
+        if let Err(error) = spawned {
+            let mut state = lock(&self.state);
+            state.restoring = false;
+            state.startup_error = Some("Local inference startup worker could not start.".into());
+            return Err(InferenceError::Unavailable(error.to_string()));
+        }
+        Ok(true)
+    }
+    /// Terminal lifecycle barrier: queued restores and active launches cannot outlive Core.
+    pub fn shutdown(&self) -> Result<InferenceStatus, InferenceError> {
+        self.shutdown.store(true, Ordering::Release);
+        self.stop()
+    }
+    fn launch(
+        &self,
+        options: &StartOptions,
+        manifest: &RuntimeManifest,
+        model_name: &str,
+        cancel: &CancelToken,
+    ) -> Result<InferenceStatus, InferenceError> {
+        let listener = TcpListener::bind(("127.0.0.1", 0))?;
+        let port = listener.local_addr()?.port();
+        let runtime_dir = runtime::directory(&self.paths)?;
+        let scratch = self
+            .paths
+            .ensure_dir(&self.paths.tmp().join("local-inference"))
+            .map_err(|e| InferenceError::Io(e.to_string()))?;
+        let request = SandboxRequest::new(SandboxLevel::Brokered, &runtime_dir, &scratch)
+            .with_mount(Mount::read_only(&runtime_dir))
+            .with_mount(Mount::read_only(self.paths.models()))
+            .with_network(NetworkMode::Normal)
+            .with_limits(ResourceLimits {
+                max_memory_bytes: Some(16 * 1024 * 1024 * 1024),
+                max_output_bytes: 1024 * 1024,
+                ..ResourceLimits::default()
+            });
+        let plan = self
+            .sandbox
+            .negotiate(&request)
+            .map_err(|e| InferenceError::Unavailable(e.to_string()))?;
+        let command = CommandSpec::new(runtime_dir.join(&manifest.executable)).args([
+            "--model".into(),
+            self.paths
+                .models()
+                .join(&options.model_id)
+                .join("model.gguf")
+                .to_string_lossy()
+                .into_owned(),
+            "--host".into(),
+            "127.0.0.1".into(),
+            "--port".into(),
+            port.to_string(),
+            "--alias".into(),
+            options.model_id.clone(),
+            "--ctx-size".into(),
+            options.context_window.unwrap().to_string(),
+            "--threads".into(),
+            options.threads.unwrap().to_string(),
+            "--n-gpu-layers".into(),
+            "0".into(),
+            "--parallel".into(),
+            "1".into(),
+            "--jinja".into(),
+        ]);
+        drop(listener);
+        files::check_cancel(cancel)?;
+        let process = Arc::new(
+            self.sandbox
+                .spawn(&plan, command)
+                .map_err(|e| InferenceError::Unavailable(e.to_string()))?,
+        );
+        {
+            let mut state = lock(&self.state);
+            state.process = Some(process.clone());
+            state.endpoint = Some(format!("http://127.0.0.1:{port}/v1"));
+        }
+        crate::readiness::wait(&process, port, cancel, START_TIMEOUT)?;
+        files::check_cancel(cancel)?;
+        let mut config = ProviderConfig::new(
+            ProviderId::new(LOCAL_PROVIDER_ID)
+                .map_err(|e| InferenceError::Invalid(e.to_string()))?,
+            ProviderKind::OpenaiCompatible,
+            format!("http://127.0.0.1:{port}/v1"),
+        );
+        config.discover_models = false;
+        config.models = vec![ModelConfig::new(
+            ModelId::new(options.model_id.clone())
+                .map_err(|e| InferenceError::Invalid(e.to_string()))?,
+            options.context_window.unwrap(),
+        )];
+        let inner = OpenAiCompatibleProvider::from_config(
+            &config,
+            Arc::new(NoVault::default()),
+            self.gate.clone(),
+        )
+        .map_err(|e| InferenceError::Invalid(e.to_string()))?;
+        let provider =
+            crate::provider::LocalProvider::new(inner, &process, &options.model_id, model_name);
+        self.registry
+            .register(Box::new(provider))
+            .map_err(|e| InferenceError::Conflict(e.to_string()))?;
+        lock(&self.state).registered = true;
+        files::check_cancel(cancel)?;
+        lock(&self.state).starting = false;
+        Ok(self.status())
+    }
+    pub fn cancel_operations(&self) {
+        if let Some(cancel) = lock(&self.restore_cancel).as_ref() {
+            cancel.cancel();
+        }
+        if let Some(cancel) = lock(&self.cancel).as_ref() {
+            cancel.cancel();
         }
     }
-}
-
-fn start_reaper(inner: Weak<Inner>, timeout: Duration, interval: Duration) -> Result<()> {
-    thread::Builder::new()
-        .name("aidex-inference-reaper".into())
-        .spawn(move || {
-            loop {
-                thread::sleep(interval);
-                let Some(inner) = inner.upgrade() else {
-                    return;
-                };
-                if inner.residency.lock().closed {
-                    return;
-                }
-                inner.reap(timeout);
+    fn clear_process(&self) -> Result<(), InferenceError> {
+        let mut state = lock(&self.state);
+        if let Some(process) = state.process.as_ref() {
+            process
+                .kill_tree()
+                .map_err(|e| InferenceError::Unavailable(e.to_string()))?;
+            if process
+                .wait_timeout(Duration::from_secs(15))
+                .map_err(|e| InferenceError::Unavailable(e.to_string()))?
+                .is_none()
+            {
+                return Err(InferenceError::Unavailable(
+                    "inference process did not terminate".into(),
+                ));
             }
-        })
-        .map(drop)
-        .map_err(|error| InferenceError::io("cannot start the idle reaper", &error))
+        }
+        state.process = None;
+        state.starting = false;
+        state.options = None;
+        state.endpoint = None;
+        state.model_name = None;
+        state.startup_error = None;
+        if state.registered {
+            let _ = self
+                .registry
+                .unregister(&ProviderId::new(LOCAL_PROVIDER_ID).unwrap());
+            state.registered = false;
+        }
+        Ok(())
+    }
+    pub fn stop(&self) -> Result<InferenceStatus, InferenceError> {
+        self.cancel_operations();
+        let _guard = lock(&self.operation);
+        self.clear_process()?;
+        lock(&self.state).restoring = false;
+        Ok(self.status())
+    }
+    pub fn status(&self) -> InferenceStatus {
+        let mut state = lock(&self.state);
+        if !state.starting && state.process.as_ref().is_some_and(|p| !p.is_running()) {
+            state.process = None;
+            state.options = None;
+            state.endpoint = None;
+            if state.registered {
+                let _ = self
+                    .registry
+                    .unregister(&ProviderId::new(LOCAL_PROVIDER_ID).unwrap());
+                state.registered = false;
+            }
+        }
+        InferenceStatus{state:if state.starting || state.restoring{"starting"}else if state.process.is_some(){"ready"}else if state.startup_error.is_some(){"failed"}else{"stopped"}.into(),model_name:state.model_name.clone(),startup_error:state.startup_error.clone(),model_id:state.options.as_ref().map(|o|o.model_id.clone()),backend:state.options.as_ref().map(|o|o.backend),endpoint:state.endpoint.clone(),pid:state.process.as_ref().map(|p|p.pid()),context_window:state.options.as_ref().and_then(|o|o.context_window),threads:state.options.as_ref().and_then(|o|o.threads),controls:state.process.as_ref().map(|p|p.plan().controls.clone()).unwrap_or_default(),limitations:vec!["GPU availability is not proven; auto uses CPU".into(),"Brokered runtime has a killable process tree and cleared environment; filesystem and network are not OS-confined".into(),"The runtime binds IPv4 loopback only; local applications can access its credential-free API".into()]}
+    }
+}
+impl Drop for InferenceService {
+    fn drop(&mut self) {
+        self.cancel_operations();
+        let _ = self.clear_process();
+    }
 }

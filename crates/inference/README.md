@@ -1,64 +1,52 @@
-# aidex-inference
+# Managed local inference
 
-AiDEX-owned local inference (spec §10, §11, §46, §66, §67, §86, §96–98): GGUF metadata, a drive-resident model registry with import and verification, pinned llama.cpp runtime bundles, host-aware launch planning, managed `llama-server` processes run through `aidex-sandbox`, residency scheduling, and `LocalLlamaProvider`, an `aidex_providers::ModelProvider` serving every registered model as `local/<id>`. No third-party agent, Node, or Bun is involved, and no model weights or runtime binaries are in the repository.
+`InferenceService::open(DrivePaths, Arc<ProviderRegistry>, Arc<dyn EgressGate>, Sandbox)` uses the selected drive's model, runtime, scratch, and configuration directories. Opening a service does not launch a process. Use `import`, `install_runtime`, then `start`. The provider id is `local-llama`; the model id is `m-<SHA-256>`. The existing provider contract carries all chat requests, streaming events, and failures, including when cloud networking is offline.
 
-## Platforms
+The daemon adapters expose `inference.catalog`, `inference.import {source,name?}`, `inference.runtime.install {source?}`, `inference.start {model_id,backend?,context_window?,threads?}`, `inference.stop {}`, `inference.status {}`, `inference.model.remove {id}`, and `inference.cancel {}`. Parameters reject unknown fields. Source paths are absolute. Operations are synchronous; send cancellation on another daemon connection. Stop also cancels the active operation. Connection shutdown and daemon shutdown propagate cancellation while an operation is running.
 
-| Platform | Status |
-| --- | --- |
-| Windows x64 | **Validated**: the pinned `llama-b11205-bin-win-cpu-x64.zip` runtime runs Qwen2.5-Coder-0.5B-Instruct Q4_K_M end to end (`tests/real_llama.rs`, see `inference/tests/README.md`). |
-| Linux x64/arm64, macOS arm64/x64 | **Not validated.** The catalog pins their upstream archives, but they are `.tar.gz` and this build installs `.zip` archives only, so `aidex runtime install` refuses them with `unsupported_archive_format`. The fake-runtime test suite (zip fixtures) runs on all CI platforms. |
-| Windows arm64 | Pinned in the catalog; AiDEX has no `windows-arm64` drive runtime platform yet. |
-| Anything else | `unsupported_platform` (no `runtime/<os>-<arch>/` name). |
+Models are copied into `DrivePaths::models()/m-<digest>/model.gguf`, with portable relative paths in `model.json`. Imports validate GGUF v2/v3 header, bounded metadata, context length, dimensions, quantization block sizes, complete tensor payload bounds, and non-overlapping offsets. Common F32/F16/BF16, integer, Q4/Q5/Q8, K and IQ formats are supported; unknown layouts fail closed. A `filename.gguf.sha256` sidecar is checked when present. Names and digest collisions refuse overwrite. Source files remain unchanged. Catalog availability is computed from the managed bytes, including a fresh SHA-256 check. A structurally valid GGUF may still be unusable for inference; successful `/health` is required before a loaded model is offered.
 
-GPU variants (Vulkan for Windows/Linux, Metal for macOS arm64) are pinned but not validated; the composer selects them only when the opt-in probe reports a matching device.
+A runtime source is a local flat directory containing `runtime-manifest.json` and every declared file:
 
-## Drive layout
-
-```text
-models/registry/<id>.toml        closed, versioned registry entry (licence, source, hashes, estimates)
-models/<id>/model.gguf           the imported copy (AiDEX owns this file)
-models/<id>/LICENSE              licence text, when one was imported
-models/.staging/*.partial        interrupted imports (removed once stale)
-runtime/<platform>/llama/<version>-<variant>/   extracted runtime + aidex-runtime.json manifest
-cache/verified-models.json       verification cache (path, size, mtime, sha256)
-cache/hosts/<fingerprint>/benchmarks.json       per-host benchmark results
-logs/inference/llama-server-<id>-*.log          bounded server logs (5 kept per model)
-tmp/inference/<id>-<random>/     per-launch scratch (TEMP/HOME of the server), removed on stop
+```json
+{
+  "version": 1,
+  "release": "b11205",
+  "platform": "windows-x64",
+  "executable": "llama-server.exe",
+  "gpu_supported": false,
+  "files": [
+    {
+      "path": "llama-server.exe",
+      "sha256": "<64 hex digits>",
+      "size_bytes": 9216
+    },
+    {
+      "path": "llama-server-impl.dll",
+      "sha256": "<64 hex digits>",
+      "size_bytes": 8916480
+    }
+  ]
+}
 ```
 
-## API
+Include all required native libraries in the manifest; the example lists only two files. Unlisted files, missing hashes, changed digests, links, junctions, unsafe names, unsupported platforms, insufficient space, and a previously installed destination refuse installation. The source manifest is the explicit local distribution's checksum authority; it provides integrity, not publisher authentication. Release packaging must acquire and verify the official archive digest before producing the manifest and must carry the corresponding licenses. No remote runtime or model is automatically downloaded or executed.
 
-| Area | Items |
-| --- | --- |
-| GGUF | `gguf::read_metadata(&Path) -> Result<GgufMetadata, GgufError>`, `gguf::parse(impl Read, Option<u64>)`; `GgufMetadata { version, tensor_count, kv_count, architecture, name, basename, size_label, license, file_type, quantization, context_length, block_count, embedding_length, head_count, head_count_kv, key_length, value_length, vocab_size, has_chat_template, chat_template_mentions_tools, alignment, data_offset, tensor_data_end, values }`, `kv_bytes_per_token()`; `GgufValue`; `GgufBuilder` (synthetic GGUF writer for tests and fixtures). |
-| Registry | `LocalModelId` (1–64 of `[a-z0-9._-]`, Windows device names refused; `derive(stem)`, `model_id()`, `entity_id()`), `RegistryEntry { version, id, display_name, family, architecture, format, file, sha256, size_bytes, quantization, gguf_version, context_length, block_count, embedding_length, vocab_size, capabilities: ModelCapabilityRecord, roles, memory: MemoryEstimate, license: LicenseRecord { name, file, origin }, source: SourceRecord { url, revision, original_file_name }, imported_at }`, `ModelRegistry::{open, list -> RegistryListing { entries, problems }, get, contains, entry_path, model_dir}`. |
-| Import | `import_model(&DrivePaths, &Path, &ImportOptions) -> Result<RegistryEntry>`, `import_model_with(.., progress: &mut dyn FnMut(&ImportProgress), &CancelToken)`; `ImportOptions { id, display_name, license, license_file, source_url, source_revision, expected_sha256 }`; `cleanup_partial_imports(&DrivePaths, max_age)`. |
-| Verification | `verify_model(&DrivePaths, &RegistryEntry) -> Result<Verified>`, `verify_model_with(.., force, progress, cancel)`; `Verified { id, sha256, size_bytes, method: FullHash \| Cached, hashed_at, duration_ms }`. |
-| Runtimes | `runtime::RuntimeCatalog::{builtin, parse, from_entries, find, find_by_sha256, for_platform}` over `inference/runtimes.toml`; `CatalogEntry { id, engine, version, platform, variant: Cpu\|Cuda\|Vulkan\|Metal, archive, format: Zip\|TarGz, size_bytes, sha256, url, source, license, server_binary, tree_sha256, validated, notes }`; `install_runtime(&DrivePaths, &Path, &CatalogEntry) -> Result<InstalledRuntime>`, `install_from_catalog(.., &RuntimeCatalog, progress, cancel)`; `InstalledRuntime { dir, relative_dir, manifest: RuntimeManifest }` with `verify(&RuntimeCatalog, &CancelToken)` and `server_path()`; `list_installed(&DrivePaths)`; `tree_sha256(&[ManifestFile])`. |
-| Planning | `compose(&RegistryEntry, &HostSnapshot, &[InstalledRuntime], &ComposeRequest) -> Result<LaunchPlan>`; `HostSnapshot { os, arch, platform, resources: HostResources, gpu: GpuStatus }` (`current(gpu)`); `ComposeRequest { context, mmap, cpu_only }`; `LaunchPlan { model, runtime: RuntimeChoice { catalog_id, version, platform, variant, dir }, threads, batch_size, ubatch_size, ctx_size, gpu_layers, mmap, estimated_ram_bytes, estimated_vram_bytes, reasons }`; `estimate_memory`, `MIN_CONTEXT` (2048), `DEFAULT_TARGET_CONTEXT` (16384). |
-| Service | `LocalInference::{open(&DrivePaths, Sandbox, Arc<dyn EventSink>, InferenceOptions), with_catalog(.., RuntimeCatalog)}`; `import`, `verify`, `remove`, `models`, `runtimes -> RuntimeInventory`, `install_runtime`, `host(probe_gpu)`, `plan(&id, &LoadOptions) -> PlanReport`, `load(&id, &LoadOptions, &CancelToken) -> LoadReport`, `unload(&id) -> bool`, `loaded() -> Vec<LoadedSummary>`, `chat(&id, &ChatRequest, on_event, &CancelToken)`, `benchmark(&id, force, &CancelToken) -> BenchmarkReport`, `shutdown()`, `provider() -> LocalLlamaProvider`. `InferenceOptions { idle_timeout (10 min), reaper_interval, scheduler: SchedulerPolicy { large_model_bytes (2 GiB), max_small_models (2) }, server: ServerConfig { health_timeout (180 s), health_interval, log_limit_bytes (8 MiB), logs_kept, stop_grace, http }, resources: Option<HostResources> (fixed host facts for deterministic tests) }`. |
-| Provider | `LocalLlamaProvider: ModelProvider` — id `local`, kind `llama-cpp`, locality `local`, models from the registry (`tool_calls: structured`, `json_schema_output: true`, `min_ram_bytes`, `source: configured`; context window = the running plan's, else the recommended context). |
-| Errors | `InferenceError` with `kind()` (stable snake_case, e.g. `runtime_not_installed`, `hash_mismatch`, `insufficient_memory`, `server_exited`), `code() -> ServiceErrorCode`, `advice()` naming the command to run, `into_provider_error()`. |
+Omitting the source uses `AIDEX_LLAMA_DISTRIBUTION` when explicitly configured, otherwise `DrivePaths::runtime()/components/llama-cpp`. There are no developer-drive defaults. Runtime installation commits a verified staging directory into `DrivePaths::platform_runtime()/llama-cpp`. A running server's binaries are reverified before launch. Imports/runtime copies use 1 MiB buffers, explicit cancellation, available-space checks, fsync of files, and a final directory rename; interrupted staging never appears as a successful install. Configuration is written through a synced temporary file and rename. Process-local mutation locking rejects conflicts; the daemon's drive ownership remains the cross-process boundary. Path checks are point-in-time checks and cannot prevent another same-user process racing the filesystem.
 
-## Guarantees
+Start binds only `127.0.0.1`, chooses an available ephemeral port, invokes argv directly through `aidex-sandbox`, and polls bounded `/health` requests until it reports `status: ok`. Only then does the service register the one loaded model. Stale provider handles fail once the process ends. Stop/drop terminates the tracked sandbox process tree and unregisters the provider. Runtime settings persist in `DrivePaths::config()/inference-settings.json`. Opening the service alone does not start it; Core calls `restore_saved()` on launch to verify and load the saved model on a background worker while IPC remains available. Auto currently selects CPU using host thread availability; explicit GPU fails because device support has not been proven. Imported model tool capabilities are conservatively `none`; chat and plan modes use the same provider contract. Native agent mode requires a separately proven tool-capable model.
 
-- **GGUF parsing** reads only the header: magic, version 2/3 (v1, big-endian, and unknown versions are refused), metadata, and tensor descriptors. Counts and lengths are bounded before allocation (65,536 keys, 2^20 tensors, 2^26 array elements, strings kept only up to 4 KiB, chat templates inspected up to 1 MiB, 1 GiB header); vocabularies are streamed past. When every tensor type is known the end of tensor data is computed, so a truncated file is refused at import. Fuzz-style tests mutate and truncate headers at every byte.
-- **Import never overwrites**: an existing registry entry or `models/<id>/` directory is `already_exists`. The file is copied while hashed, fsynced, re-read to verify the copy, then moved into a directory created exclusively (which claims the id); the entry is written last, atomically. Cancellation or failure removes the partial copy; a crash leaves only a `.partial` file that a later import removes once it is 10 minutes stale. Unknown architectures (including `clip` projectors) and files without tensors are refused before anything is copied.
-- **Verification before use**: the first load of a model is preceded by a full SHA-256 (import already hashed the copy, so that result is cached). Later loads reuse the cached result while the file's size and modification time are unchanged; any change forces a full rehash, and a mismatch refuses the model and drops its cache record. A size change is refused without hashing. `aidex model verify --force` always rehashes (spec §86 allows lazy full hashing; metadata-preserving tampering is caught only by a forced check).
-- **Runtimes are pinned**: only archives whose size and SHA-256 match `inference/runtimes.toml` install. Extraction rejects absolute paths, drive prefixes, `..`, backslash tricks, alternate data streams, reserved Windows names, trailing dots/spaces, links and special files, case-insensitive duplicates, encryption, a bundled `aidex-runtime.json`, and more than 4096 entries or 8 GiB; it writes into a fresh `.staging-*` directory with exclusive creates and renames it into place (stale staging is removed by the next install). The manifest records every file's size and SHA-256, the archive hash, licence, source, and URL. **Before every launch** every file is rehashed, unexpected files (for example a planted DLL next to `llama-server.exe`) are refused, the manifest must match its catalog entry, and when the catalog pins `tree_sha256` (the Windows CPU entry does) the extracted contents must match the release exactly.
-- **Planning** selects only runtimes for this host's platform, uses a GPU variant only when the opt-in probe found a matching device (CUDA → NVIDIA, Metal → Apple, Vulkan → any detected GPU), and always says why it fell back to CPU (`GPU not probed`, `GPU unknown (...)`, `GPU detected (...) but no supported GPU runtime is installed`). Context is sized to available RAM after the model, runtime buffers, and a reserve (max(512 MiB, 5 % of RAM)); a default context is shrunk with a reason, an explicit one is refused rather than shrunk, and a model that cannot fit 2048 tokens is `insufficient_memory` with the numbers. Threads are physical cores (≤ 32).
-- **Managed servers** run `llama-server --model ... --host 127.0.0.1 --port <free> --ctx-size --threads --threads-batch --batch-size --ubatch-size --n-gpu-layers --parallel 1 --load-mode mmap|none --jinja --no-webui --no-slots --offline` through `aidex-sandbox` at level Brokered (Windows Job Object with kill-on-close; process group on Unix), with the runtime and model directories as read-only mounts, the runtime directory as working directory, a cleared environment (no inherited `LLAMA_ARG_*`), and a per-launch scratch directory. The 256-bit API key is generated from the OS RNG and passed as `LLAMA_API_KEY` in the child's environment — never on the command line (Linux `/proc/<pid>/cmdline` is world-readable; `environ` is owner-only) — and never appears in logs (redacted), events, `Debug`, or results. The server listens on loopback only, refuses requests without the key (`/health` is public), and has no network features (`--offline`). Readiness is a `200` from `/health` within the timeout; an early exit reports the exit code and the last log lines; logs are bounded (8 MiB) and pruned (5 per model). `unload`, idle unload, eviction, daemon shutdown, and dropping the service kill the whole tree.
-- **Chat** goes through `aidex_providers::OpenAiClient` (streaming SSE, `response_format: json_schema` passthrough, which llama-server enforces with grammar-constrained decoding); cancelling the token returns `Cancelled` within one poll and closes the connection, which stops generation. The model loads lazily on first chat; a cancelled load reports `Done(Cancelled)` too.
-- **Scheduling** (spec §97): at most one large model (file ≥ 2 GiB) is resident, at most two small ones; idle models are evicted least-recently-used first, a model serving a request is never evicted (the caller waits, or gets `busy` at its deadline), and models idle for 10 minutes are unloaded. `model.loaded`, `model.unloaded`, and `model.error` events are emitted (global scope; `provider_id = local`).
-- **Benchmarks** (spec §46) run a fixed prompt with llama-server's own timings (prompt and generation tokens/s), record load time and the server tree's resident memory, mark a model recommended at ≥ 5 tokens/s, and cache the result per host fingerprint — a hash of OS, architecture, CPU model, core counts, and RAM rounded to GiB, never serial numbers.
+Successful starts also save `local-inference.json` alongside the settings. Its versioned binding records the managed model ID and drive-relative model/runtime paths derived from the current manifest, so changing the drive letter requires no reimport. Existing settings restore without a binding file. Set the binding's `autoload` to `false` to skip restoration; a successful manual start enables it again. Binding paths must match derived locations and cannot redirect execution. `inference.status` exposes `starting`, `ready`, `failed`, or `stopped`, plus `model_name` and a safe `startup_error`. Failed restores preserve files and settings. Stop cancels queued loading and checksum work; terminal `shutdown()` also prevents subsequent launches.
 
-## Limitations / not implemented
+Status includes the actual sandbox controls and their enforcement/watchdog distinction. Requested memory is bounded at 16 GiB, output capture at 1 MiB per stream, and model-load readiness at 120 seconds. Brokered execution clears inherited credentials and tracks a killable process tree. It does not claim OS filesystem/network confinement. The credential-free model API is reachable by other local applications. Readiness requests bypass proxies and refuse redirects.
 
-- `.tar.gz` runtime extraction (Linux/macOS archives, which also contain symlinks) is not implemented; those platforms are therefore not runnable yet. No `fetch_runtime` download command: archives are installed from a local file (download them yourself from the pinned URL; the hash check is the same).
-- GPU runtimes are not validated; VRAM-based layer counts are estimates; AMD/Intel GPUs are not probed (only `nvidia-smi` and Apple Silicon).
-- `tool_calls` is advertised as `structured`; native tool calls are passed through to llama-server (`--jinja`) but not advertised until validated per model.
-- The verification cache trusts file metadata between forced checks. Runtime files are verified before launch, not continuously; a process with write access to the drive could race the launch.
-- Windows sandboxing is containment, not confinement (no filesystem/network restriction at level Brokered); see `crates/sandbox/README.md`. Network is not OS-restricted because the server must listen on loopback.
-- Memory limits are not imposed on the server process (Linux `RLIMIT_AS` would break memory mapping); RAM estimates are heuristics validated against one model.
-- Embeddings, rerankers, vision projectors, multiple concurrent slots per server, KV-cache persistence, and copy-to-fast-disk caching (spec §68, §95) are not implemented.
+Verification:
+
+```text
+cargo build -p aidex-sandbox --bin aidex-sandbox-exec -j 2
+cargo test -p aidex-inference --features test-fixture -j 2
+cargo test -p aidexd methods::inference --lib -j 2
+cargo run -p aidex-inference --example prove_local -j 2 -- <verified-distribution> <GGUF-file>
+```
+
+The `test-fixture` feature builds an HTTP subprocess used only in tests. The proof example installs into a disposable temporary drive and uses the real model through `ProviderRegistry` while cloud networking is offline.

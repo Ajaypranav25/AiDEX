@@ -194,7 +194,7 @@ pub(crate) fn parse_completion(
     on_event: &mut dyn FnMut(&StreamEvent),
 ) -> Result<ChatResponse, ProviderError> {
     let completion: Completion = serde_json::from_str(body)
-        .map_err(|error| ProviderError::Protocol(format!("malformed completion ({error})")))?;
+        .map_err(|_| ProviderError::Protocol("malformed completion".into()))?;
     let choice = completion
         .choices
         .into_iter()
@@ -217,6 +217,7 @@ pub(crate) fn parse_completion(
             other => other.to_string(),
         };
         let call = ToolCall {
+            provider_metadata: None,
             id: call
                 .id
                 .filter(|id| !id.is_empty())
@@ -266,7 +267,7 @@ struct ModelList {
 /// Parse a `/models` listing; entries with unusable ids are skipped.
 pub(crate) fn parse_models(body: &str) -> Result<Vec<DiscoveredModel>, ProviderError> {
     let list: ModelList = serde_json::from_str(body)
-        .map_err(|error| ProviderError::Protocol(format!("malformed model list ({error})")))?;
+        .map_err(|_| ProviderError::Protocol("malformed model list".into()))?;
     if list.data.len() > MAX_LISTED_MODELS {
         return Err(ProviderError::Protocol(
             "the model list is larger than 1000 entries".into(),
@@ -316,9 +317,15 @@ pub(crate) fn http_error(
 pub(crate) fn stream_error(error: &Value) -> ProviderError {
     let status = error
         .get("code")
-        .and_then(Value::as_u64)
-        .and_then(|code| u16::try_from(code).ok())
-        .filter(|code| (400..600).contains(code))
+        .and_then(Value::as_str)
+        .and_then(crate::error::chatgpt_error_status)
+        .or_else(|| {
+            error
+                .get("code")
+                .and_then(Value::as_u64)
+                .and_then(|code| u16::try_from(code).ok())
+                .filter(|code| (400..600).contains(code))
+        })
         .unwrap_or(500);
     classify(status, Some(error), None, None)
 }
@@ -337,6 +344,13 @@ fn classify(
     let code = field("code")
         .or_else(|| field("type"))
         .and_then(sanitize_code);
+    if code
+        .as_deref()
+        .and_then(crate::error::chatgpt_error_status)
+        .is_some()
+    {
+        return ProviderError::Http { status, code };
+    }
     let kind = field("type").unwrap_or_default();
     let message = field("message").unwrap_or_default().to_ascii_lowercase();
     let number = |name: &str| {
@@ -377,11 +391,35 @@ fn classify(
 
 /// Keep short identifier-like codes; drop anything that could be free text.
 fn sanitize_code(code: &str) -> Option<String> {
-    (!code.is_empty()
-        && code.len() <= 64
-        && code
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.')))
+    if crate::error::chatgpt_error_status(code).is_some() {
+        return Some(code.to_owned());
+    }
+    // Identifier-shaped strings can still be credentials. Only documented,
+    // recognized machine codes may cross the error/log boundary.
+    matches!(
+        code,
+        "context_length_exceeded"
+            | "exceed_context_size_error"
+            | "invalid_request_error"
+            | "invalid_request"
+            | "model_not_found"
+            | "rate_limit_exceeded"
+            | "rate_limit_error"
+            | "insufficient_quota"
+            | "authentication_error"
+            | "permission_error"
+            | "not_found_error"
+            | "overloaded_error"
+            | "server_error"
+            | "api_error"
+            | "RESOURCE_EXHAUSTED"
+            | "INVALID_ARGUMENT"
+            | "UNAUTHENTICATED"
+            | "PERMISSION_DENIED"
+            | "NOT_FOUND"
+            | "UNAVAILABLE"
+            | "INTERNAL"
+    )
     .then(|| code.to_owned())
 }
 
@@ -399,6 +437,7 @@ mod tests {
                 ChatMessage::user("read a"),
                 ChatMessage {
                     tool_calls: vec![ToolCall {
+                        provider_metadata: None,
                         id: "c1".into(),
                         name: "read_file".into(),
                         arguments: "{\"path\":\"a\"}".into(),
