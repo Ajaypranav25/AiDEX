@@ -297,7 +297,7 @@ impl SandboxLauncher {
                     return Err(LaunchError::Sandbox(error));
                 }
             }
-            if cancel.is_cancelled() && !kill_requested {
+            if cancel.is_stopped() && !kill_requested {
                 kill_requested = true;
                 let _ = process.kill_tree();
             }
