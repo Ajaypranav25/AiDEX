@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/aidexd",
+    "crates/aidex-cli",
     "crates/core",
     "crates/drive",
     "crates/events",
@@ -20,3 +21,6 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = "warn"
+
+[workspace.dependencies]
+clap = { version = "4.5", features = ["derive"] }

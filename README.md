@@ -1,13 +1,14 @@
 # AiDEX
 
-AiDEX is a portable AI development environment: its agent workflows, tools, models, encrypted state, and policies are designed to travel with removable storage while adapting to the host computer. This repository is at the foundation stage: it contains desktop and installer shells and a small Rust foundation; the full agent runtime, drive provisioning, encryption, and remote control remain planned.
+AiDEX is a portable AI development environment: its agent workflows, tools, models, encrypted state, and policies are designed to travel with removable storage while adapting to the host computer. This repository is in its CLI-first foundation phase: the Rust CLI and core crates are active work, the desktop and installer remain Tauri clients, and the full AiDEX-native agent runtime, drive provisioning, encryption, and remote control are still planned.
 
 ## Repository layout
 
-- `apps/desktop` — primary Tauri desktop application.
-- `apps/installer` — Tauri drive-setup application; it does not yet provision a drive.
-- `apps/cli` and `apps/mobile` — reserved future clients; neither is implemented yet.
-- `crates/` — Rust workspace for portable paths, host capabilities, durable state, and the future core daemon.
+- `apps/cli` — first-class `aidex` CLI, implemented in `crates/aidex-cli`; Oh My Pi supplies the initial agent runtime.
+- `apps/desktop` — Tauri desktop client; retained while the shared Rust crates take priority.
+- `apps/installer` — Tauri drive-setup preview; it does not yet provision a drive.
+- `apps/mobile` — reserved future client; not implemented yet.
+- `crates/` — active Rust workspace for the CLI, host, portable paths, sessions, storage, events, and daemon foundations.
 - `packages/` and `protocol/` — reserved shared frontend and versioned API-contract boundaries; no generated client exists yet.
 - `integrations/` — reserved metadata and definitions for adapters, MCP, skills, plugins, and providers.
 - `portable/` — reserved distribution layouts, manifests, bootstrap, and packaging.
@@ -18,19 +19,21 @@ The directory structure separates real foundation code from planned product doma
 
 ## Prerequisites
 
-- Bun 1.3+
+- Bun 1.3.14+
 - Rust stable toolchain
-- Tauri v2 platform prerequisites for the host OS
+- Tauri v2 platform prerequisites only when building the GUI apps
 
-## Run the applications
+## Run the CLI
 
 ```sh
 bun install
-bun run dev:desktop
-bun run dev:installer
+bun run dev:cli -- --help
+bun run dev:cli -- doctor
 ```
 
-Both Tauri frontends use Next.js with Turbopack and export static assets for the webview. The installer is a read-only setup preview; it does not scan, encrypt, or provision drives.
+`aidex chat` starts Oh My Pi with interactive approvals. `aidex run` is non-interactive and read-only. See [CLI setup](apps/cli/README.md) for runtime setup and boundaries.
+
+The Tauri clients remain available with `bun run dev:desktop` and `bun run dev:installer`.
 
 ## Rust workspace
 

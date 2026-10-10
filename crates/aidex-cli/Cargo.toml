@@ -1,0 +1,17 @@
+[package]
+name = "aidex-cli"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+aidex-host = { path = "../host" }
+clap.workspace = true
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "aidex"
+path = "src/main.rs"

@@ -8,7 +8,17 @@
     "apps/installer"
   ],
   "scripts": {
+    "dev:cli": "cargo run --manifest-path crates/aidex-cli/Cargo.toml --",
+    "check:cli": "tsc --noEmit -p apps/cli/tsconfig.json",
+    "login:omp": "omp login",
     "dev:desktop": "bun run --cwd apps/desktop tauri dev",
     "dev:installer": "bun run --cwd apps/installer tauri dev"
+  },
+  "dependencies": {
+    "@oh-my-pi/pi-coding-agent": "18.8.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "~5.8.3"
   }
 }

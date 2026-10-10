@@ -2,34 +2,27 @@
 
 ## Product boundary
 
-The desktop UI, installer, command-line surface, and future mobile controller are clients of AiDEX Core. Durable portable data belongs on the drive; host-specific process and hardware state is discovered and recreated. Agents express typed intents and sensitive actions pass through the execution broker and policy/approval boundary. See the product specification for the complete target architecture and threat model.
+The CLI is the first active client surface. Its `aidex` Rust binary uses the existing host crate for diagnostics, delegates interactive agent sessions to the pinned Oh My Pi CLI, and runs headless sessions through Oh My Pi's restricted Bun SDK. The desktop and installer Tauri shells remain in place, but the product UI does not own domain behavior.
 
 ## Repository layers
 
 ```text
+crates/aidex-cli (`aidex`)
+   ├── aidex-host (host diagnostics)
+   └── pinned Oh My Pi runtime (CLI TUI + restricted Bun SDK)
+
+crates/core, drive, events, sessions, storage
+   └── Rust foundation; shared local-core API is not implemented yet
+
 apps/desktop, apps/installer
-           │
-           ├── shared TypeScript packages
-           └── versioned protocol contracts
-                         │
-                         ▼
-                 local AiDEX Core API
-                         │
-       ┌─────────────────┼────────────────┐
-       ▼                 ▼                ▼
- sessions/events    host/runtime     agent harness
-       │                                  │
-       ▼                                  ▼
-    storage                       typed tools / broker
-                                          │
-                              policy / approval / sandbox
+   └── future clients of a versioned local-core API
 ```
 
-The apps are independent Tauri v2 projects. Their Rust Tauri shells own desktop integration only; domain services belong in the Rust workspace, not duplicated inside each UI shell. `protocol/` is the intended source of frontend/backend contracts. Until generation and compatibility checks exist, no handwritten duplicate contract should be treated as canonical.
+The desktop and installer are independent Tauri v2 projects. Their Rust shells own desktop integration only; domain services belong in the Rust workspace. `crates/aidex-cli` owns the first Rust command surface and treats Oh My Pi as an external agent runtime, not as AiDEX core. `protocol/` is the intended source of frontend/backend contracts. Until generation and compatibility checks exist, no handwritten duplicate contract should be treated as canonical.
 
 ## Rust workspace boundaries
 
-The first implementation layer is intentionally small: shared core types, portable-drive paths, host capability discovery, events, durable storage/session foundations, and the `aidexd` process boundary. Depend on lower-level shared contracts rather than creating cycles. Future domains listed in the specification—harness, inference, providers/router, context/memory/indexing, tools and adapters, MCP/skills/plugins, broker/policy/sandbox, vault/identity/approvals/remote, cleanup/updater—must be introduced when there is a real API and consumer, not as empty service crates.
+The Rust workspace remains the primary implementation focus. Its first layer is intentionally small: shared core types, portable-drive paths, host capability discovery, events, durable storage/session foundations, the `aidexd` process boundary, and the `aidex` CLI. Depend on lower-level shared contracts rather than creating cycles. Future domains listed in the specification—harness, inference, providers/router, context/memory/indexing, tools and adapters, MCP/skills/plugins, broker/policy/sandbox, vault/identity/approvals/remote, cleanup/updater—must be introduced when there is a real API and consumer, not as empty service crates.
 
 ## Portable-drive data is not repository source
 
