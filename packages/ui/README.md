@@ -93,6 +93,14 @@ Every component accepts its root element's props (including `ref` and `className
 | `DockLayout` | `dock` (pinned to the bottom of the scroll area), `width` prose · default |
 | `FocusLayout` | full-window frame for launch and setup flows |
 
+### Installer
+
+| Component | Key props |
+| --- | --- |
+| `WizardLayout` | `title`, `badge`, `steps` (a `Stepper`), `aside`, `footer`, `contentRef`; brand header, step rail, scrolling content, pinned footer |
+| `WizardFooter` | `back`, `status` (polite live text, e.g. why Next is disabled), `statusId`, `next` |
+| `Stepper` | `label`, `steps: { id, title, description?, status: complete · current · upcoming }[]`, `onSelect` (completed steps only) |
+
 ## Checks
 
 ```sh

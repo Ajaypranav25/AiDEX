@@ -1,0 +1,135 @@
+.stepper {
+  min-width: 0;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--aidex-space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.step {
+  position: relative;
+}
+
+/* Connector between markers; drawn behind the next marker. */
+.step:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 44px;
+  bottom: -8px;
+  left: calc(var(--aidex-space-3) + 13px);
+  width: 1px;
+  background: var(--aidex-color-border);
+}
+
+.complete:not(:last-child)::after {
+  background: color-mix(in srgb, var(--aidex-color-success) 40%, var(--aidex-color-border));
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--aidex-space-3);
+  width: 100%;
+  padding: var(--aidex-space-3);
+  border: 1px solid transparent;
+  border-radius: var(--aidex-radius-md);
+  background: transparent;
+  color: var(--aidex-color-text);
+  text-align: left;
+}
+
+.button {
+  cursor: pointer;
+  transition:
+    background-color var(--aidex-duration-fast) var(--aidex-ease),
+    border-color var(--aidex-duration-fast) var(--aidex-ease);
+}
+
+.button:hover {
+  background: var(--aidex-color-surface-hover);
+}
+
+.current .row {
+  border-color: var(--aidex-color-accent-border);
+  background: var(--aidex-color-surface-raised);
+}
+
+.marker {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--aidex-color-border-strong);
+  border-radius: var(--aidex-radius-full);
+  background: var(--aidex-color-surface);
+  color: var(--aidex-color-text-muted);
+  font-size: var(--aidex-text-xs);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  user-select: none;
+}
+
+.marker svg {
+  width: 14px;
+  height: 14px;
+}
+
+.complete .marker {
+  border-color: color-mix(in srgb, var(--aidex-color-success) 40%, transparent);
+  background: color-mix(in srgb, var(--aidex-color-success) 12%, var(--aidex-color-surface));
+  color: var(--aidex-color-success);
+}
+
+.current .marker {
+  border-color: var(--aidex-color-accent);
+  color: var(--aidex-color-accent);
+  box-shadow: 0 0 0 3px var(--aidex-color-accent-ring);
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.title {
+  font-size: var(--aidex-text-md);
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.upcoming .title {
+  color: var(--aidex-color-text-secondary);
+}
+
+.status {
+  color: var(--aidex-color-text-muted);
+  font-size: var(--aidex-text-xs);
+  line-height: 1.4;
+}
+
+.current .status {
+  color: var(--aidex-color-accent);
+}
+
+.complete .status {
+  color: var(--aidex-color-success);
+}
+
+.description {
+  overflow: hidden;
+  color: var(--aidex-color-text-muted);
+  font-size: var(--aidex-text-xs);
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
