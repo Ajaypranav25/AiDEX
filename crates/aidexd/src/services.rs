@@ -5,10 +5,15 @@
 //! are added here as fields constructed in [`Services::open`]; their JSON-RPC
 //! adapters live in `methods/<domain>.rs`.
 
+mod models;
+
+pub use models::{EventsModelObserver, ModelServices, VaultCredentials, model_event_kind};
+
 use crate::{endpoint, lifecycle::ShutdownSignal};
 use aidex_core::ServiceErrorCode;
 use aidex_drive::DrivePaths;
-use aidex_events::{EventLog, RetentionPolicy};
+use aidex_events::{EventLog, EventSink, RetentionPolicy};
+use aidex_sessions::{RecoveryReport, SessionStore};
 use aidex_vault::{VaultService, VaultServiceConfig};
 use aidex_workspace::WorkspaceRegistry;
 use std::{
@@ -50,6 +55,9 @@ pub struct Services {
     events: EventLog,
     vault: Arc<VaultService>,
     workspaces: WorkspaceRegistry,
+    models: ModelServices,
+    sessions: Arc<SessionStore>,
+    session_recovery: RecoveryReport,
 }
 
 impl Services {
@@ -82,6 +90,14 @@ impl Services {
             .map_err(|error| ServicesError::new("vault", error.code(), error.to_string()))?;
         let workspaces = WorkspaceRegistry::open(&paths)
             .map_err(|error| ServicesError::new("workspace", error.code(), error.to_string()))?;
+        let vault = Arc::new(vault);
+        // Model notifications are recorded as typed `model.*` events.
+        let models = ModelServices::open(
+            &paths,
+            Arc::clone(&vault),
+            Arc::new(EventsModelObserver::new(Arc::new(events.clone()))),
+        )?;
+        let (sessions, session_recovery) = open_sessions(&paths, &events)?;
         Ok(Self {
             drive_root: drive_root.to_path_buf(),
             paths,
@@ -89,8 +105,11 @@ impl Services {
             started_at: Instant::now(),
             shutdown,
             events,
-            vault: Arc::new(vault),
+            vault,
             workspaces,
+            models,
+            sessions: Arc::new(sessions),
+            session_recovery,
         })
     }
 
@@ -132,6 +151,42 @@ impl Services {
     pub fn workspaces(&self) -> &WorkspaceRegistry {
         &self.workspaces
     }
+
+    /// Model providers, the router, and the offline switch
+    /// (`aidex-providers`, `aidex-router`).
+    pub fn models(&self) -> &ModelServices {
+        &self.models
+    }
+    /// Durable sessions, checkpoints, and resume plans (`aidex-sessions`).
+    pub fn sessions(&self) -> &Arc<SessionStore> {
+        &self.sessions
+    }
+
+    /// What startup recovery found (interrupted sessions, lost tool calls, event gaps).
+    pub fn session_recovery(&self) -> &RecoveryReport {
+        &self.session_recovery
+    }
+}
+
+/// Open the session store with the drive event log as its sink, then recover from an
+/// unclean stop before anything is served: active sessions become `interrupted`,
+/// running tool calls `lost`, and unprovable events explicit gaps.
+fn open_sessions(
+    paths: &DrivePaths,
+    events: &EventLog,
+) -> Result<(SessionStore, RecoveryReport), ServicesError> {
+    let session_error = |error: aidex_sessions::SessionError| {
+        ServicesError::new("sessions", error.code(), error.to_string())
+    };
+    let sink: Arc<dyn EventSink> = Arc::new(events.clone());
+    let store = SessionStore::open(paths, sink).map_err(session_error)?;
+    let latest = events
+        .latest_cursor()
+        .map_err(|error| ServicesError::new("events", error.code(), error.to_string()))?;
+    let report = store
+        .recover_on_startup(store.host(), Some(latest))
+        .map_err(session_error)?;
+    Ok((store, report))
 }
 
 /// Open the drive's event log and import PR #40's superseded log once, if present.

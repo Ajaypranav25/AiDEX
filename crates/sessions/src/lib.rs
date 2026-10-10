@@ -1,88 +1,61 @@
-//! Thread-safe in-process session lifecycle catalog; persistence is a future domain concern.
+//! `aidex-sessions`: durable agent sessions on the drive (spec §20-22, §74, §77, §87).
+//!
+//! - [`SessionStore`]: SQLite (`<private_sessions>/sessions.sqlite3`) plus a
+//!   content-addressed blob store for sessions, messages, tool calls, approval
+//!   references, artifacts, and checkpoints, with an explicit state machine whose
+//!   transitions emit `session.*` events through an [`aidex_events::EventSink`].
+//! - Checkpoints ([`SessionStore::checkpoint`]) are hash-verified on restore; a
+//!   corrupt latest checkpoint falls back to the previous valid one.
+//! - [`SessionStore::recover_on_startup`] turns an unclean stop into explicit
+//!   interrupted sessions, lost tool calls, and recorded event gaps.
+//! - [`SessionStore::resume_plan`] reports what a resume on this host restores and
+//!   what it cannot ([`UnrecoverableItem`]); continuing is the harness's job.
+//! - [`HostFingerprint`]: salted, privacy-preserving host identity (spec §62).
+//!
+//! Records never hold secret values or absolute host paths: credentials are vault
+//! handles, and every persisted text field is redacted as defence in depth.
 
-use aidex_core::EntityId;
-use std::{
-    collections::BTreeMap,
-    sync::{
-        Mutex,
-        atomic::{AtomicU64, Ordering},
-    },
-    time::SystemTime,
+mod approvals;
+mod artifacts;
+mod checkpoints;
+mod error;
+mod host;
+mod messages;
+mod migration;
+mod model;
+mod recovery;
+mod resume;
+mod secrets;
+mod store;
+mod summary;
+mod tool_calls;
+
+pub use aidex_events::MessageRole;
+pub use approvals::{ApprovalRecord, ApprovalRef, ApprovalScope, ApprovalStatus};
+pub use artifacts::{ArtifactKind, ArtifactRef, MAX_ARTIFACT_BYTES, MAX_SOURCE_PATHS, NewArtifact};
+pub use checkpoints::{
+    CHECKPOINT_FORMAT, Checkpoint, CheckpointMeta, CheckpointStatus, HighWaterMarks, LogicalState,
+    MAX_CHECKPOINT_BYTES, MAX_LABEL_BYTES, RestoredCheckpoint, ToolCallMark,
 };
-
-static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Session {
-    pub id: EntityId,
-    pub created_at: SystemTime,
-    pub closed_at: Option<SystemTime>,
-}
-
-impl Session {
-    pub fn is_open(&self) -> bool {
-        self.closed_at.is_none()
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SessionError {
-    NotFound(EntityId),
-}
-
-#[derive(Default)]
-pub struct SessionCatalog {
-    sessions: Mutex<BTreeMap<EntityId, Session>>,
-}
-
-impl SessionCatalog {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Create and register a new open session with a process-local unique ID.
-    pub fn create(&self) -> Session {
-        let sequence = NEXT_SESSION.fetch_add(1, Ordering::Relaxed);
-        let id = EntityId::new(format!("session:{sequence}"))
-            .expect("generated session identifier is valid");
-        let session = Session {
-            id: id.clone(),
-            created_at: SystemTime::now(),
-            closed_at: None,
-        };
-        self.sessions
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(id, session.clone());
-        session
-    }
-
-    pub fn get(&self, id: &EntityId) -> Option<Session> {
-        self.sessions
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(id)
-            .cloned()
-    }
-
-    pub fn list(&self) -> Vec<Session> {
-        self.sessions
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .values()
-            .cloned()
-            .collect()
-    }
-
-    /// Close a session once; repeated closes preserve the original close time.
-    pub fn close(&self, id: &EntityId) -> Result<Session, SessionError> {
-        let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
-        let session = sessions
-            .get_mut(id)
-            .ok_or_else(|| SessionError::NotFound(id.clone()))?;
-        if session.closed_at.is_none() {
-            session.closed_at = Some(SystemTime::now());
-        }
-        Ok(session.clone())
-    }
-}
+pub use error::SessionError;
+pub use host::{
+    FINGERPRINT_HEX_LEN, HOST_SALT_BYTES, HOST_SALT_FILE, HostFingerprint, load_or_create_host_salt,
+};
+pub use messages::{MAX_MESSAGE_BYTES, MAX_MESSAGE_PAGE, Message, MessagePage, NewMessage};
+pub use migration::SCHEMA_VERSION;
+pub use model::{
+    BudgetUsage, CheckpointId, DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT, MAX_REASON_BYTES,
+    MAX_TITLE_BYTES, NewSession, Session, SessionFilter, SessionState, SessionStateKind,
+};
+pub use recovery::{
+    CancelledApproval, EventGap, EventGapKind, InterruptedSession, LostToolCall, RESTART_REASON,
+    RecoveryReport,
+};
+pub use resume::{ResumePlan, UnrecoverableItem, UnrecoverableKind};
+pub use secrets::{REDACTED, contains_secret_like};
+pub use store::{BLOB_DIR, SESSIONS_FILE, SessionStore};
+pub use summary::SessionSummary;
+pub use tool_calls::{
+    MAX_SUMMARY_BYTES, MAX_TOOL_INPUT_BYTES, NewToolCall, ToolCallRecord, ToolCallState,
+    ToolCallUpdate,
+};
