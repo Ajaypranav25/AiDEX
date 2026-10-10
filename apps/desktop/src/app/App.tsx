@@ -1,26 +1,17 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import { MainLayout } from "../layouts/MainLayout";
-import { HomePage } from "../features/home/HomePage";
-import { useCommandShortcut } from "../hooks/useCommandShortcut";
-import type { PageId } from "../lib/navigation";
+import { useState } from "react";
+import { RuntimeDetectionPage } from "../features/launch/RuntimeDetectionPage";
+import { UnlockPage } from "../features/launch/UnlockPage";
+import { Workspace } from "./Workspace";
 
+type Stage = "unlock" | "detect" | "workspace";
+
+/** Launch flow: unlock the drive, review host detection, then enter the workspace. */
 export function App() {
-  const [activePage, setActivePage] = useState<PageId>("home");
-  // Remounting the home page gives each new session an empty, focused composer.
-  const [sessionKey, setSessionKey] = useState(0);
+  const [stage, setStage] = useState<Stage>("unlock");
 
-  const startNewSession = useCallback(() => {
-    setActivePage("home");
-    setSessionKey((key) => key + 1);
-  }, []);
-
-  useCommandShortcut("k", startNewSession);
-
-  return (
-    <MainLayout activePage={activePage} onNavigate={setActivePage} onNewSession={startNewSession}>
-      <HomePage key={sessionKey} autoFocus={sessionKey > 0} />
-    </MainLayout>
-  );
+  if (stage === "unlock") return <UnlockPage onUnlock={() => setStage("detect")} />;
+  if (stage === "detect") return <RuntimeDetectionPage onContinue={() => setStage("workspace")} />;
+  return <Workspace />;
 }
