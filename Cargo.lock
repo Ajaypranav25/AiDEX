@@ -61,6 +61,7 @@ dependencies = [
 name = "aidex-cli"
 version = "0.1.0"
 dependencies = [
+ "aidex-bundle",
  "aidex-core",
  "aidex-drive",
  "aidex-events",
@@ -68,6 +69,7 @@ dependencies = [
  "aidex-providers",
  "aidex-router",
  "aidex-sessions",
+ "aidex-updater",
  "aidex-vault",
  "aidex-workspace",
  "aidexd",

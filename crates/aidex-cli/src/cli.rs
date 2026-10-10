@@ -3,7 +3,7 @@
 
 use crate::commands::{
     agent::AgentCommand, daemon::DaemonCommand, events::EventsCommand, omp::SessionOptions,
-    session::SessionArgs, vault::VaultCommand, workspace::WorkspaceArgs,
+    session::SessionArgs, update::UpdateArgs, vault::VaultCommand, workspace::WorkspaceArgs,
 };
 use crate::commands::{model::ModelArgs, offline::OfflineArgs, provider::ProviderArgs};
 use clap::{Parser, Subcommand};
@@ -84,6 +84,8 @@ pub enum Commands {
     /// Inspect durable sessions, checkpoints, and resume plans.
     #[command(alias = "sessions")]
     Session(SessionArgs),
+    /// Check, apply, verify, and roll back signed AiDEX updates on this drive.
+    Update(UpdateArgs),
 }
 
 impl Commands {
@@ -108,6 +110,7 @@ impl Commands {
             Some(Self::Provider(args)) => args.command.label(),
             Some(Self::Offline(args)) => args.command.label(),
             Some(Self::Session(args)) => args.command.label(),
+            Some(Self::Update(args)) => args.command.label(),
         }
     }
 }
