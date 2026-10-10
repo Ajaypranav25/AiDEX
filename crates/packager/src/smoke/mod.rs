@@ -5,7 +5,8 @@
 //! `<work>/drive` (removable check skipped) → snapshot host directories → install
 //! (signature checked against the built-in keys plus `--trust-key`) →
 //! run the drive-root entry with `--launcher-verify`, `--version`, `doctor --json`,
-//! `daemon start`, `daemon status --json`, `daemon stop` → compare snapshots → check
+//! `update verify`, `daemon start`, `daemon status --json`, `daemon stop` → compare
+//! snapshots → check
 //! that the drive root holds only AiDEX-owned names.
 
 mod process;
@@ -151,6 +152,7 @@ pub fn run(args: &SmokeArgs) -> Result<SmokeReport, PackagerError> {
     let verify = step(&["--launcher-verify"])?;
     let version = step(&["--version"])?;
     let doctor = step(&["doctor", "--json"])?;
+    let integrity = step(&["--json", "update", "verify"])?;
     // Always try to stop the daemon, even when starting or querying it failed.
     let start = step(&["daemon", "start"]);
     let daemon_status = step(&["daemon", "status", "--json"]);
@@ -217,6 +219,16 @@ pub fn run(args: &SmokeArgs) -> Result<SmokeReport, PackagerError> {
         return Err(PackagerError::new(format!(
             "the bundled CLI does not report a verified installation (signer {:?}, expected {expected_signer:?}): {}",
             doctor.signer_key_id, doctor_json["integrity"]
+        )));
+    }
+    // The bundled CLI re-verifies every file and the signature (`update verify`).
+    let verified_install = expect(integrity, &[0])?.json()?;
+    if verified_install["verified"] != true
+        || verified_install["scope"] != "all"
+        || verified_install["signer_key_id"].as_str() != expected_signer.as_deref()
+    {
+        return Err(PackagerError::new(format!(
+            "unexpected `update verify` report: {verified_install}"
         )));
     }
     expect(start, &[0])?;
