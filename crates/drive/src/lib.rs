@@ -110,6 +110,9 @@ mod tests {
     }
 }
 
+/// Root-level file used to identify an AiDEX drive.
+pub const MANIFEST_FILE_NAME: &str = "aidex-drive.json";
+
 /// The manifest schema supported by this version of the drive crate.
 pub const CURRENT_SCHEMA_VERSION: u32 = 1;
 
