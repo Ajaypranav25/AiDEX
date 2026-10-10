@@ -6,7 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+aidex-drive = { path = "../drive" }
 aidex-host = { path = "../host" }
+aidexd = { path = "../aidexd" }
 clap.workspace = true
 
 [lints]

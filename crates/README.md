@@ -5,12 +5,14 @@
 The Cargo workspace contains only code that has a concrete implementation today:
 
 - `aidex-core` owns small cross-domain value types (`EntityId`), with no domain or platform dependencies.
-- `aidex-drive` validates lexical relative paths and resolves them beneath a caller-provided root. Resolution is lexical and does not claim symlink containment.
+- `aidex-drive` validates portable relative paths, defines the schema-v1 root-level `aidex-drive.json` manifest, and provides safe init/status operations that create only manifest-declared directories.
 - `aidex-host` reports compile-time platform identifiers and best-effort process paths; it does not discover hardware or configure the operating system.
 - `aidex-events` broadcasts byte-payload events to in-process subscribers. It is not a durable event log or IPC transport.
-- `aidex-storage` uses embedded SQLite for transactional state (WAL, full synchronous commits, schema versioning, and one-time import of legacy file values) and SHA-256-addressed files for large artifacts. SQLite was chosen over another file-backed index because it provides atomic metadata transactions without a service; blobs are synced before atomic rename and verified on read. Managed paths reject symlink traversal. This local persistence is not encrypted.
+- `aidex-storage` uses embedded SQLite for transactional state (WAL, full synchronous commits, schema versioning, and one-time import of legacy file values) and SHA-256-addressed files for large artifacts. SQLite provides atomic metadata transactions without a service; blobs are synced before atomic rename and verified on read. Managed paths reject symlink traversal. This local persistence is not encrypted.
 - `aidex-sessions` provides a process-local, in-memory session lifecycle catalog. It is not persistent and does not implement chat history.
-- `aidexd` is the daemon binary entry-point shell. Its current `host` command is diagnostic only; no daemon/service is started.
+- `aidexd` owns the local daemon lifecycle and a versioned, capability-authenticated loopback IPC protocol. State is rooted on the selected drive; the endpoint capability is protected by Unix file permissions or the current Windows user's DPAPI credential. Its narrow API exposes readiness, status, and graceful shutdown.
+
+The daemon uses `aidex-drive` for the selected root. The CLI links the daemon IPC client and exposes `aidex daemon start|status|stop`; the daemon executable remains the lifecycle owner.
 
 Dependency direction is inward toward small shared primitives: `aidex-core` has no dependencies; `aidex-sessions` may depend on `aidex-core`; `aidex-storage` depends on embedded SQLite and SHA-256 primitives; and `aidexd` composes infrastructure crates. Domain crates should depend on lower-level contracts, never on the executable or UI. Avoid cycles; express cross-domain events at domain boundaries.
 

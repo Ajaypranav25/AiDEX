@@ -1,3 +1,5 @@
 # Protocol schemas
 
-Canonical machine-readable request, response, and event schemas belong here. The JSON-RPC 2.0 envelope schema is the only schema currently present; AiDEX service contracts and generated bindings are not yet defined.
+`contract-v1.schema.json` is the generated JSON Schema client boundary for the Rust Serde DTOs in `aidex-core`; those Rust types are canonical. Regenerate it with `cargo run -p aidex-core --bin generate_contract_schema`. `cargo test -p aidex-core` deterministically compares generated and checked-in schema bytes and fails on drift. Do not edit generated schema by hand or declare a duplicated protocol definition canonical.
+
+`json-rpc-2.0.schema.json` remains the transport envelope schema. Contract evolution and compatibility rules are in `protocol/versioning/README.md`.
