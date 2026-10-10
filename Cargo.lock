@@ -193,10 +193,13 @@ dependencies = [
  "aidex-core",
  "aidex-drive",
  "aidex-events",
+ "flate2",
  "semver",
  "serde",
  "serde_json",
+ "tar",
  "tempfile",
+ "zip",
 ]
 
 [[package]]
