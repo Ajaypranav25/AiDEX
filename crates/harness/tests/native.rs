@@ -424,11 +424,14 @@ fn approved_file_plan_detects_changes_after_approval_was_requested() {
 #[cfg(windows)]
 #[test]
 fn approved_shell_returns_promptly_and_cancel_terminates_the_real_process() {
+    // Cold Windows shells can take longer than five seconds to become ready.
+    // Delaying the first marker reproduces that independently of runner load;
+    // the approval RPC must still return promptly and cancellation must kill it.
     let (drive, ws, e, s, _p, _events) = fixture(
         vec![
             FakeTurn::tool_call(
                 "shell_exec",
-                r#"{"shell":true,"command":"Set-Content -LiteralPath started.txt -Value started; Start-Sleep -Seconds 10; Set-Content -LiteralPath finished.txt -Value finished"}"#,
+                r#"{"shell":true,"command":"Start-Sleep -Seconds 6; Set-Content -LiteralPath started.txt -Value started; Start-Sleep -Seconds 10; Set-Content -LiteralPath finished.txt -Value finished"}"#,
             ),
             FakeTurn::text("done"),
         ],
@@ -451,11 +454,14 @@ fn approved_shell_returns_promptly_and_cancel_terminates_the_real_process() {
         start.elapsed() < Duration::from_secs(1),
         "approval RPC blocked on shell execution"
     );
-    let until = Instant::now() + Duration::from_secs(5);
+    let until = Instant::now() + Duration::from_secs(30);
     while !ws.path().join("started.txt").exists() {
         let state = e.store().run(&r.id).unwrap();
         assert!(state.status.active(), "{:?}", state.error);
-        assert!(Instant::now() < until, "process did not start");
+        assert!(
+            Instant::now() < until,
+            "process did not start within 30 seconds: {state:?}"
+        );
         std::thread::sleep(Duration::from_millis(20));
     }
     e.cancel(&r.id).unwrap();

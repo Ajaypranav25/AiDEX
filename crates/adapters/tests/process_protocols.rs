@@ -130,6 +130,24 @@ fn every_named_driver_streams_real_process_protocol_and_ignores_child_completion
     }
 }
 #[test]
+fn protocol_peers_accept_equivalent_workspace_directory_paths() {
+    for driver in [Driver::Codex, Driver::Acp] {
+        let (dir, manager, mut request) = setup(driver, "normal");
+        // Sandbox negotiation canonicalizes cwd. The wire request can still use
+        // an equivalent spelling (including Windows short-name temp paths).
+        request.workspace.as_mut().unwrap().root =
+            dir.path().join(".").to_string_lossy().into_owned();
+        let response = manager.executors().unwrap()[0]
+            .execute(
+                &request,
+                &mut |_| RuntimeControl::Continue,
+                &CancelToken::new().with_timeout(Duration::from_secs(10)),
+            )
+            .unwrap_or_else(|error| panic!("{driver:?}: {error}"));
+        assert_eq!(response.status, RuntimeStatus::Completed);
+    }
+}
+#[test]
 fn codex_approval_pauses_before_effect_and_requires_exact_live_native_request() {
     let (dir, manager, mut request) = setup(Driver::Codex, "approval");
     let executor = manager.executors().unwrap().remove(0);

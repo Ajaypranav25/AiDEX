@@ -5,12 +5,15 @@
 //! directories directly inside the home directory and the per-user config, data,
 //! cache, and state roots, plus AiDEX-named entries in the system temp directory
 //! (other processes create unrelated temp files concurrently). Writes deeper inside
-//! pre-existing directories are not detected.
+//! pre-existing directories and changes to existing entries are not detected.
+//! macOS Preferences also excludes the exact regular file
+//! `com.apple.siri.ODDI.ExperimentationWorker.plist`, maintained by the OS in the
+//! background; other entries there remain fully watched.
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     env,
-    ffi::OsString,
+    ffi::{OsStr, OsString},
     fs,
     path::{Path, PathBuf},
 };
@@ -24,11 +27,16 @@ pub enum Watch {
     All,
     /// Only new entries whose name contains `aidex` (case-insensitive).
     AidexNamed,
+    /// All new entries except one known OS-maintained regular plist.
+    MacosPreferences,
 }
+
+/// Entry names mapped to their regular-file status at snapshot time.
+type Entries = BTreeMap<OsString, bool>;
 
 #[derive(Debug)]
 pub struct Snapshot {
-    dirs: Vec<(PathBuf, Watch, Option<BTreeSet<OsString>>)>,
+    dirs: Vec<(PathBuf, Watch, Option<Entries>)>,
 }
 
 /// Directories to watch on this host.
@@ -57,7 +65,12 @@ pub fn watched() -> Vec<(PathBuf, Watch)> {
         let xdg = |name: &str, default: &str| var(name).unwrap_or_else(|| home.join(default));
         if cfg!(target_os = "macos") {
             for sub in ["Application Support", "Caches", "Preferences", "Logs"] {
-                dirs.push((home.join("Library").join(sub), Watch::All));
+                let watch = if sub == "Preferences" {
+                    Watch::MacosPreferences
+                } else {
+                    Watch::All
+                };
+                dirs.push((home.join("Library").join(sub), watch));
             }
         } else {
             dirs.push((xdg("XDG_CONFIG_HOME", ".config"), Watch::All));
@@ -93,17 +106,26 @@ impl Snapshot {
             let Some(now) = now else { continue };
             let Some(before) = before else {
                 // The directory itself appeared.
-                if *watch == Watch::All {
+                if *watch != Watch::AidexNamed {
                     found.insert(dir.clone());
                 }
                 continue;
             };
-            for name in now.difference(before) {
+            for (name, regular_file) in now {
+                if before.contains_key(name) {
+                    continue;
+                }
+                // Siri's background worker can create this plist during smoke.
+                // Restrict the exception to this directory policy, exact name,
+                // and regular-file type captured without following symlinks.
+                let os_preference = *watch == Watch::MacosPreferences
+                    && *regular_file
+                    && name == OsStr::new("com.apple.siri.ODDI.ExperimentationWorker.plist");
                 let named = name
                     .to_string_lossy()
                     .to_ascii_lowercase()
                     .contains("aidex");
-                if *watch == Watch::All || named {
+                if (*watch != Watch::AidexNamed || named) && !os_preference {
                     found.insert(dir.join(name));
                 }
             }
@@ -112,14 +134,163 @@ impl Snapshot {
     }
 }
 
-fn list(dir: &Path) -> Option<BTreeSet<OsString>> {
+/// Entry names and whether each was a regular file at snapshot time. An unknown
+/// file type is never eligible for the OS-owned regular-file exception.
+fn list(dir: &Path) -> Option<Entries> {
     let entries = fs::read_dir(dir).ok()?;
-    Some(entries.flatten().map(|entry| entry.file_name()).collect())
+    Some(
+        entries
+            .flatten()
+            .map(|entry| {
+                (
+                    entry.file_name(),
+                    entry.file_type().is_ok_and(|kind| kind.is_file()),
+                )
+            })
+            .collect(),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn macos_preferences_background_churn_does_not_hide_host_writes() {
+        let host = tempfile::tempdir().unwrap();
+        let preferences = host.path().join("Library/Preferences");
+        fs::create_dir_all(&preferences).unwrap();
+        let dirs = vec![(preferences.clone(), Watch::MacosPreferences)];
+        let before = Snapshot::take(&dirs);
+
+        // A separate background writer reproduces the runner's Siri preference
+        // appearing between snapshots; joining makes the fixture deterministic.
+        let background_preferences = preferences.clone();
+        let background = std::thread::spawn(move || {
+            fs::write(
+                background_preferences.join("com.apple.siri.ODDI.ExperimentationWorker.plist"),
+                "OS-owned preference",
+            )
+            .unwrap();
+        });
+        for name in [
+            "unexpected.plist",
+            "com.apple.unexpected.plist",
+            "AiDEX.plist",
+            "com.apple.siri.ODDI.ExperimentationWorker.plist.bak",
+            "com.apple.siri.ODDI.ExperimentationWorker-AiDEX.plist",
+        ] {
+            fs::write(preferences.join(name), "unexpected host write").unwrap();
+        }
+        fs::create_dir(preferences.join("AiDEX-data")).unwrap();
+        background.join().unwrap();
+
+        let mut expected = vec![
+            preferences.join("unexpected.plist"),
+            preferences.join("com.apple.unexpected.plist"),
+            preferences.join("AiDEX.plist"),
+            preferences.join("com.apple.siri.ODDI.ExperimentationWorker.plist.bak"),
+            preferences.join("com.apple.siri.ODDI.ExperimentationWorker-AiDEX.plist"),
+            preferences.join("AiDEX-data"),
+        ];
+        expected.sort();
+        assert_eq!(before.new_entries(&Snapshot::take(&dirs)), expected);
+    }
+
+    #[test]
+    fn differently_cased_macos_preference_name_is_audited() {
+        let preferences = tempfile::tempdir().unwrap();
+        let dirs = vec![(preferences.path().to_path_buf(), Watch::MacosPreferences)];
+        let before = Snapshot::take(&dirs);
+        // Separate from the OS-owned filename fixture for case-insensitive hosts.
+        let unexpected = preferences
+            .path()
+            .join("Com.apple.siri.ODDI.ExperimentationWorker.plist");
+        fs::write(&unexpected, "unexpected host write").unwrap();
+        assert_eq!(before.new_entries(&Snapshot::take(&dirs)), vec![unexpected]);
+    }
+
+    #[test]
+    fn known_macos_preference_name_is_audited_in_other_directories() {
+        let host = tempfile::tempdir().unwrap();
+        let cache = host.path().join("Library/Caches");
+        fs::create_dir_all(&cache).unwrap();
+        let dirs = vec![
+            (host.path().to_path_buf(), Watch::All),
+            (cache.clone(), Watch::All),
+        ];
+        let before = Snapshot::take(&dirs);
+        let name = "com.apple.siri.ODDI.ExperimentationWorker.plist";
+        fs::write(host.path().join(name), "unexpected host write").unwrap();
+        fs::write(cache.join(name), "unexpected cache write").unwrap();
+        let mut expected = vec![host.path().join(name), cache.join(name)];
+        expected.sort();
+        assert_eq!(before.new_entries(&Snapshot::take(&dirs)), expected);
+    }
+
+    #[test]
+    fn known_macos_preference_name_does_not_exclude_a_directory() {
+        let preferences = tempfile::tempdir().unwrap();
+        let dirs = vec![(preferences.path().to_path_buf(), Watch::MacosPreferences)];
+        let before = Snapshot::take(&dirs);
+        let unexpected = preferences
+            .path()
+            .join("com.apple.siri.ODDI.ExperimentationWorker.plist");
+        fs::create_dir(&unexpected).unwrap();
+        assert_eq!(before.new_entries(&Snapshot::take(&dirs)), vec![unexpected]);
+    }
+
+    #[test]
+    fn macos_preference_file_type_is_captured_in_the_snapshot() {
+        let preferences = tempfile::tempdir().unwrap();
+        let dirs = vec![(preferences.path().to_path_buf(), Watch::MacosPreferences)];
+        let before = Snapshot::take(&dirs);
+        let unexpected = preferences
+            .path()
+            .join("com.apple.siri.ODDI.ExperimentationWorker.plist");
+        fs::create_dir(&unexpected).unwrap();
+        let after = Snapshot::take(&dirs);
+        fs::remove_dir(&unexpected).unwrap();
+        fs::write(
+            &unexpected,
+            "regular file replacing an unexpected directory",
+        )
+        .unwrap();
+        assert_eq!(before.new_entries(&after), vec![unexpected]);
+    }
+
+    #[test]
+    fn newly_created_macos_preferences_directory_is_audited() {
+        let host = tempfile::tempdir().unwrap();
+        let preferences = host.path().join("Library/Preferences");
+        let dirs = vec![(preferences.clone(), Watch::MacosPreferences)];
+        let before = Snapshot::take(&dirs);
+        fs::create_dir_all(&preferences).unwrap();
+        fs::write(
+            preferences.join("com.apple.siri.ODDI.ExperimentationWorker.plist"),
+            "OS-owned preference",
+        )
+        .unwrap();
+        assert_eq!(
+            before.new_entries(&Snapshot::take(&dirs)),
+            vec![preferences]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn known_macos_preference_name_does_not_exclude_a_symlink() {
+        let preferences = tempfile::tempdir().unwrap();
+        let target = preferences.path().join("existing.plist");
+        fs::write(&target, "existing preference").unwrap();
+        let dirs = vec![(preferences.path().to_path_buf(), Watch::MacosPreferences)];
+        let before = Snapshot::take(&dirs);
+        let unexpected = preferences
+            .path()
+            .join("com.apple.siri.ODDI.ExperimentationWorker.plist");
+        std::os::unix::fs::symlink(target, &unexpected).unwrap();
+        assert_eq!(before.new_entries(&Snapshot::take(&dirs)), vec![unexpected]);
+    }
 
     #[test]
     fn new_entries_respect_the_watch_mode() {

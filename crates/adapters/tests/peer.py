@@ -43,7 +43,8 @@ while True:
     r=read(); method=r.get('method','')
     if method=='model/list': reply(r,{'data':[{'id':'fixture','name':'Fixture'}]})
     elif method in ('thread/start','thread/resume'):
-        assert r['params']['cwd']==os.getcwd()
+        # The sandbox canonicalizes cwd; Windows temp paths can use 8.3 aliases.
+        assert os.path.samefile(r['params']['cwd'], os.getcwd())
         assert r['params']['sandbox']=='danger-full-access'
         if scenario=='restart':
             state=os.path.join(os.environ['CODEX_HOME'],'native-history.json')
@@ -53,7 +54,7 @@ while True:
                 json.dump({'marker':'ENCRYPTED-NATIVE-HISTORY'},open(state,'w'))
         reply(r,{'thread':{'id':'native-session'}})
     elif method in ('session/new','session/load','session/resume','session/start'):
-        assert r['params'].get('cwd',r['params'].get('workspaceRoot'))==os.getcwd()
+        assert os.path.samefile(r['params'].get('cwd',r['params'].get('workspaceRoot')), os.getcwd())
         if driver=='muse':assert uuid.UUID(r['params']['commandId']).version==7
         reply(r,{'sessionId':'native-session','session':{'sessionId':'native-session'},'models':{'availableModels':[{'modelId':'fixture','name':'Fixture'}]}})
     elif method in ('session/set_model','session/setModel','session/setApprovalMode','session/set_mode'): reply(r,{})
