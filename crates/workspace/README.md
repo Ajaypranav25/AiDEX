@@ -48,7 +48,7 @@ workspaces/ephemeral/<id>/tree/            ephemeral workspace root
 
 ## Limitations
 
-- Resolution is a point-in-time check (TOCTOU): a process that can modify the workspace concurrently could swap a verified directory for a link between resolution and use, and `create_dir_all` during apply could then create empty directories through it. Apply narrows the window by re-resolving before each rename. OS-enforced confinement (handles, `openat`, sandbox mounts) belongs to `aidex-sandbox`.
+- Resolution is a point-in-time check (TOCTOU): a process that can modify the workspace concurrently could swap a verified directory for a link between resolution and use, and `create_dir_all` during apply could then create empty directories through it. Apply narrows the window by re-resolving before each rename. OS-enforced confinement (handles, `openat`, sandbox mounts) belongs to `aidex-sandbox`, which is not yet wired to workspace roots.
 - Windows 8.3 short names are not normalized; they resolve as the directories they alias but compare differently (which can only cause a false refusal). NTFS per-directory case sensitivity is not detected. Reserved-name rules are enforced only on Windows.
 - Empty directories are not tracked by the baseline or by review; directory deletions are not applied (emptied directories remain). File permissions other than the Unix mode bits are not preserved.
 - Review requires the source to be available. Very large reviews are bounded, not paginated; the daemon truncates the listed entries to fit one IPC message while the digest still covers every change.
