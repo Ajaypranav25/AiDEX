@@ -5,6 +5,10 @@
 //! are added here as fields constructed in [`Services::open`]; their JSON-RPC
 //! adapters live in `methods/<domain>.rs`.
 
+mod models;
+
+pub use models::{ModelServices, VaultCredentials};
+
 use crate::{endpoint, lifecycle::ShutdownSignal, methods::events::event_error_code};
 use aidex_core::ServiceErrorCode;
 use aidex_drive::DrivePaths;
@@ -32,6 +36,7 @@ pub struct Services {
     events: EventLog,
     vault: Arc<VaultService>,
     workspaces: WorkspaceRegistry,
+    models: ModelServices,
 }
 
 impl Services {
@@ -68,6 +73,14 @@ impl Services {
             .map_err(|error| ServicesError::new("vault", error.code(), error.to_string()))?;
         let workspaces = WorkspaceRegistry::open(&paths)
             .map_err(|error| ServicesError::new("workspace", error.code(), error.to_string()))?;
+        let vault = Arc::new(vault);
+        // Typed `model.*` events need the events v2 catalog; until it is wired the
+        // observer discards notifications (they are still returned to callers).
+        let models = ModelServices::open(
+            &paths,
+            Arc::clone(&vault),
+            Arc::new(aidex_providers::NoopObserver),
+        )?;
         Ok(Self {
             drive_root: drive_root.to_path_buf(),
             paths,
@@ -75,8 +88,9 @@ impl Services {
             started_at: Instant::now(),
             shutdown,
             events,
-            vault: Arc::new(vault),
+            vault,
             workspaces,
+            models,
         })
     }
 
@@ -117,6 +131,12 @@ impl Services {
     /// Workspace registry and confinement (`aidex-workspace`).
     pub fn workspaces(&self) -> &WorkspaceRegistry {
         &self.workspaces
+    }
+
+    /// Model providers, the router, and the offline switch
+    /// (`aidex-providers`, `aidex-router`).
+    pub fn models(&self) -> &ModelServices {
+        &self.models
     }
 }
 
