@@ -8,9 +8,9 @@ use crate::{SkippedEntry, Workspace};
 /// Bounds for copying and reviewing ephemeral workspaces.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EphemeralLimits {
-    /// Maximum regular files copied from the source.
+    /// Maximum regular files copied from the source or examined in a review.
     pub max_files: u64,
-    /// Maximum total bytes copied from the source.
+    /// Maximum total bytes copied from the source or examined in a review.
     pub max_bytes: u64,
     /// Files larger than this (either side) get no unified diff.
     pub max_diff_input_bytes: u64,

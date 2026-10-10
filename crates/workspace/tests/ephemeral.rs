@@ -635,3 +635,58 @@ fn large_diffs_are_bounded() {
         patch.len()
     );
 }
+
+#[test]
+fn mutable_review_enforces_file_count_and_byte_limits_before_apply() {
+    let drive = Drive::new();
+    let source = project(&[("a", "12")]);
+    let registry = drive.registry().with_limits(EphemeralLimits {
+        max_files: 2,
+        max_bytes: 4,
+        ..EphemeralLimits::default()
+    });
+    let source_ws = registry.add_host(source.path(), None).unwrap();
+    let copy = registry.create_ephemeral(&source_ws.id).unwrap().workspace;
+    let tree = registry.confined_root(&copy.id).unwrap();
+    write(tree.root(), "b", "34");
+    assert_eq!(registry.review(&copy.id).unwrap().changes.len(), 1);
+
+    write(tree.root(), "c", "");
+    assert!(matches!(registry.review(&copy.id), Err(WorkspaceError::TooLarge(_))));
+    assert!(matches!(
+        registry.apply(&copy.id, &ApplySelection::All, None),
+        Err(WorkspaceError::TooLarge(_))
+    ));
+    assert!(!source.path().join("b").exists());
+    fs::remove_file(tree.root().join("c")).unwrap();
+    write(tree.root(), "b", "345");
+    assert!(matches!(registry.review(&copy.id), Err(WorkspaceError::TooLarge(_))));
+    fs::remove_file(tree.root().join("b")).unwrap();
+    write(tree.root(), "a", "12345");
+    assert!(matches!(registry.review(&copy.id), Err(WorkspaceError::TooLarge(_))));
+    write(tree.root(), "a", "12");
+    assert!(registry.review(&copy.id).unwrap().changes.is_empty());
+    assert_eq!(fs::read_to_string(source.path().join("a")).unwrap(), "12");
+}
+
+#[test]
+fn newly_ignored_baseline_files_still_count_toward_review_limits() {
+    let drive = Drive::new();
+    let source = project(&[(".gitignore", ""), ("tracked", "x")]);
+    let registry = drive.registry().with_limits(EphemeralLimits {
+        max_files: 2,
+        max_bytes: 16,
+        ..EphemeralLimits::default()
+    });
+    let source_ws = registry.add_host(source.path(), None).unwrap();
+    let copy = registry.create_ephemeral(&source_ws.id).unwrap().workspace;
+    let tree = registry.confined_root(&copy.id).unwrap();
+    write(tree.root(), ".gitignore", "tracked\n");
+    write(tree.root(), "tracked", "123456789");
+    assert!(matches!(registry.review(&copy.id), Err(WorkspaceError::TooLarge(_))));
+    write(tree.root(), "tracked", "x");
+    write(tree.root(), "new", "");
+    assert!(matches!(registry.review(&copy.id), Err(WorkspaceError::TooLarge(_))));
+    fs::remove_file(tree.root().join("new")).unwrap();
+    assert_eq!(registry.review(&copy.id).unwrap().changes.len(), 1);
+}
