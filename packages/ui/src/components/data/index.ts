@@ -1,3 +1,4 @@
+export { AsyncContent, type AsyncContentProps } from "./AsyncContent";
 export { BarChart, type BarChartProps, type BarDatum } from "./BarChart";
 export { type ChartColor } from "./chart";
 export { DataTable, type DataTableColumn, type DataTableProps } from "./DataTable";

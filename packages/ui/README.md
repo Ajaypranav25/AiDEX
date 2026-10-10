@@ -68,6 +68,7 @@ Every component accepts its root element's props (including `ref` and `className
 | `SettingRow` | `title`, `description`, `control`, `controlId` |
 | `EmptyState` | `icon`, `title`, `description`, `actions`, `titleLevel` |
 | `LoadingState` | `label` (announced as a polite status); a spinner sized like `Notice`, still under reduced motion |
+| `AsyncContent` | `state` loading · failed · ready, `loadingLabel`, `failure` (announced as an alert), `onRetry`, `retryLabel`, `children`; focus waits on the region while a retry replaces its button |
 | `StatTile` | `label`, `value`, `hint`, `icon`, `tone` |
 | `Meter` | `label`, `value`, `max`, `valueText`, `tone`, `warnAt`, `dangerAt` |
 | `SegmentedMeter` | `label`, `segments: { label, value, color? }[]`, `max`, `valueText`, `remainderLabel` |

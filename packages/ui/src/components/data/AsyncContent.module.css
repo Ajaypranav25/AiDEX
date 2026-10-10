@@ -1,0 +1,8 @@
+.region {
+  min-width: 0;
+}
+
+/* Focus waits here while a retry replaces its button; the region is not interactive, so no ring. */
+.region:focus {
+  outline: none;
+}
