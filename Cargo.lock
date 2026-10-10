@@ -23,7 +23,9 @@ dependencies = [
  "aidex-host",
  "aidexd",
  "clap",
+ "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
