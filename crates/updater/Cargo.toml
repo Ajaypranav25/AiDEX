@@ -1,0 +1,31 @@
+[package]
+name = "aidex-updater"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Signed, staged, self-tested AiDEX updates with atomic switching, crash recovery, rollback, and SBOM validation."
+
+# Test-only stand-in for the bundled `aidex` and `aidexd` binaries: answers the
+# self-test commands from the bundle.json next to it. Never part of a real bundle.
+[[bin]]
+name = "aidex-updater-test-bin"
+path = "tests/support/test_bin.rs"
+test = false
+doc = false
+
+[dependencies]
+aidex-bundle = { path = "../bundle", features = ["archive"] }
+aidex-core = { path = "../core" }
+aidex-drive = { path = "../drive" }
+aidex-events = { path = "../events" }
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+aidex-bundle = { path = "../bundle", features = ["archive", "dev-trust"] }
+tempfile = "3"
+
+[lints]
+workspace = true
