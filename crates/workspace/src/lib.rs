@@ -11,11 +11,13 @@
 
 
 mod confine;
+mod discover;
 mod error;
 mod model;
 mod platform;
 
 pub use confine::{Access, ConfinedRoot, parse_workspace_path};
+pub use discover::{Discovery, MAX_SCAN_DEPTH, MAX_SCAN_ENTRIES, discover};
 pub use error::WorkspaceError;
 pub use model::{
     MAX_NAME_CHARS, RepositoryInfo, Vcs, WORKSPACE_ID_PREFIX, Workspace, WorkspaceAvailability,
