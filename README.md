@@ -34,7 +34,7 @@ bun run dev:cli -- status --drive /path/to/removable-drive
 bun run dev:cli -- doctor
 ```
 
-`aidex init` creates only the directories declared by the root-level `aidex-drive.json` manifest. `aidex status` and `aidex doctor` inspect that same schema-v1 JSON manifest without repairing it. `aidex chat` starts Oh My Pi with interactive approvals; `aidex run` is non-interactive and read-only. See [CLI setup](apps/cli/README.md) for runtime setup and boundaries.
+`aidex init` creates only the directories declared by the root-level `aidex-drive.json` manifest. `aidex status` and `aidex doctor` inspect that same schema-v2 JSON manifest without repairing it; `aidex init` explicitly migrates a schema-v1 manifest and keeps the original as `aidex-drive.v1.json`. `aidex chat` starts Oh My Pi with interactive approvals; `aidex run` is non-interactive and read-only. See [CLI setup](apps/cli/README.md) for runtime setup and boundaries.
 
 The Tauri clients remain available with `bun run dev:desktop` and `bun run dev:installer`.
 
