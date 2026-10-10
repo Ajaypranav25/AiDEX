@@ -1,0 +1,149 @@
+# Pinned llama.cpp runtime bundles AiDEX can install (spec §10.2, §67).
+#
+# Every entry is an upstream release archive from github.com/ggml-org/llama.cpp,
+# identified by its exact size and SHA-256 (taken from the GitHub release asset
+# digests). `aidex runtime install <ARCHIVE>` accepts only archives listed here.
+# `tree_sha256` pins the extracted file set (sha256sum lines of every file,
+# sorted by path) when AiDEX has measured it; launches then refuse any runtime
+# whose files differ. `validated = true` means AiDEX's real-model test passed
+# with that archive; everything else is listed but not validated.
+#
+# Licence: llama.cpp is MIT licensed (https://github.com/ggml-org/llama.cpp/blob/master/LICENSE).
+# The Windows CPU archive also ships libomp.dll with LICENSE-LLVM-OpenMP (Apache-2.0 WITH LLVM-exception).
+version = 1
+
+[[runtime]]
+id = "llama.cpp-b11205-windows-x64-cpu"
+engine = "llama.cpp"
+version = "b11205"
+platform = "windows-x64"
+variant = "cpu"
+archive = "llama-b11205-bin-win-cpu-x64.zip"
+format = "zip"
+size_bytes = 19155045
+sha256 = "2a8bf1ff808e8f6d2329f50f7005419a9930d9ecfbeae5047cfff475e87c2db0"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11205/llama-b11205-bin-win-cpu-x64.zip"
+source = "https://github.com/ggml-org/llama.cpp/releases/tag/b11205"
+license = "MIT"
+server_binary = "llama-server.exe"
+tree_sha256 = "cba79c95731ecfe372448629d5d39b26e52d74f92b50b5d8d5cc71d507fcfde8"
+validated = true
+
+[[runtime]]
+id = "llama.cpp-b11205-windows-x64-vulkan"
+engine = "llama.cpp"
+version = "b11205"
+platform = "windows-x64"
+variant = "vulkan"
+archive = "llama-b11205-bin-win-vulkan-x64.zip"
+format = "zip"
+size_bytes = 33061695
+sha256 = "f3d08e7e342e2cb96ccddd1a208320c188d0a394844553a40a32c5e9903af563"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11205/llama-b11205-bin-win-vulkan-x64.zip"
+source = "https://github.com/ggml-org/llama.cpp/releases/tag/b11205"
+license = "MIT"
+server_binary = "llama-server.exe"
+validated = false
+notes = "needs a Vulkan-capable GPU driver; not validated by AiDEX"
+
+[[runtime]]
+id = "llama.cpp-b11205-windows-arm64-cpu"
+engine = "llama.cpp"
+version = "b11205"
+platform = "windows-arm64"
+variant = "cpu"
+archive = "llama-b11205-bin-win-cpu-arm64.zip"
+format = "zip"
+size_bytes = 12040648
+sha256 = "39adbe8846a1228f0b16e93ba726e8c05c5af46d990441b272f7eed64f8ff455"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11205/llama-b11205-bin-win-cpu-arm64.zip"
+source = "https://github.com/ggml-org/llama.cpp/releases/tag/b11205"
+license = "MIT"
+server_binary = "llama-server.exe"
+validated = false
+notes = "AiDEX has no windows-arm64 runtime platform yet"
+
+[[runtime]]
+id = "llama.cpp-b11205-linux-x64-cpu"
+engine = "llama.cpp"
+version = "b11205"
+platform = "linux-x64"
+variant = "cpu"
+archive = "llama-b11205-bin-ubuntu-x64.tar.gz"
+format = "tar-gz"
+size_bytes = 17403637
+sha256 = "730ea8e54b97735abb46e46747999249719251f29753fcda97b5e2f2f3ea6912"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11205/llama-b11205-bin-ubuntu-x64.tar.gz"
+source = "https://github.com/ggml-org/llama.cpp/releases/tag/b11205"
+license = "MIT"
+server_binary = "llama-server"
+validated = false
+notes = "tar.gz extraction is not implemented yet; listed for integrity pinning only"
+
+[[runtime]]
+id = "llama.cpp-b11205-linux-x64-vulkan"
+engine = "llama.cpp"
+version = "b11205"
+platform = "linux-x64"
+variant = "vulkan"
+archive = "llama-b11205-bin-ubuntu-vulkan-x64.tar.gz"
+format = "tar-gz"
+size_bytes = 31346600
+sha256 = "14bb34d7058693f7679117ec3544a732e0a72405c6a08d60c8961b79393dd309"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11205/llama-b11205-bin-ubuntu-vulkan-x64.tar.gz"
+source = "https://github.com/ggml-org/llama.cpp/releases/tag/b11205"
+license = "MIT"
+server_binary = "llama-server"
+validated = false
+notes = "tar.gz extraction is not implemented yet; listed for integrity pinning only"
+
+[[runtime]]
+id = "llama.cpp-b11205-linux-arm64-cpu"
+engine = "llama.cpp"
+version = "b11205"
+platform = "linux-arm64"
+variant = "cpu"
+archive = "llama-b11205-bin-ubuntu-arm64.tar.gz"
+format = "tar-gz"
+size_bytes = 13500061
+sha256 = "9106753bff55e43c78ff595bf169a6bf01175f3d38f707866a1142553d4c437a"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11205/llama-b11205-bin-ubuntu-arm64.tar.gz"
+source = "https://github.com/ggml-org/llama.cpp/releases/tag/b11205"
+license = "MIT"
+server_binary = "llama-server"
+validated = false
+notes = "tar.gz extraction is not implemented yet; listed for integrity pinning only"
+
+[[runtime]]
+id = "llama.cpp-b11205-macos-arm64-metal"
+engine = "llama.cpp"
+version = "b11205"
+platform = "macos-arm64"
+variant = "metal"
+archive = "llama-b11205-bin-macos-arm64.tar.gz"
+format = "tar-gz"
+size_bytes = 11755672
+sha256 = "97b06f59ad15e2b4b6044ba7338c4e3f40354c6dc2b9c5cda234e2bd6b9fd65e"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11205/llama-b11205-bin-macos-arm64.tar.gz"
+source = "https://github.com/ggml-org/llama.cpp/releases/tag/b11205"
+license = "MIT"
+server_binary = "llama-server"
+validated = false
+notes = "tar.gz extraction is not implemented yet; listed for integrity pinning only"
+
+[[runtime]]
+id = "llama.cpp-b11205-macos-x64-cpu"
+engine = "llama.cpp"
+version = "b11205"
+platform = "macos-x64"
+variant = "cpu"
+archive = "llama-b11205-bin-macos-x64.tar.gz"
+format = "tar-gz"
+size_bytes = 11309116
+sha256 = "1122a00cf6ce9e9ae687c1b71fef82e2f59bec2bea443f4746d94212b3124db1"
+url = "https://github.com/ggml-org/llama.cpp/releases/download/b11205/llama-b11205-bin-macos-x64.tar.gz"
+source = "https://github.com/ggml-org/llama.cpp/releases/tag/b11205"
+license = "MIT"
+server_binary = "llama-server"
+validated = false
+notes = "tar.gz extraction is not implemented yet; listed for integrity pinning only"

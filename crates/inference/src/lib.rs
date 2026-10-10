@@ -3,5 +3,6 @@
 mod error;
 mod fsutil;
 pub mod gguf;
+pub mod runtime;
 
 pub use error::{InferenceError, Result};
