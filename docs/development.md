@@ -24,6 +24,8 @@ cargo check --workspace
 
 The drive contract is the root-level schema-v2 JSON `aidex-drive.json` (see `portable/layouts/README.md`); `aidex init` and `aidex status` operate on that manifest and never use a second metadata format. `aidex init` migrates a schema-v1 manifest explicitly. Services locate drive directories through `aidex_drive::DrivePaths`; tests that need an initialized drive in a temporary directory use `aidex_drive::init_with` with `InitOptions { require_removable: false }`.
 
+Daemon-backed behaviour is tested against an in-process `aidexd::Daemon` on a temporary directory (see `crates/aidexd/tests/common`); the daemon does not need an initialized drive. CI (`.github/workflows/ci.yml`) runs `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test --workspace` on Windows, Linux, and macOS.
+
 Run the narrowest relevant checks after changing a surface. Do not treat a successful frontend build as proof of drive provisioning, encryption, broker enforcement, or model inference; those behaviors require their own integration scenarios when implemented.
 
 ## Dependency boundaries
