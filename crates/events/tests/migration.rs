@@ -1,0 +1,338 @@
+//! Migration of PR #40 (event log v1) databases.
+
+mod common;
+
+use aidex_events::{
+    Cursor, EventFilter, EventKind, EventLog, EventScope, LegacyApprovalDecision, LegacyImport,
+    LegacyRecord, Outcome, RetentionPolicy,
+};
+use common::{db_path, id, write_v1_database};
+use std::fs;
+
+/// One row of every PR #40 kind, across two workspaces, in write order.
+const V1_ROWS: &[(&str, Option<&str>, &str)] = &[
+    ("ws_a", Some("ses_1"), r#"{"type":"session_started"}"#),
+    (
+        "ws_a",
+        Some("ses_1"),
+        r#"{"type":"task_started","task_id":"t1"}"#,
+    ),
+    (
+        "ws_b",
+        None,
+        r#"{"type":"task_finished","task_id":"t2","outcome":"succeeded"}"#,
+    ),
+    (
+        "ws_a",
+        None,
+        r#"{"type":"task_finished","task_id":"t3","outcome":"cancelled"}"#,
+    ),
+    (
+        "ws_a",
+        None,
+        r#"{"type":"task_finished","task_id":"t4","outcome":"failed"}"#,
+    ),
+    (
+        "ws_a",
+        Some("ses_1"),
+        r#"{"type":"agent_started","agent_id":"omp"}"#,
+    ),
+    (
+        "ws_a",
+        Some("ses_1"),
+        r#"{"type":"agent_finished","agent_id":"omp","outcome":"failed"}"#,
+    ),
+    (
+        "ws_a",
+        None,
+        r#"{"type":"tool_started","tool_id":"fs.read"}"#,
+    ),
+    (
+        "ws_a",
+        None,
+        r#"{"type":"tool_finished","tool_id":"fs.read","outcome":"succeeded"}"#,
+    ),
+    (
+        "ws_a",
+        None,
+        r#"{"type":"approval_requested","approval_id":"apr_1"}"#,
+    ),
+    (
+        "ws_a",
+        None,
+        r#"{"type":"approval_resolved","approval_id":"apr_1","decision":"approved"}"#,
+    ),
+    (
+        "ws_a",
+        None,
+        r#"{"type":"approval_resolved","approval_id":"apr_2","decision":"denied"}"#,
+    ),
+    (
+        "ws_a",
+        None,
+        r#"{"type":"approval_resolved","approval_id":"apr_3","decision":"expired"}"#,
+    ),
+    (
+        "ws_a",
+        None,
+        r#"{"type":"process_started","process_id":"p1"}"#,
+    ),
+    (
+        "ws_a",
+        None,
+        r#"{"type":"process_finished","process_id":"p1","exit_code":3}"#,
+    ),
+    ("ws_a", None, r#"{"type":"model_started","model_id":"m1"}"#),
+    (
+        "ws_a",
+        None,
+        r#"{"type":"model_finished","model_id":"m1","outcome":"succeeded"}"#,
+    ),
+    (
+        "ws_a",
+        None,
+        r#"{"type":"cleanup_started","cleanup_id":"c1"}"#,
+    ),
+    (
+        "ws_a",
+        None,
+        r#"{"type":"cleanup_finished","cleanup_id":"c1","outcome":"succeeded"}"#,
+    ),
+    ("ws_b", Some("ses_9"), r#"{"type":"session_finished"}"#),
+];
+
+fn legacy(record: LegacyRecord, subject: Option<&str>) -> EventKind {
+    EventKind::LegacyV1 {
+        record,
+        subject_id: subject.map(id),
+        outcome: None,
+        decision: None,
+        exit_code: None,
+    }
+}
+
+fn legacy_outcome(record: LegacyRecord, subject: &str, outcome: Outcome) -> EventKind {
+    EventKind::LegacyV1 {
+        record,
+        subject_id: Some(id(subject)),
+        outcome: Some(outcome),
+        decision: None,
+        exit_code: None,
+    }
+}
+
+fn expected() -> Vec<(EventScope, EventKind)> {
+    let a = || EventScope::workspace(id("ws_a"));
+    let a1 = || EventScope::session(id("ws_a"), id("ses_1"));
+    vec![
+        (a1(), EventKind::SessionStarted {}),
+        (a1(), EventKind::TaskStarted { task_id: id("t1") }),
+        (
+            EventScope::workspace(id("ws_b")),
+            EventKind::TaskCompleted { task_id: id("t2") },
+        ),
+        (a(), EventKind::TaskCancelled { task_id: id("t3") }),
+        (
+            a(),
+            legacy_outcome(LegacyRecord::TaskFinished, "t4", Outcome::Failed),
+        ),
+        (
+            a1(),
+            EventKind::AgentStarted {
+                agent_id: id("omp"),
+                model: None,
+            },
+        ),
+        (
+            a1(),
+            EventKind::AgentFinished {
+                agent_id: id("omp"),
+                outcome: Outcome::Failed,
+            },
+        ),
+        (a(), legacy(LegacyRecord::ToolStarted, Some("fs.read"))),
+        (
+            a(),
+            legacy_outcome(LegacyRecord::ToolFinished, "fs.read", Outcome::Succeeded),
+        ),
+        (a(), legacy(LegacyRecord::ApprovalRequested, Some("apr_1"))),
+        (
+            a(),
+            EventKind::LegacyV1 {
+                record: LegacyRecord::ApprovalResolved,
+                subject_id: Some(id("apr_1")),
+                outcome: None,
+                decision: Some(LegacyApprovalDecision::Approved),
+                exit_code: None,
+            },
+        ),
+        (
+            a(),
+            EventKind::ApprovalDenied {
+                approval_id: id("apr_2"),
+                reason: None,
+            },
+        ),
+        (
+            a(),
+            EventKind::ApprovalExpired {
+                approval_id: id("apr_3"),
+            },
+        ),
+        (a(), legacy(LegacyRecord::ProcessStarted, Some("p1"))),
+        (
+            a(),
+            EventKind::ProcessExited {
+                process_id: id("p1"),
+                exit_code: Some(3),
+                signal: None,
+            },
+        ),
+        (a(), legacy(LegacyRecord::ModelStarted, Some("m1"))),
+        (
+            a(),
+            legacy_outcome(LegacyRecord::ModelFinished, "m1", Outcome::Succeeded),
+        ),
+        (
+            a(),
+            EventKind::CleanupStarted {
+                cleanup_id: id("c1"),
+            },
+        ),
+        (
+            a(),
+            legacy_outcome(LegacyRecord::CleanupFinished, "c1", Outcome::Succeeded),
+        ),
+        (
+            EventScope::session(id("ws_b"), id("ses_9")),
+            legacy(LegacyRecord::SessionFinished, None),
+        ),
+    ]
+}
+
+fn replay_all(log: &EventLog) -> Vec<(u64, EventScope, EventKind)> {
+    log.replay(&EventFilter::all(), Cursor::ZERO, 256)
+        .unwrap()
+        .events
+        .into_iter()
+        .map(|event| (event.cursor.get(), event.scope, event.event))
+        .collect()
+}
+
+fn assert_imported(log: &EventLog) {
+    let replayed = replay_all(log);
+    let expected = expected();
+    assert_eq!(replayed.len(), expected.len());
+    for (index, ((cursor, scope, kind), (want_scope, want_kind))) in
+        replayed.into_iter().zip(expected).enumerate()
+    {
+        assert_eq!(cursor, index as u64 + 1);
+        assert_eq!((scope, kind), (want_scope, want_kind), "row {cursor}");
+    }
+}
+
+#[test]
+fn a_v1_database_is_migrated_in_place_preserving_write_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = db_path(dir.path());
+    write_v1_database(&path, V1_ROWS);
+    let log = EventLog::open(&path, RetentionPolicy::UNBOUNDED).unwrap();
+    assert_imported(&log);
+    assert_eq!(
+        log.latest_cursor().unwrap(),
+        Cursor::new(V1_ROWS.len() as u64)
+    );
+    let next = log
+        .append(
+            EventScope::workspace(id("ws_a")),
+            common::task_started("t5"),
+        )
+        .unwrap();
+    assert_eq!(next.cursor, Cursor::new(V1_ROWS.len() as u64 + 1));
+    drop(log);
+    // The v1 table is gone and reopening does not import twice.
+    let tables: Vec<String> = rusqlite::Connection::open(&path)
+        .unwrap()
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert!(!tables.contains(&"events".to_owned()), "{tables:?}");
+    let reopened = EventLog::open(&path, RetentionPolicy::UNBOUNDED).unwrap();
+    assert_eq!(
+        reopened.latest_cursor().unwrap(),
+        Cursor::new(V1_ROWS.len() as u64 + 1)
+    );
+}
+
+#[test]
+fn a_corrupt_v1_row_fails_the_migration_and_changes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = db_path(dir.path());
+    write_v1_database(
+        &path,
+        &[
+            ("ws_a", None, r#"{"type":"task_started","task_id":"t1"}"#),
+            (
+                "ws_a",
+                None,
+                r#"{"type":"task_started","task_id":"bad id"}"#,
+            ),
+        ],
+    );
+    assert!(matches!(
+        EventLog::open(&path, RetentionPolicy::UNBOUNDED),
+        Err(aidex_events::EventError::Migration(_))
+    ));
+    let rows: i64 = rusqlite::Connection::open(&path)
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM events", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(rows, 2);
+}
+
+#[test]
+fn a_separate_v1_file_is_imported_once_read_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let legacy_path = dir.path().join("legacy.sqlite");
+    write_v1_database(&legacy_path, V1_ROWS);
+    let before = fs::read(&legacy_path).unwrap();
+
+    let log = EventLog::open(db_path(dir.path()), RetentionPolicy::UNBOUNDED).unwrap();
+    assert_eq!(
+        log.import_legacy(&legacy_path).unwrap(),
+        LegacyImport::Imported {
+            events: V1_ROWS.len() as u64
+        }
+    );
+    assert_imported(&log);
+    assert_eq!(
+        log.import_legacy(&legacy_path).unwrap(),
+        LegacyImport::AlreadyImported
+    );
+    assert_eq!(
+        fs::read(&legacy_path).unwrap(),
+        before,
+        "v1 file was modified"
+    );
+
+    // A log that already has its own history never imports, to keep cursor order honest.
+    let other =
+        EventLog::open(dir.path().join("other.sqlite3"), RetentionPolicy::UNBOUNDED).unwrap();
+    other
+        .append(EventScope::global(), EventKind::DriveSafeToRemove {})
+        .unwrap();
+    assert_eq!(
+        other.import_legacy(&legacy_path).unwrap(),
+        LegacyImport::SkippedNonEmpty
+    );
+    assert_eq!(other.latest_cursor().unwrap(), Cursor::new(1));
+
+    // Something that is not a v1 log is refused.
+    assert!(matches!(
+        other.import_legacy(&db_path(dir.path())),
+        Err(aidex_events::EventError::Migration(_))
+    ));
+}

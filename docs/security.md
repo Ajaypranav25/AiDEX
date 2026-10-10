@@ -48,6 +48,10 @@ See `crates/sandbox/README.md` for the full enforcement matrix and limitations.
 
 This is a decision engine only. No execution broker routes or enforces agent actions yet, approvals are not persisted or exposed through the CLI, and decisions are not yet audit events; those land with the broker work for issue #17. The shell classifier is a conservative heuristic, and network destinations are classified before DNS resolution, so enforcement must still re-check resolved addresses and rely on the sandbox.
 
+## Event redaction (implemented)
+
+- Events (`aidex-events`) reference secrets by handle and name only. Every free-text event field is passed through `redact_text` (provider tokens, JWTs, bearer/authorization credentials, PEM private keys, URL passwords, password/token/secret/key assignments) and bounded before it is stored or streamed, and an identifier that looks like a credential refuses the event. Redaction is pattern based and is a last line of defence, not a substitute for keeping secret values out of events. The event log is not yet encrypted at rest.
+
 ## Workspace confinement
 
 `aidex-workspace` confines workspace-relative paths in-process (for the tools and apply logic that use it). Workspace roots are only directories the user explicitly selected (never the drive, a directory containing it, or AiDEX-managed directories) or directories AiDEX created on the drive. `ConfinedRoot::resolve` rejects traversal, absolute, drive-letter, and UNC paths, alternate data streams, and Windows reserved or aliasing names; it follows a symbolic link or junction only when the resolved target stays inside the root and fails closed on dangling or looping links. Ephemeral copies are applied only after review, per selected file, with conflict detection and a review digest; deletion is limited to marker-verified, AiDEX-created directories, and host data is never deleted. Resolution is a point-in-time check rather than OS-enforced isolation: a process that can modify the workspace concurrently can race it (TOCTOU), and containing untrusted processes is `aidex-sandbox`'s job (not yet wired to workspaces).
