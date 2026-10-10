@@ -6,7 +6,9 @@
 > pre-release until that review is complete (issue #13 acceptance criterion).
 
 This document is normative for `aidex-vault` format version 1. Any change to a byte
-layout, label, or validation rule requires a new format version.
+layout, label, or cryptographic validation rule requires a new format version.
+Operational resource-admission budgets may tighten without changing the byte format;
+an otherwise well-formed header exceeding the current KDF budget is refused.
 
 ## Directory layout
 
@@ -164,8 +166,11 @@ across replacements while `revision` and `blob` change on every write.
 3. `format` must be `aidex-vault`; an unknown `format_version` is
    `UnsupportedVersion` and is checked before strict parsing.
 4. Strict structural parsing (`CorruptHeader`): one passphrase slot with Argon2id
-   parameters inside the accepted bounds (m ≤ 1 GiB, t ≤ 64, p ≤ 16, m ≥ 8·p KiB),
-   at most one HKDF recovery slot, exact salt/nonce/key/MAC lengths.
+   parameters inside the accepted bounds (8·p KiB ≤ m ≤ 64 MiB, 1 ≤ t ≤ 3,
+   1 ≤ p ≤ 4), at most one HKDF recovery slot, exact salt/nonce/key/MAC lengths.
+   These unauthenticated limits cap one unlock at the default memory/work budget;
+   headers above them are refused before deriving a key, even if an older version
+   accepted their parameters.
 
 `unlock`:
 

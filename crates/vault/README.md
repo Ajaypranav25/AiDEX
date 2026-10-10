@@ -80,6 +80,9 @@ Types:
 - No API returns a secret value except handle resolution for an allowed consumer.
 - Revoked and expired handles are pruned before capacity checks, so revocation
   immediately makes room for replacements without extending an old handle's life.
+- Unauthenticated KDF parameters are capped at 64 MiB, three Argon2id iterations,
+  and four lanes. Headers above that budget are rejected before key derivation,
+  including vaults created with previously accepted oversized parameters.
 
 ## Limitations
 
