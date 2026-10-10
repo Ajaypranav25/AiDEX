@@ -210,7 +210,7 @@ pub(crate) fn by_name(
 
 pub(crate) fn list(connection: &Connection) -> Result<Vec<Record>, WorkspaceError> {
     let mut statement = connection.prepare(&format!(
-        "SELECT {COLUMNS} FROM workspaces ORDER BY created_at, id"
+        "SELECT {COLUMNS} FROM workspaces ORDER BY created_at, rowid"
     ))?;
     let rows = statement.query_map([], decode)?;
     let mut records = Vec::new();

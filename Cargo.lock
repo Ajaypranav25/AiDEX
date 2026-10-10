@@ -62,6 +62,7 @@ dependencies = [
  "aidex-drive",
  "aidex-events",
  "aidex-host",
+ "aidex-sessions",
  "aidex-vault",
  "aidex-workspace",
  "aidexd",
@@ -171,6 +172,16 @@ name = "aidex-sessions"
 version = "0.1.0"
 dependencies = [
  "aidex-core",
+ "aidex-drive",
+ "aidex-events",
+ "aidex-storage",
+ "gethostname",
+ "getrandom",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
 ]
 
 [[package]]
@@ -179,6 +190,28 @@ version = "0.1.0"
 dependencies = [
  "rusqlite",
  "sha2",
+ "tempfile",
+]
+
+[[package]]
+name = "aidex-tools"
+version = "0.1.0"
+dependencies = [
+ "aidex-core",
+ "aidex-events",
+ "aidex-policy",
+ "aidex-sandbox",
+ "aidex-tools",
+ "aidex-workspace",
+ "globset",
+ "ignore",
+ "regex",
+ "schemars",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "sha2",
+ "similar",
  "tempfile",
 ]
 
@@ -224,6 +257,7 @@ dependencies = [
  "aidex-drive",
  "aidex-events",
  "aidex-host",
+ "aidex-sessions",
  "aidex-vault",
  "aidex-workspace",
  "getrandom",
@@ -639,6 +673,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gethostname"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bd49230192a3797a9a4d6abe9b3eed6f7fa4c8a8a4947977c6f80025f92cbd8"
+dependencies = [
+ "rustix",
+ "windows-link 0.2.1",
+]
+
+[[package]]
 name = "getrandom"
 version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -946,6 +990,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c"
 
 [[package]]
+name = "regex"
+version = "1.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f020237b6c8eed93db2e2cb53c00c60a8e1bc73da7d073199a1180401450218d"
+dependencies = [
+ "aho-corasick",
+ "memchr",
+ "regex-automata",
+ "regex-syntax",
+]
+
+[[package]]
 name = "regex-automata"
 version = "0.4.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1095,6 +1151,17 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
+]
+
+[[package]]
+name = "serde_path_to_error"
+version = "0.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10a9ff822e371bb5403e391ecd83e182e0e77ba7f6fe0160b795797109d1b457"
+dependencies = [
+ "itoa",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]

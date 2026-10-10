@@ -8,10 +8,12 @@
 
 use crate::{
     errors::{ErrorCode, RpcError},
+    methods::record_event,
     router::{Router, RouterError},
     rpc::{expect_no_params, to_result},
     services::Services,
 };
+use aidex_events::{EventKind, EventScope};
 use aidex_vault::{
     ConsumerScope, RecoveryKey, SecretBytes, SecretKind, SecretName, SecretPolicy, SecretString,
     VaultError, VaultErrorKind,
@@ -186,6 +188,13 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
             .vault()
             .init(&passphrase, params.recovery)
             .map_err(|error| vault_error(&error))?;
+        record_event(
+            &shared,
+            EventScope::global(),
+            EventKind::VaultUnlocked {
+                vault_id: outcome.vault_id.clone(),
+            },
+        )?;
         to_result(&InitResult {
             state: VaultState::Unlocked,
             vault_id: outcome.vault_id.to_string(),
@@ -214,13 +223,30 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
             }
         }
         .map_err(|error| vault_error(&error))?;
+        if let Some(vault_id) = &status.vault_id {
+            record_event(
+                &shared,
+                EventScope::global(),
+                EventKind::VaultUnlocked {
+                    vault_id: vault_id.clone(),
+                },
+            )?;
+        }
         to_result(&status)
     })?;
 
     let shared = Arc::clone(services);
     router.register(LOCK, move |_context, params| {
         expect_no_params(&params)?;
+        let vault_id = shared.vault().status().vault_id;
         let outcome = shared.vault().lock();
+        if let (true, Some(vault_id)) = (outcome.was_unlocked, vault_id) {
+            record_event(
+                &shared,
+                EventScope::global(),
+                EventKind::VaultLocked { vault_id },
+            )?;
+        }
         to_result(&LockResult {
             state: shared.vault().status().state,
             was_unlocked: outcome.was_unlocked,
