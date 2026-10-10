@@ -119,6 +119,8 @@ durable unless marked *ephemeral*.
 | `remote.disconnected` | `device_id: id`, `reason: text?` |
 | `daemon.started` | `pid: u32`, `version: text` |
 | `daemon.stopping` | `reason: requested\|drive_removed` |
+| `emergency.stopped` | `reason: text`, `cancelled_approvals: u64`, `revoked_approvals: u64`, `terminated_processes: u64`, `revoked_handles: u64` |
+| `emergency.resumed` | — |
 | `extension.enabled` / `disabled` | `extension_id: id`, `kind: skill\|mcp\|plugin\|agent` |
 | `update.staged` | `update_id: id`, `version: text`, `target: text` |
 | `update.verified` | `update_id: id`, `version: text`, `signer_key_id: text?` (`null` only for an unsigned bundle accepted by the development opt-in), `unsigned_allowed: bool` |

@@ -11,6 +11,7 @@ mod models;
 pub use models::{EventsModelObserver, ModelServices, VaultCredentials, model_event_kind};
 
 use crate::{endpoint, lifecycle::ShutdownSignal};
+use aidex_broker::{Broker, BrokerConfig};
 use aidex_context::ContextService;
 use aidex_core::ServiceErrorCode;
 use aidex_drive::DrivePaths;
@@ -58,6 +59,7 @@ pub struct Services {
     events: EventLog,
     vault: Arc<VaultService>,
     workspaces: Arc<WorkspaceRegistry>,
+    broker: Arc<Broker>,
     models: ModelServices,
     sessions: Arc<SessionStore>,
     session_recovery: RecoveryReport,
@@ -112,10 +114,14 @@ impl Services {
                 ServicesError::new("workspace", error.code(), error.to_string())
             })?);
         let vault = Arc::new(vault);
-        // Model notifications are recorded as typed `model.*` events.
+        let broker = open_broker(&paths, &events, &workspaces, &vault)?;
+        spawn_approval_expiry(&broker, &shutdown);
+        // Model notifications are recorded as typed `model.*` events; remote provider
+        // calls and their credentials pass the broker's policy.
         let models = ModelServices::open(
             &paths,
             Arc::clone(&vault),
+            Arc::clone(&broker),
             Arc::new(EventsModelObserver::new(Arc::new(events.clone()))),
         )?;
         let (sessions, session_recovery) = open_sessions(&paths, &events)?;
@@ -146,6 +152,7 @@ impl Services {
             events,
             vault,
             workspaces,
+            broker,
             models,
             sessions: Arc::new(sessions),
             session_recovery,
@@ -194,6 +201,12 @@ impl Services {
     /// Workspace registry and confinement (`aidex-workspace`).
     pub fn workspaces(&self) -> &WorkspaceRegistry {
         &self.workspaces
+    }
+
+    /// The execution broker (`aidex-broker`): tool execution for `tool.*`,
+    /// broker approvals, policy settings, model egress, and emergency stop.
+    pub fn broker(&self) -> &Arc<Broker> {
+        &self.broker
     }
 
     /// Model providers, the router, and the offline switch
@@ -264,6 +277,49 @@ fn open_updates(
     Updater::for_host(paths.clone(), config)
         .map(|updater| Arc::new(updater.with_events(sink)))
         .map_err(|error| error.to_string())
+}
+
+/// How often pending approvals are checked for expiry.
+const APPROVAL_EXPIRY_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Compose the execution broker over the drive: approvals in `private_sessions/`,
+/// settings in `private_config/policy.toml`, policy documents in `policies/`, the
+/// sandbox helper next to the daemon executable, and the drive vault.
+fn open_broker(
+    paths: &DrivePaths,
+    events: &EventLog,
+    workspaces: &Arc<WorkspaceRegistry>,
+    vault: &Arc<VaultService>,
+) -> Result<Arc<Broker>, ServicesError> {
+    let broker_error = |error: aidex_broker::BrokerError| {
+        ServicesError::new("broker", error.code(), error.to_string())
+    };
+    let config = BrokerConfig::for_drive(paths).map_err(broker_error)?;
+    let sink: Arc<dyn EventSink> = Arc::new(events.clone());
+    let broker = Broker::builder(config, Arc::clone(workspaces) as _, sink)
+        .vault(Arc::clone(vault))
+        .open()
+        .map_err(broker_error)?;
+    Ok(Arc::new(broker))
+}
+
+/// Expire due approvals in the background until shutdown (or the broker is gone).
+fn spawn_approval_expiry(broker: &Arc<Broker>, shutdown: &ShutdownSignal) {
+    let broker = Arc::downgrade(broker);
+    let shutdown = shutdown.clone();
+    // Expiry is also enforced when an approval is resolved, so a failed spawn only
+    // delays `approval.expired` events.
+    let _ = std::thread::Builder::new()
+        .name("aidexd-approval-expiry".into())
+        .spawn(move || {
+            while !shutdown.is_requested() {
+                std::thread::sleep(APPROVAL_EXPIRY_INTERVAL);
+                let Some(broker) = broker.upgrade() else {
+                    break;
+                };
+                let _ = broker.expire_due();
+            }
+        });
 }
 
 /// Open the session store with the drive event log as its sink, then recover from an

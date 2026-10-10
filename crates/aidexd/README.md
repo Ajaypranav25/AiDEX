@@ -102,7 +102,22 @@ handlers without sockets.
 ## Limitations
 
 - Methods: `daemon.status|ping|stop`, `events.replay|latest|subscribe`, `workspace.*`,
-  `vault.*`, `model.*`, `provider.*`, `network.*`, and `update.status|check|apply|rollback` exist; additional domains are future work.
+  `vault.*`, `model.*`, `provider.*`, `network.*`, and `update.status|check|apply|rollback`
+  exist, plus the broker's
+  `tool.list|invoke|continue`, `broker.approval.list|show|resolve|revoke`,
+  `policy.show|profile.set|reload|explain`, and `emergency.stop|resume`; additional
+  domains are future work.
+- `Services::broker()` returns the `Arc<aidex_broker::Broker>` composed over the drive
+  (approvals in `private_sessions/approvals.sqlite3`, settings in
+  `private_config/policy.toml`, documents in `policies/`, sandbox scratch in
+  `tmp/broker/`, the helper `aidex-sandbox-exec` next to the daemon, the drive vault).
+  A background thread expires due approvals every 500 ms; `session.cancel` also
+  cancels the session's calls and approvals; daemon stop and drive removal terminate
+  every managed process. Every IPC client acts as the local user. Remote provider
+  calls pass the broker's `ModelEgress` gate (offline switch, emergency stop,
+  `model.invoke` policy); vault-backed provider credentials go through it too
+  (`secret.use`, audited 30 s handles), while `aidex-auth` account sign-ins resolve
+  through `AuthService` (`BrokeredCredentials`).
 - The event log is `DrivePaths::sessions()/events.sqlite3` (100 000 events, 90
   days). PR #40's `.aidex/runtime/events.sqlite` is superseded: it is imported once,
   read-only, into an empty new log and then left untouched (safe to delete).

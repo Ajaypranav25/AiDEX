@@ -270,6 +270,7 @@ impl Daemon {
                 error.to_string(),
             )));
         }
+        let broker = Arc::clone(self.services.broker());
         let native = self.services.native().clone();
         let inference = self.services.inference().clone();
         drop(self.services);
@@ -289,6 +290,8 @@ impl Daemon {
                         native.shutdown();
                         let _ = inference.shutdown();
                         record_stopping(&events, outcome);
+                        // No tool process outlives the daemon (or the drive).
+                        broker.shutdown_processes(matches!(outcome, Ok(StopReason::DriveRemoved)));
                     },
                 );
                 let _ = inference.shutdown();

@@ -316,6 +316,21 @@ pub enum EventKind {
     #[serde(rename = "daemon.stopping")]
     DaemonStopping { reason: DaemonStopReason },
 
+    // --- emergency.* (scope: global; spec §48) ---
+    /// An emergency stop froze tool execution, cancelled approvals, terminated
+    /// managed processes, and revoked secret handles.
+    #[serde(rename = "emergency.stopped")]
+    EmergencyStopped {
+        reason: String,
+        cancelled_approvals: u64,
+        revoked_approvals: u64,
+        terminated_processes: u64,
+        revoked_handles: u64,
+    },
+    /// Tool execution resumed after an emergency stop.
+    #[serde(rename = "emergency.resumed")]
+    EmergencyResumed {},
+
     // --- extension.* ---
     #[serde(rename = "extension.enabled")]
     ExtensionEnabled {
@@ -454,6 +469,8 @@ pub const EVENT_NAMES: &[&str] = &[
     "remote.disconnected",
     "daemon.started",
     "daemon.stopping",
+    "emergency.stopped",
+    "emergency.resumed",
     "extension.enabled",
     "extension.disabled",
     "update.staged",
@@ -535,6 +552,8 @@ impl EventKind {
             Self::RemoteDisconnected { .. } => "remote.disconnected",
             Self::DaemonStarted { .. } => "daemon.started",
             Self::DaemonStopping { .. } => "daemon.stopping",
+            Self::EmergencyStopped { .. } => "emergency.stopped",
+            Self::EmergencyResumed {} => "emergency.resumed",
             Self::ExtensionEnabled { .. } => "extension.enabled",
             Self::ExtensionDisabled { .. } => "extension.disabled",
             Self::UpdateStaged { .. } => "update.staged",

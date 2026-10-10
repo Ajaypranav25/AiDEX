@@ -81,6 +81,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "aidex-broker"
+version = "0.1.0"
+dependencies = [
+ "aidex-broker",
+ "aidex-core",
+ "aidex-drive",
+ "aidex-events",
+ "aidex-policy",
+ "aidex-providers",
+ "aidex-sandbox",
+ "aidex-tools",
+ "aidex-vault",
+ "aidex-workspace",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
 name = "aidex-bundle"
 version = "0.1.0"
 dependencies = [
@@ -439,6 +461,7 @@ version = "0.1.0"
 dependencies = [
  "aidex-adapters",
  "aidex-auth",
+ "aidex-broker",
  "aidex-bundle",
  "aidex-context",
  "aidex-core",
@@ -448,11 +471,13 @@ dependencies = [
  "aidex-host",
  "aidex-inference",
  "aidex-native-sessions",
+ "aidex-policy",
  "aidex-preferences",
  "aidex-providers",
  "aidex-router",
  "aidex-sandbox",
  "aidex-sessions",
+ "aidex-tools",
  "aidex-updater",
  "aidex-vault",
  "aidex-workspace",

@@ -6,14 +6,18 @@ use crate::commands::{
     session::SessionArgs, update::UpdateArgs, vault::VaultCommand, workspace::WorkspaceArgs,
 };
 use crate::commands::{
+    approvals::{ApprovalsArgs, ApprovalsCommand, ApproveArgs, DenyArgs},
     context::{
         index::IndexArgs, memory::MemoryArgs, pack::ContextArgs, rules::RulesArgs,
         search::SearchArgs,
     },
+    emergency::{ResumeArgs, StopArgs},
     inference::InferenceArgs,
     model::ModelArgs,
     offline::OfflineArgs,
+    policy::PolicyArgs,
     provider::ProviderArgs,
+    tools::ToolsArgs,
 };
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -95,6 +99,22 @@ pub enum Commands {
     /// Inspect durable sessions, checkpoints, and resume plans.
     #[command(alias = "sessions")]
     Session(SessionArgs),
+    /// List and inspect the broker's approval requests (default: list).
+    #[command(alias = "approval")]
+    Approvals(ApprovalsArgs),
+    /// Approve a pending request after reviewing its card (asks unless --yes).
+    Approve(ApproveArgs),
+    /// Deny a pending request.
+    Deny(DenyArgs),
+    /// Show or change the active policy, or explain a tool call without running it.
+    Policy(PolicyArgs),
+    /// List the tools the broker mediates.
+    #[command(alias = "tool")]
+    Tools(ToolsArgs),
+    /// Emergency stop: freeze tools, cancel approvals, kill managed processes.
+    Stop(StopArgs),
+    /// Resume tool execution after an emergency stop.
+    Resume(ResumeArgs),
     /// Build, inspect, or cancel the workspace's local search index.
     Index(IndexArgs),
     /// Search the workspace index offline (full text, file names, or symbols).
@@ -132,6 +152,13 @@ impl Commands {
             Some(Self::Provider(args)) => args.command.label(),
             Some(Self::Offline(args)) => args.command.label(),
             Some(Self::Session(args)) => args.command.label(),
+            Some(Self::Approvals(args)) => ApprovalsCommand::label(args.command.as_ref()),
+            Some(Self::Approve(_)) => "aidex approve",
+            Some(Self::Deny(_)) => "aidex deny",
+            Some(Self::Policy(args)) => args.command.label(),
+            Some(Self::Tools(args)) => args.command.label(),
+            Some(Self::Stop(_)) => "aidex stop",
+            Some(Self::Resume(_)) => "aidex resume",
             Some(Self::Index(args)) => args.command.label(),
             Some(Self::Search(args)) => args.label(),
             Some(Self::Context(args)) => args.command.label(),

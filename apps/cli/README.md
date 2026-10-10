@@ -37,6 +37,10 @@ bun run dev:cli -- vault lock --drive /path/to/drive
 bun run dev:cli -- daemon stop --drive /path/to/drive
 bun run dev:cli -- workspace add ~/src/project --name project --drive /path/to/drive
 bun run dev:cli -- workspace ephemeral create project --drive /path/to/drive
+bun run dev:cli -- approvals --pending --drive /path/to/drive
+bun run dev:cli -- approve apr_01J... --drive /path/to/drive
+bun run dev:cli -- policy explain --tool fs.delete --input '{"path":"build"}' --drive /path/to/drive
+bun run dev:cli -- stop --emergency --lock-vault --drive /path/to/drive
 bun run dev:cli -- index build --workspace project --drive /path/to/drive
 bun run dev:cli -- search --symbol parse_config --drive /path/to/drive
 bun run dev:cli -- context pack "fix the login timeout" --budget 8000 --drive /path/to/drive
@@ -77,6 +81,14 @@ bun run login:omp
 - `discover <PATH>` reports the enclosing Git repository and nested repositories (bounded scan, links not followed).
 - `ephemeral create <SOURCE>` copies a workspace (honouring `.gitignore`, skipping `.git/` and `.aidex/`, never following links); `ephemeral review <ID>` lists added/modified/deleted files with conflicts and unified diffs; `ephemeral apply <ID> [--path P ...]` re-reviews, shows the changes, asks for confirmation, and applies only the selected non-conflicting files, refusing if the workspace changed since that review (exit 1 when any selected change was skipped or failed); `ephemeral discard <ID>` deletes only the ephemeral directory.
 - `remove --delete-data`, `ephemeral apply`, and `ephemeral discard` need `--yes` or an interactive confirmation; without a terminal (or with `--json`) and without `--yes` they refuse with exit 2 and change nothing. Declining the prompt exits 9.
+
+The execution broker's commands (all with `--drive PATH` and `--json`):
+
+- `aidex approvals [list] [--pending | --state STATE] [--session ID] [--limit N]` lists approval requests newest first (state, tool, summary, expiry, grant status). `aidex approvals show <ID>` renders the card: who asks, the request, its effect (for example "Writes 3 files in workspace demo: +12 −4" or "Uploads local commits on branch main to remote origin (...)"), workspace, session, risk and minimum sandbox, the deciding policy rule, the redacted command, targets, secret names (never values), scope options (`once`, `session` when offered, with what a session grant covers), expiry, and the redacted diff. `aidex approvals revoke <ID> [--reason TEXT]` revokes a pending request, an approved call that has not run, or a session grant.
+- `aidex approve <ID> [--session] [--yes]` shows the card and asks `Approve once? [y/N]`; any answer but `y`/`yes` (including Enter) denies the request. Without a terminal, or with `--json`, approving needs `--yes` and otherwise exits 2 without changing anything. `--session` is accepted only when the card offers it. `aidex deny <ID>` denies without a prompt. Approving does not run anything by itself: the requester (the harness, or `tool.continue` for local invocations) continues the call, which the broker re-plans and refuses if the intent changed.
+- `aidex policy show` prints the profile, privacy mode, host trust, and network mode (requested and effective), loaded policy documents (or why they failed: every call is then denied), hard rules, and whether an emergency stop is in effect. `aidex policy profile <safe|balanced|autonomous|offline-secure>` switches the profile (recorded as `policy.changed`); `aidex policy reload` re-reads `policies/*.toml`. `aidex policy explain --tool T [--input JSON] [--workspace W] [--session S] [--as-user]` plans the call and prints the decision per intent without running it, creating an approval, or recording events.
+- `aidex tools list` prints every registered tool with its action, base risk, and effects.
+- `aidex stop --emergency [--lock-vault] [--reason TEXT]` freezes tool execution, cancels pending approvals, revokes unused approvals and session grants, terminates every managed process, and revokes secret handles (optionally locking the vault); it exits 1 if a process could not be confirmed terminated. `aidex resume` lifts the stop; cancelled approvals must be requested again. While stopped, tool requests fail with exit 6 (`policy_denied`).
 
 Repository context commands use the daemon's `context.*`, `memory.*`, and `rules.show` methods. Each accepts `--workspace ID|NAME` (default: the selected workspace; none selected is exit 2), `--drive PATH`, and `--json`:
 

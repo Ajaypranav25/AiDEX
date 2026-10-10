@@ -5,6 +5,7 @@ members = [
     "crates/aidex-cli",
     "crates/adapters",
     "crates/auth",
+    "crates/broker",
     "crates/bundle",
     "crates/launcher",
     "crates/packager",

@@ -6,9 +6,11 @@
 //! emit `<domain>.event` notifications), and keeps domain logic in its crate.
 //! Add one `pub mod` line and one `register` line below per domain.
 
+pub mod approvals;
 pub mod auth;
 pub mod context;
 pub mod daemon;
+pub mod emergency;
 pub mod events;
 pub mod inference;
 pub mod memory;
@@ -16,8 +18,10 @@ pub mod models;
 pub mod native;
 pub mod native_history;
 pub mod native_view;
+pub mod policy;
 pub mod sessions;
 pub mod settings;
+pub mod tools;
 pub mod update;
 pub mod vault;
 pub mod workspace;
@@ -64,16 +68,20 @@ pub(crate) fn register_all(
     router: &mut Router,
     services: &Arc<Services>,
 ) -> Result<(), RouterError> {
+    approvals::register(router, services)?;
     context::register(router, services)?;
     auth::register(router, services)?;
     inference::register(router, services)?;
     native::register(router, services)?;
     settings::register(router, services)?;
     daemon::register(router, services)?;
+    emergency::register(router, services)?;
     events::register(router, services)?;
     memory::register(router, services)?;
     models::register(router, services)?;
+    policy::register(router, services)?;
     sessions::register(router, services)?;
+    tools::register(router, services)?;
     update::register(router, services)?;
     vault::register(router, services)?;
     workspace::register(router, services)?;
