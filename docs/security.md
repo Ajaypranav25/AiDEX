@@ -33,6 +33,12 @@ These properties are requirements from the product specification, not current im
 
 See `crates/sandbox/README.md` for the full enforcement matrix and limitations.
 
+## Bundle integrity (implemented) and signatures (not yet)
+
+The drive-root launcher verifies before it executes: the drive manifest (closed schema), the `app/current.json` pointer (which cannot leave `app/versions/` and pins the SHA-256 of the selected `bundle.json`), the manifest itself (closed schema, host target, version, drive schema, no host extraction), and the size and SHA-256 of every critical binary, refusing symbolic links, junctions, and unlisted files beside the binaries. Any mismatch stops the launch with exit code 11 and nothing runs. Installation verifies everything before committing, switches the pointer atomically, and never overwrites a drive-root file that is not an AiDEX launcher.
+
+This is integrity, not authenticity. Nothing is signed: someone who can write to the drive can replace the launcher or rewrite the pointer and manifests, and a concurrent writer could swap a file between its check and its execution. Windows also loads the launcher's DLL imports from the drive root before any check runs. Signed manifests with a trust anchor outside the drive, SBOMs, and downgrade protection are issue #27.
+
 ## Policy evaluation (implemented) and enforcement (not yet)
 
 `crates/policy` (`aidex-policy`) implements deterministic policy evaluation: agents' requests are normalized into intents carrying broker-computed facts, and evaluation returns allow, deny, sandbox, rate-limit, or approval with the deciding rule and a human-readable effect summary. Hard safety rules (disk formatting, raw drive writes, credential export, secret dumping, deleting root/home/system directories, vault modification, broker disabling, AiDEX-protected paths) deny unconditionally, including when a shell command implies them; policy changes and destructive commands always need one-time approval. Any layer deny wins; otherwise the most specific layer, then the active profile, then deny-by-default decides. Privacy mode, network mode, host trust, and repository project rules can only tighten a decision. Policy files are closed-schema TOML and fail closed when malformed. Intent fingerprints let approvals bind to the exact intent.
