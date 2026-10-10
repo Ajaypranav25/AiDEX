@@ -4,8 +4,8 @@
 
 The Cargo workspace contains only code that has a concrete implementation today:
 
-- `aidex-core` owns small cross-domain value types (`EntityId`), with no domain or platform dependencies.
-- `aidex-drive` validates portable relative paths, defines the schema-v1 root-level `aidex-drive.json` manifest, and provides safe init/status operations that create only manifest-declared directories.
+- `aidex-core` owns small cross-domain value types and the versioned contract DTOs: `EntityId` (with `EntityId::generate(prefix)` for prefixed ULIDs from the OS RNG), `Timestamp` (with `Timestamp::now()` and chronological ordering), `WorkspacePath`, `SecretRef`, and `ServiceError`. It has no domain or platform dependencies.
+- `aidex-drive` validates portable relative paths, defines the schema-v2 root-level `aidex-drive.json` manifest (with an explicit, backed-up migration from v1), provides safe init/status operations that create only manifest-declared directories, and exposes `DrivePaths`, the resolver services use for their drive directories.
 - `aidex-host` reports compile-time platform identifiers and best-effort process paths; it does not discover hardware or configure the operating system.
 - `aidex-events` defines versioned typed workspace/session transitions with SQLite persistence, ordered cursors, explicit retention gaps, and bounded subscriptions. `aidexd` serves authenticated bounded replay requests from the selected drive's event database; `aidex events --follow` reconnects from its last flushed cursor.
 - `aidex-storage` uses embedded SQLite for transactional state (WAL, full synchronous commits, schema versioning, and one-time import of legacy file values) and SHA-256-addressed files for large artifacts. SQLite provides atomic metadata transactions without a service; blobs are synced before atomic rename and verified on read. Managed paths reject symlink traversal. This local persistence is not encrypted.
@@ -14,7 +14,7 @@ The Cargo workspace contains only code that has a concrete implementation today:
 
 The daemon uses `aidex-drive` for the selected root. The CLI links the daemon IPC client and exposes `aidex daemon start|status|stop`; the daemon executable remains the lifecycle owner.
 
-Dependency direction is inward toward small shared primitives: `aidex-core` has no dependencies; `aidex-sessions` may depend on `aidex-core`; `aidex-storage` depends on embedded SQLite and SHA-256 primitives; and `aidexd` composes infrastructure crates. Domain crates should depend on lower-level contracts, never on the executable or UI. Avoid cycles; express cross-domain events at domain boundaries.
+Dependency direction is inward toward small shared primitives: `aidex-core` has no AiDEX dependencies; `aidex-drive` depends only on `aidex-core`; `aidex-sessions` may depend on `aidex-core`; `aidex-storage` depends on embedded SQLite and SHA-256 primitives; and `aidexd` composes infrastructure crates. Domain crates should depend on lower-level contracts, never on the executable or UI. Avoid cycles; express cross-domain events at domain boundaries.
 
 ## Requested future domains (not Cargo packages yet)
 

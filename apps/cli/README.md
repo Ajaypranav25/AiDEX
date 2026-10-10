@@ -31,7 +31,7 @@ bun run dev:cli -- run "Explain this repository"
 bun run login:omp
 ```
 
-`aidex init --drive PATH` requires an existing removable-drive root, verifies writability and at least 10 MiB free space, then idempotently creates only the directories listed by `aidex-drive.json`. It never formats a drive or replaces existing files. The root-level `aidex-drive.json` is the canonical schema-v1 JSON manifest; malformed and unsupported manifests are reported and left untouched.
+`aidex init --drive PATH` requires an existing removable-drive root, verifies writability and at least 10 MiB free space, then idempotently creates only the directories listed by `aidex-drive.json`. It never formats a drive or replaces existing files. The root-level `aidex-drive.json` is the canonical schema-v2 JSON manifest. A valid schema-v1 manifest is migrated explicitly, with the original kept as `aidex-drive.v1.json`; malformed and unsupported manifests are reported and left untouched.
 
 `aidex status [--drive PATH]` reads drive health without creating directories or repairing the manifest. Without `--drive`, status and doctor use `AIDEX_DRIVE_ROOT`, which a portable launcher can set. Status reports the resolved root, manifest schema version, writability, and available space; a missing or invalid manifest is an error. Doctor retains its host and Oh My Pi checks and adds actionable active-drive health output.
 
