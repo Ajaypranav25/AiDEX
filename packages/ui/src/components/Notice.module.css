@@ -1,0 +1,63 @@
+.notice {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--aidex-space-3);
+  color: var(--aidex-color-text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+}
+
+.body {
+  min-width: 0;
+}
+
+.info .icon {
+  color: var(--aidex-color-text-muted);
+}
+
+.success .icon {
+  color: var(--aidex-color-accent);
+}
+
+.warning .icon {
+  color: var(--aidex-color-warning);
+}
+
+.danger {
+  color: var(--aidex-color-danger);
+}
+
+.danger .icon {
+  color: var(--aidex-color-danger);
+}
+
+.banner {
+  padding: var(--aidex-space-3) var(--aidex-space-4);
+  border: 1px solid var(--aidex-color-border);
+  border-radius: var(--aidex-radius-md);
+  background: var(--aidex-color-surface-raised);
+}
+
+.banner.success {
+  border-color: var(--aidex-color-accent-subtle-border);
+  background: var(--aidex-color-accent-soft);
+  color: var(--aidex-color-text);
+}
+
+.banner.warning {
+  border-color: color-mix(in srgb, var(--aidex-color-warning) 40%, transparent);
+  background: color-mix(in srgb, var(--aidex-color-warning) 8%, transparent);
+  color: var(--aidex-color-text);
+}
+
+.banner.danger {
+  border-color: color-mix(in srgb, var(--aidex-color-danger) 45%, transparent);
+  background: color-mix(in srgb, var(--aidex-color-danger) 8%, transparent);
+}

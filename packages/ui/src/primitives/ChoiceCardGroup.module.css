@@ -147,3 +147,28 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Rows: a ruled list (shared with CheckboxGroup) instead of bordered cards. */
+.rows .options {
+  gap: 0;
+  border-top: 1px solid var(--aidex-color-border-subtle);
+}
+
+.rows .card,
+.rows .checked,
+.rows .checked:hover {
+  align-items: center;
+  padding: var(--aidex-space-4) var(--aidex-space-1);
+  border: 0;
+  border-bottom: 1px solid var(--aidex-color-border-subtle);
+  border-radius: 0;
+  background: transparent;
+}
+
+.rows .card:hover {
+  background: color-mix(in srgb, var(--aidex-color-text) 3%, transparent);
+}
+
+.rows .meta {
+  white-space: nowrap;
+}

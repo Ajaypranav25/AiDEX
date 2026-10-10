@@ -21,6 +21,8 @@ export type ChoiceCardGroupProps<Value extends string> = {
   value: Value;
   onValueChange: (value: Value) => void;
   columns?: 1 | 2 | 3;
+  /** `cards` are bordered tiles; `rows` are a ruled list for compact forms. */
+  variant?: "cards" | "rows";
   className?: string;
 };
 
@@ -32,11 +34,12 @@ export function ChoiceCardGroup<Value extends string>({
   value,
   onValueChange,
   columns = 1,
+  variant = "cards",
   className,
 }: ChoiceCardGroupProps<Value>) {
   const name = useId();
   return (
-    <fieldset className={cx(styles.group, className)}>
+    <fieldset className={cx(styles.group, variant === "rows" && styles.rows, className)}>
       <legend className={labelVisibility === "visible" ? cx(fieldStyles.label, styles.legend) : fieldStyles.visuallyHidden}>
         {label}
       </legend>
