@@ -139,7 +139,7 @@ pub(crate) fn import(
     };
     files::write_json(&stage.0.join("model.json"), &model)?;
     files::check_cancel(cancel)?;
-    fs::rename(&stage.0, &target)?;
+    files::rename(&stage.0, &target)?;
     Ok(model)
 }
 pub(crate) fn remove(paths: &DrivePaths, id: &str) -> Result<(), InferenceError> {
