@@ -153,3 +153,7 @@ impl JsonSchema for EntityId {
         String::json_schema(generator)
     }
 }
+
+#[cfg(test)]
+#[path = "id_tests.rs"]
+mod tests;

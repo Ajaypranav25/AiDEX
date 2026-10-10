@@ -236,3 +236,7 @@ impl JsonSchema for Timestamp {
         String::json_schema(generator)
     }
 }
+
+#[cfg(test)]
+#[path = "time_tests.rs"]
+mod tests;
