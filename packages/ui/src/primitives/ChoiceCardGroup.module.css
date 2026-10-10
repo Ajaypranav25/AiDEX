@@ -1,5 +1,6 @@
 .group {
   min-width: 0;
+  container-type: inline-size;
   margin: 0;
   padding: 0;
   border: 0;
@@ -119,4 +120,30 @@
   flex: none;
   color: var(--aidex-color-text-muted);
   font-size: 13px;
+}
+
+/* In narrow multi-column cards the meta moves under the text instead of squeezing it. */
+.columns2 .card,
+.columns3 .card {
+  flex-wrap: wrap;
+}
+
+.columns2 .meta,
+.columns3 .meta {
+  order: 3;
+  flex-basis: 100%;
+  padding-left: calc(18px + var(--aidex-space-4));
+}
+
+.columns2 .text,
+.columns3 .text {
+  flex-basis: 0;
+}
+
+/* Stack multi-column cards when the group is too narrow for their text. */
+@container (max-width: 640px) {
+  .columns2,
+  .columns3 {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

@@ -13,12 +13,15 @@
     color var(--aidex-duration-fast) var(--aidex-ease);
 }
 
-.button:disabled {
+.button:disabled,
+.button[aria-disabled="true"] {
   cursor: not-allowed;
 }
 
 .ghost:disabled,
-.soft:disabled {
+.soft:disabled,
+.ghost[aria-disabled="true"],
+.soft[aria-disabled="true"] {
   opacity: 0.45;
 }
 

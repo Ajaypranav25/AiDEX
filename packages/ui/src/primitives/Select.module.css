@@ -1,4 +1,5 @@
 .inline {
+  flex: none;
   width: auto;
 }
 
@@ -40,6 +41,7 @@
 }
 
 .ghost .select {
+  width: auto;
   min-height: 34px;
   padding: 0 var(--aidex-space-8) 0 var(--aidex-space-2);
   border-radius: var(--aidex-radius-sm);

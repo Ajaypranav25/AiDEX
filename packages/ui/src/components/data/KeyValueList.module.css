@@ -24,10 +24,12 @@
   background: color-mix(in srgb, var(--aidex-color-text) 3%, transparent);
 }
 
+/* Labels are short and never break mid-word; long values wrap instead. */
 .label {
-  min-width: 0;
+  flex: none;
+  max-width: 45%;
   color: var(--aidex-color-text);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .value {
