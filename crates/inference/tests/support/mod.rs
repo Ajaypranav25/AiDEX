@@ -13,6 +13,7 @@ use std::{
 
 use aidex_drive::DrivePaths;
 use aidex_events::MemoryEventSink;
+use aidex_host::HostResources;
 use aidex_inference::{
     InferenceOptions, LocalInference,
     gguf::GgufBuilder,
@@ -125,11 +126,19 @@ pub fn fake_runtime_archive(dir: &Path) -> (PathBuf, CatalogEntry) {
     (path, entry)
 }
 
-/// Options suited to tests: fast reaper, short health timeout, no idle unload.
+/// Options suited to tests: fast reaper, short health timeout, no idle unload,
+/// and fixed host resources so plans do not depend on the machine's free RAM.
 pub fn options() -> InferenceOptions {
     let mut options = InferenceOptions {
         idle_timeout: None,
         reaper_interval: Duration::from_millis(50),
+        resources: Some(HostResources {
+            total_ram_bytes: Some(16 << 30),
+            available_ram_bytes: Some(8 << 30),
+            physical_cores: Some(4),
+            logical_cores: Some(8),
+            cpu_brand: Some("test CPU".into()),
+        }),
         ..InferenceOptions::default()
     };
     options.server.health_timeout = Duration::from_secs(30);

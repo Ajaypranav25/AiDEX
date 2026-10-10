@@ -12,7 +12,7 @@ use std::{
 use aidex_core::{CancelReason, CancelToken, EntityId};
 use aidex_drive::DrivePaths;
 use aidex_events::{EventKind, EventScope, EventSink};
-use aidex_host::{GpuProbeOptions, GpuStatus, probe_gpus};
+use aidex_host::{GpuProbeOptions, GpuStatus, HostResources, probe_gpus};
 use aidex_providers::{ChatRequest, ChatResponse, FinishReason, ProviderId, StreamEvent};
 use aidex_sandbox::Sandbox;
 use serde::{Deserialize, Serialize};
@@ -49,6 +49,9 @@ pub struct InferenceOptions {
     pub reaper_interval: Duration,
     pub scheduler: SchedulerPolicy,
     pub server: ServerConfig,
+    /// Fixed host memory/CPU facts instead of reading them for each plan
+    /// (deterministic tests and diagnostics); `None` reads the live host.
+    pub resources: Option<HostResources>,
 }
 
 impl Default for InferenceOptions {
@@ -58,6 +61,7 @@ impl Default for InferenceOptions {
             reaper_interval: Duration::from_secs(5),
             scheduler: SchedulerPolicy::default(),
             server: ServerConfig::default(),
+            resources: None,
         }
     }
 }
@@ -298,7 +302,11 @@ impl LocalInference {
             }
             cached.clone()
         };
-        HostSnapshot::current(gpu)
+        let mut host = HostSnapshot::current(gpu);
+        if let Some(resources) = &self.inner.options.resources {
+            host.resources = resources.clone();
+        }
+        host
     }
 
     /// Explain how `id` would be launched on this host now.
