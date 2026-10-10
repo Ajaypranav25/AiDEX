@@ -2,13 +2,18 @@
 //! daemon commands against an in-process daemon on a temporary, initialized
 //! developer drive (`init_with` without the removable-media check).
 
-use aidex_events::{EventKind, EventLog};
-use aidexd::{Daemon, StopReason, endpoint, services::EVENT_FILE};
+use aidex_core::EntityId;
+use aidex_events::{EventKind, EventLog, EventScope};
+use aidexd::{Daemon, DaemonHandle, StopReason, endpoint};
 use serde_json::Value;
 use std::{
     fs,
+    io::{BufRead, BufReader},
     path::Path,
-    process::{Command, Output},
+    process::{Command, Output, Stdio},
+    sync::mpsc,
+    thread,
+    time::{Duration, Instant},
 };
 
 fn aidex(args: &[&str]) -> Output {
@@ -176,58 +181,165 @@ fn agent_list_and_doctor_emit_json_reports() {
     assert!(report["host"]["os"].is_string());
 }
 
-#[test]
-fn events_command_replays_over_ipc_from_the_cursor() {
-    let root = temp_drive();
-    {
-        let runtime = endpoint::ensure_state_dir(root.path()).unwrap();
-        let log = EventLog::open(runtime.join(EVENT_FILE), 20).unwrap();
-        log.publish(
-            "workspace",
-            Some("session".into()),
-            EventKind::SessionStarted,
-        )
-        .unwrap();
-        log.publish(
-            "workspace",
-            Some("session".into()),
-            EventKind::SessionFinished,
-        )
-        .unwrap();
+fn start_daemon(root: &Path) -> (DaemonHandle, EventLog) {
+    let daemon = Daemon::new(root).unwrap();
+    let log = daemon.services().events().clone();
+    (daemon.start().unwrap(), log)
+}
+
+fn task(id: &str) -> EventKind {
+    EventKind::TaskStarted {
+        task_id: EntityId::new(id).unwrap(),
     }
-    let daemon = Daemon::new(root.path()).unwrap().start().unwrap();
-    let sequences = |output: &Output| -> Vec<u64> {
-        String::from_utf8_lossy(&output.stdout)
-            .lines()
-            .map(|line| {
-                serde_json::from_str::<Value>(line).unwrap()["sequence"]
-                    .as_u64()
-                    .unwrap()
-            })
-            .collect()
-    };
-    let all = aidex(&drive_args(
-        &["events", "--workspace", "workspace"],
-        root.path(),
-    ));
+}
+
+fn scope() -> EventScope {
+    EventScope::session(
+        EntityId::new("ws_main").unwrap(),
+        EntityId::new("ses_one").unwrap(),
+    )
+}
+
+fn cursors(output: &Output) -> Vec<u64> {
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|line| {
+            serde_json::from_str::<Value>(line).unwrap()["cursor"]
+                .as_u64()
+                .unwrap()
+        })
+        .collect()
+}
+
+#[test]
+fn events_tail_and_show_replay_over_ipc_from_the_cursor() {
+    let root = temp_drive();
+    let (daemon, log) = start_daemon(root.path());
+    log.append(scope(), task("t1")).unwrap();
+    log.append(scope(), task("t2")).unwrap();
+    log.append(EventScope::global(), EventKind::DriveSafeToRemove {})
+        .unwrap();
+
+    let all = aidex(&drive_args(&["--json", "events", "tail"], root.path()));
     assert_eq!(code(&all), 0, "{}", String::from_utf8_lossy(&all.stderr));
-    assert_eq!(sequences(&all), [1, 2]);
-    let after = aidex(&drive_args(
-        &["events", "--workspace", "workspace", "--after", "1"],
+    assert_eq!(cursors(&all), [1, 2, 3, 4]);
+    let tasks = aidex(&drive_args(
+        &[
+            "--json",
+            "events",
+            "tail",
+            "--after",
+            "1",
+            "--kind",
+            "task",
+            "--workspace",
+            "ws_main",
+        ],
         root.path(),
     ));
-    assert_eq!(sequences(&after), [2]);
-    let invalid = aidex(&drive_args(
-        &["events", "--workspace", "bad id!"],
+    assert_eq!(cursors(&tasks), [2, 3]);
+
+    let page = aidex(&drive_args(
+        &["--json", "events", "show", "--limit", "2"],
         root.path(),
     ));
-    assert_eq!(code(&invalid), 2);
+    assert_eq!(code(&page), 0, "{}", String::from_utf8_lossy(&page.stderr));
+    let page = stdout_json(&page);
+    assert_eq!(page["events"].as_array().unwrap().len(), 2);
+    assert_eq!(page["next_cursor"], 2);
+    assert_eq!(page["has_more"], true);
+
+    let human = aidex(&drive_args(
+        &["events", "show", "--after", "1"],
+        root.path(),
+    ));
+    assert_eq!(code(&human), 0);
+    let text = String::from_utf8_lossy(&human.stdout);
+    assert!(text.contains("task.started"), "{text}");
+    assert!(text.contains("ws_main/ses_one"), "{text}");
+    assert!(text.contains("drive.safe_to_remove"), "{text}");
+    assert!(text.trim_end().ends_with("next cursor: 4"), "{text}");
+
+    for args in [
+        &["events", "tail", "--kind", "nope"][..],
+        &["events", "tail", "--workspace", "bad id!"],
+        &["events", "show", "--limit", "0"],
+        &["events", "show", "--after", "99"],
+    ] {
+        let rejected = aidex(&drive_args(args, root.path()));
+        assert_eq!(
+            code(&rejected),
+            2,
+            "{args:?}: {}",
+            String::from_utf8_lossy(&rejected.stderr)
+        );
+    }
     daemon.stop();
     daemon.wait().unwrap();
 
-    let down = aidex(&drive_args(
-        &["events", "--workspace", "workspace"],
+    let down = aidex(&drive_args(&["events", "show"], root.path()));
+    assert_eq!(code(&down), 3);
+}
+
+/// Lines printed by a running `aidex` child, read on a background thread.
+fn spawn_lines(args: &[&str]) -> (std::process::Child, mpsc::Receiver<String>) {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_aidex"))
+        .args(args)
+        .env_remove("AIDEX_DRIVE_ROOT")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn aidex");
+    let stdout = child.stdout.take().unwrap();
+    let (sender, receiver) = mpsc::channel();
+    thread::spawn(move || {
+        for line in BufReader::new(stdout).lines() {
+            let Ok(line) = line else { return };
+            if sender.send(line).is_err() {
+                return;
+            }
+        }
+    });
+    (child, receiver)
+}
+
+/// Collect printed cursors until `last` is seen.
+fn read_through(lines: &mpsc::Receiver<String>, seen: &mut Vec<u64>, last: u64) {
+    let deadline = Instant::now() + Duration::from_secs(60);
+    while seen.last() != Some(&last) {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let line = lines
+            .recv_timeout(remaining)
+            .unwrap_or_else(|_| panic!("follow printed {seen:?}, never reached {last}"));
+        let event: Value = serde_json::from_str(&line).unwrap();
+        seen.push(event["cursor"].as_u64().unwrap());
+    }
+}
+
+#[test]
+fn events_tail_follow_reconnects_across_a_daemon_restart_without_duplicates() {
+    let root = temp_drive();
+    let (daemon, log) = start_daemon(root.path());
+    log.append(scope(), task("t1")).unwrap(); // 2 (1 is daemon.started)
+    let (mut child, lines) = spawn_lines(&drive_args(
+        &["--json", "events", "tail", "--follow"],
         root.path(),
     ));
-    assert_eq!(code(&down), 3);
+    let mut seen = Vec::new();
+    read_through(&lines, &mut seen, 2);
+    log.append(scope(), task("t2")).unwrap(); // 3, delivered live
+    read_through(&lines, &mut seen, 3);
+
+    drop(log);
+    daemon.stop(); // 4: daemon.stopping
+    daemon.wait().unwrap();
+    let (restarted, log) = start_daemon(root.path()); // 5: daemon.started
+    log.append(scope(), task("t3")).unwrap(); // 6
+    read_through(&lines, &mut seen, 6);
+    let _ = child.kill();
+    let _ = child.wait();
+    assert_eq!(seen, [1, 2, 3, 4, 5, 6]);
+    restarted.stop();
+    restarted.wait().unwrap();
 }
