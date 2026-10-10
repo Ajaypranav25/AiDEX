@@ -93,6 +93,83 @@ impl fmt::Display for IntegrityProblem {
     }
 }
 
+/// Why a bundle's signature was not accepted.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SignatureError {
+    /// There is no `bundle.sig`, and unsigned bundles are not allowed.
+    Unsigned,
+    /// `bundle.sig` is unreadable, malformed, or not a regular file.
+    Malformed(DocumentError),
+    /// `bundle.sig` was made for a different `bundle.json`.
+    ManifestMismatch { expected: String, actual: String },
+    /// The signing key is not in the trust store.
+    UnknownKey { key_id: String },
+    /// The signing key was revoked (compiled-in or drive revocation list).
+    RevokedKey {
+        key_id: String,
+        reason: Option<String>,
+    },
+    /// The bundle's `created_at` is outside the key's validity window
+    /// (`window` reads like "from <start> to <end>").
+    KeyNotValid {
+        key_id: String,
+        created_at: String,
+        window: String,
+    },
+    /// The Ed25519 signature does not verify with the named trusted key.
+    BadSignature { key_id: String },
+}
+
+impl SignatureError {
+    /// Stable machine-readable name (API `data.reason`).
+    pub fn reason(&self) -> &'static str {
+        match self {
+            Self::Unsigned => "unsigned",
+            Self::Malformed(_) => "malformed_signature",
+            Self::ManifestMismatch { .. } => "signature_manifest_mismatch",
+            Self::UnknownKey { .. } => "unknown_key",
+            Self::RevokedKey { .. } => "revoked_key",
+            Self::KeyNotValid { .. } => "key_not_valid",
+            Self::BadSignature { .. } => "bad_signature",
+        }
+    }
+}
+
+impl fmt::Display for SignatureError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Unsigned => f.write_str(
+                "the bundle is not signed (no bundle.sig) and unsigned bundles are not allowed",
+            ),
+            Self::Malformed(error) => write!(f, "bundle.sig is {error}"),
+            Self::ManifestMismatch { expected, actual } => write!(
+                f,
+                "bundle.sig was made for bundle.json sha256 {expected}, but bundle.json has sha256 {actual}"
+            ),
+            Self::UnknownKey { key_id } => write!(
+                f,
+                "the bundle is signed by key {key_id}, which this build does not trust"
+            ),
+            Self::RevokedKey { key_id, reason } => match reason {
+                Some(reason) => write!(f, "signing key {key_id} is revoked ({reason})"),
+                None => write!(f, "signing key {key_id} is revoked"),
+            },
+            Self::KeyNotValid {
+                key_id,
+                created_at,
+                window,
+            } => write!(
+                f,
+                "signing key {key_id} is valid {window}, but the bundle was created at {created_at}"
+            ),
+            Self::BadSignature { key_id } => write!(
+                f,
+                "the bundle.json signature does not verify with key {key_id} (the manifest or signature was modified)"
+            ),
+        }
+    }
+}
+
 /// Coarse error classes with stable meaning for exit-code and API mapping.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum BundleErrorKind {
@@ -104,6 +181,9 @@ pub enum BundleErrorKind {
     Incompatible,
     /// Files, pointer, or manifest do not match what was recorded; nothing was run.
     Integrity,
+    /// The bundle is unsigned (and that is not allowed), or its signature is not valid
+    /// for a trusted, unrevoked key; nothing was run.
+    Untrusted,
     /// A drive-root path holds a file that is not an AiDEX launcher.
     Occupied,
     /// The install source or archive is not a usable bundle.
@@ -123,6 +203,11 @@ pub enum BundleError {
         error: DocumentError,
     },
     Pointer {
+        path: PathBuf,
+        error: DocumentError,
+    },
+    /// `app/update-journal.json` is unreadable or malformed.
+    Journal {
         path: PathBuf,
         error: DocumentError,
     },
@@ -155,11 +240,25 @@ pub enum BundleError {
         path: String,
         problem: IntegrityProblem,
     },
+    Signature {
+        bundle: PathBuf,
+        error: SignatureError,
+    },
+    /// A trust-store document, key file, or built-in trust configuration is invalid.
+    Trust(String),
     Occupied {
         path: PathBuf,
     },
     InvalidSource(String),
     Archive(String),
+    /// An archive entry that could escape or confuse extraction (traversal, absolute
+    /// path, link, device, duplicate, or outside the bundle directory).
+    ArchiveEntry {
+        name: String,
+        reason: String,
+    },
+    /// An archive over the entry-count or size limits.
+    ArchiveLimit(String),
     Aborted(InstallStep),
     Io {
         context: String,
@@ -207,10 +306,16 @@ impl BundleError {
             | Self::HostExtractionUnsupported => BundleErrorKind::Incompatible,
             Self::Manifest { .. }
             | Self::Pointer { .. }
+            | Self::Journal { .. }
             | Self::VersionMismatch { .. }
             | Self::Integrity { .. } => BundleErrorKind::Integrity,
+            Self::Signature { .. } => BundleErrorKind::Untrusted,
             Self::Occupied { .. } => BundleErrorKind::Occupied,
-            Self::InvalidSource(_) | Self::Archive(_) => BundleErrorKind::InvalidInput,
+            Self::Trust(_)
+            | Self::InvalidSource(_)
+            | Self::Archive(_)
+            | Self::ArchiveEntry { .. }
+            | Self::ArchiveLimit(_) => BundleErrorKind::InvalidInput,
             Self::Aborted(_) => BundleErrorKind::Aborted,
             Self::Io { .. } => BundleErrorKind::Io,
         }
@@ -223,9 +328,9 @@ impl BundleError {
             _ => match self.kind() {
                 BundleErrorKind::NotInstalled => ServiceErrorCode::NotFound,
                 BundleErrorKind::Incompatible => ServiceErrorCode::IncompatibleVersion,
-                BundleErrorKind::Integrity | BundleErrorKind::Occupied => {
-                    ServiceErrorCode::Conflict
-                }
+                BundleErrorKind::Integrity
+                | BundleErrorKind::Untrusted
+                | BundleErrorKind::Occupied => ServiceErrorCode::Conflict,
                 BundleErrorKind::InvalidInput => ServiceErrorCode::InvalidArgument,
                 BundleErrorKind::Aborted => ServiceErrorCode::Unavailable,
                 BundleErrorKind::Drive | BundleErrorKind::Io => ServiceErrorCode::Internal,
@@ -243,6 +348,9 @@ impl fmt::Display for BundleError {
             }
             Self::Pointer { path, error } => {
                 write!(f, "bundle pointer `{}` is {error}", path.display())
+            }
+            Self::Journal { path, error } => {
+                write!(f, "update journal `{}` is {error}", path.display())
             }
             Self::NotInstalled { pointer } => write!(
                 f,
@@ -286,6 +394,12 @@ impl fmt::Display for BundleError {
                 "integrity check failed for `{path}` in `{}`: {problem}",
                 bundle.display()
             ),
+            Self::Signature { bundle, error } => write!(
+                f,
+                "signature check failed for `{}`: {error}",
+                bundle.display()
+            ),
+            Self::Trust(reason) => write!(f, "invalid trust configuration: {reason}"),
             Self::Occupied { path } => write!(
                 f,
                 "`{}` exists and is not an AiDEX launcher; refusing to replace it (move it aside and retry)",
@@ -293,6 +407,12 @@ impl fmt::Display for BundleError {
             ),
             Self::InvalidSource(reason) => write!(f, "invalid bundle source: {reason}"),
             Self::Archive(reason) => write!(f, "invalid bundle archive: {reason}"),
+            Self::ArchiveEntry { name, reason } => {
+                write!(f, "unsafe bundle archive entry `{name}`: {reason}")
+            }
+            Self::ArchiveLimit(reason) => {
+                write!(f, "bundle archive exceeds the extraction limits: {reason}")
+            }
             Self::Aborted(step) => write!(f, "install stopped before step `{step}`"),
             Self::Io { context, error } => write!(f, "{context}: {error}"),
         }

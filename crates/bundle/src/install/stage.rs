@@ -26,11 +26,13 @@ pub(super) fn stage(source: &InstallSource, staging: &Path) -> Result<PathBuf, B
     }
 }
 
-/// Copy `bundle.json` and exactly the files it lists; anything else in the source
-/// directory is ignored, so the staged bundle holds only manifest-listed files.
+/// Copy `bundle.json`, `bundle.sig` (when present), and exactly the files the
+/// manifest lists; anything else in the source directory is ignored, so the staged
+/// bundle holds only manifest-listed files.
 fn copy_bundle(source: &Path, destination: &Path) -> Result<PathBuf, BundleError> {
     let bytes = read_manifest_bytes(source)?;
     let manifest = parse_manifest(source, &bytes)?;
+    let signature = crate::read_signature(source)?;
     let create = |dir: &Path| {
         fs::create_dir_all(dir)
             .map_err(|error| BundleError::io(format!("cannot create `{}`", dir.display()), error))
@@ -48,6 +50,9 @@ fn copy_bundle(source: &Path, destination: &Path) -> Result<PathBuf, BundleError
         .map_err(|error| {
             BundleError::io(format!("cannot write `{}`", manifest_path.display()), error)
         })?;
+    if let Some(signature) = signature {
+        crate::write_signature(destination, &signature)?;
+    }
     for file in &manifest.files {
         let from = join(source, &file.path);
         let to = join(destination, &file.path);

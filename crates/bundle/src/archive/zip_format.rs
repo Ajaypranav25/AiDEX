@@ -8,7 +8,7 @@ use std::{
 
 use zip::{CompressionMethod, DateTime, ZipArchive, ZipWriter, write::SimpleFileOptions};
 
-use super::{Extractor, Member};
+use super::{Extractor, Member, unsafe_entry};
 use crate::BundleError;
 
 const SECONDS_PER_DAY: u64 = 86_400;
@@ -71,9 +71,10 @@ pub(super) fn extract(archive: &Path, sink: &mut Extractor) -> Result<(), Bundle
             .map_err(|e| BundleError::Archive(format!("entry {index}: {e}")))?;
         let name = entry.name().to_owned();
         if entry.is_symlink() {
-            return Err(BundleError::Archive(format!(
-                "`{name}` is a symbolic link; links are not allowed in bundles"
-            )));
+            return Err(unsafe_entry(
+                &name,
+                "is a symbolic link; links are not allowed in bundles",
+            ));
         }
         if entry.is_dir() {
             sink.directory(&name)?;
@@ -81,9 +82,7 @@ pub(super) fn extract(archive: &Path, sink: &mut Extractor) -> Result<(), Bundle
             let size = entry.size();
             sink.file(&name, size, &mut entry)?;
         } else {
-            return Err(BundleError::Archive(format!(
-                "`{name}` is not a regular file or directory"
-            )));
+            return Err(unsafe_entry(&name, "is not a regular file or directory"));
         }
     }
     Ok(())

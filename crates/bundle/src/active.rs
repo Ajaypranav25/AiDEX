@@ -5,10 +5,11 @@ use std::{fs, io::ErrorKind, path::PathBuf};
 use aidex_drive::{CURRENT_SCHEMA_VERSION, DrivePaths};
 
 use crate::{
-    BundleError, CurrentPointer, IntegrityProblem, Target, TargetPointer, VerifiedBundle,
-    VerifyScope,
+    BundleError, CurrentPointer, IntegrityProblem, SignaturePolicy, SignatureState, Target,
+    TargetPointer, VerifiedBundle, VerifyScope,
     digest::sha256_hex,
     layout::{pointer_path, versions_dir},
+    signature::verify_signature,
     verify::{parse_manifest, read_manifest_bytes, verify_files},
 };
 
@@ -19,6 +20,8 @@ pub struct ActiveBundle {
     /// The pointer entry that selected the bundle.
     pub pointer: TargetPointer,
     pub bundle: VerifiedBundle,
+    /// How the bundle's signature was accepted.
+    pub signature: SignatureState,
 }
 
 impl ActiveBundle {
@@ -34,11 +37,14 @@ impl ActiveBundle {
 /// Fails closed when the pointer is missing or malformed, escapes `app/versions/`,
 /// names a link or missing directory, when `bundle.json` differs from the pinned
 /// digest, is for another target or version, needs a newer drive schema or host
-/// extraction, or when any file in `scope` does not match the manifest.
+/// extraction, when its signature is missing (unless `policy` allows unsigned
+/// bundles), malformed, made by an unknown, revoked, or out-of-window key, or does not
+/// verify, or when any file in `scope` does not match the manifest.
 pub fn resolve_active(
     paths: &DrivePaths,
     target: Target,
     scope: VerifyScope,
+    policy: &SignaturePolicy,
 ) -> Result<ActiveBundle, BundleError> {
     let pointer_file = pointer_path(paths);
     let pointer = CurrentPointer::load(&pointer_file)?.ok_or(BundleError::NotInstalled {
@@ -94,6 +100,7 @@ pub fn resolve_active(
     if manifest.state.host_extraction {
         return Err(BundleError::HostExtractionUnsupported);
     }
+    let signature = verify_signature(&bundle_dir, &bytes, &manifest.created_at, policy)?;
     let verified_files = verify_files(&bundle_dir, &manifest, scope)?;
     Ok(ActiveBundle {
         target,
@@ -105,6 +112,7 @@ pub fn resolve_active(
             scope,
             verified_files,
         },
+        signature,
     })
 }
 
