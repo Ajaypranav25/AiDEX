@@ -12,6 +12,11 @@
   letter-spacing: -0.025em;
 }
 
+/* Headings focused programmatically (e.g. on arrival) are not interactive, so no ring. */
+.heading[tabindex="-1"]:focus {
+  outline: none;
+}
+
 .title {
   font-size: 22px;
   font-weight: 600;
@@ -30,10 +35,17 @@
 
 /* Introductory copy keeps a readable measure. */
 .lead {
-  max-width: 25em;
   font-size: var(--aidex-text-xl);
   line-height: 1.65;
   text-wrap: pretty;
+}
+
+.narrow {
+  max-width: 25em;
+}
+
+.wide {
+  max-width: 40em;
 }
 
 .label {

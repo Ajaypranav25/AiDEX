@@ -20,6 +20,8 @@ export function Heading({ level = 2, size = "title", align = "start", className,
 export type TextProps = ComponentPropsWithoutRef<"p"> & {
   as?: "p" | "span" | "div";
   variant?: "body" | "lead" | "label";
+  /** Line-length cap for `lead` text: `narrow` keeps intros to a short measure. */
+  measure?: "narrow" | "wide";
   tone?: "default" | "secondary" | "muted" | "accent";
   align?: TextAlign;
 };
@@ -29,9 +31,10 @@ export function Text({
   variant = "body",
   tone = "default",
   align = "start",
+  measure = "narrow",
   className,
   ...props
 }: TextProps) {
   const Tag: ElementType = as;
-  return <Tag className={cx(styles.text, styles[variant], styles[tone], styles[align], className)} {...props} />;
+  return <Tag className={cx(styles.text, styles[variant], styles[tone], styles[align], variant === "lead" && styles[measure], className)} {...props} />;
 }

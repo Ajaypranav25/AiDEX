@@ -62,6 +62,55 @@ export const LightbulbIcon = createIcon(
   </>,
 );
 
+export const HardDriveIcon = createIcon(
+  "HardDriveIcon",
+  <>
+    <path d="m4.5 13.5 2.1-7.9A1.5 1.5 0 0 1 8.05 4.5h7.9a1.5 1.5 0 0 1 1.45 1.1l2.1 7.9" />
+    <rect x="3.5" y="13.5" width="17" height="6" rx="1.5" />
+    <path d="M7.5 16.5h3" />
+  </>,
+);
+
+export const LockIcon = createIcon(
+  "LockIcon",
+  <>
+    <rect x="5" y="10.5" width="14" height="10" rx="2" />
+    <path d="M8 10.5v-3a4 4 0 0 1 8 0v3M12 14.5v2" />
+  </>,
+);
+
+export const KeyIcon = createIcon(
+  "KeyIcon",
+  <>
+    <circle cx="7.5" cy="16.5" r="4" />
+    <path d="m10.4 13.6 9.1-9.1M16 8l2.5 2.5M13.5 10.5l2 2" />
+  </>,
+);
+
+export const CpuIcon = createIcon(
+  "CpuIcon",
+  <>
+    <rect x="6" y="6" width="12" height="12" rx="2" />
+    <path d="M9.5 2.5V6M14.5 2.5V6M9.5 18v3.5M14.5 18v3.5M2.5 9.5H6M2.5 14.5H6M18 9.5h3.5M18 14.5h3.5" />
+  </>,
+);
+
+export const MonitorIcon = createIcon(
+  "MonitorIcon",
+  <>
+    <rect x="3" y="4" width="18" height="12.5" rx="2" />
+    <path d="M8.5 20.5h7M12 16.5v4" />
+  </>,
+);
+
+export const MemoryIcon = createIcon(
+  "MemoryIcon",
+  <>
+    <rect x="2.5" y="6.5" width="19" height="10" rx="1.5" />
+    <path d="M8.5 9.5v4M12 9.5v4M15.5 9.5v4M6 16.5V19M10 16.5V19M14 16.5V19M18 16.5V19" />
+  </>,
+);
+
 export const MessageSquareIcon = createIcon(
   "MessageSquareIcon",
   <path d="M20.5 15a2 2 0 0 1-2 2H8l-4.5 3.5V6a2 2 0 0 1 2-2h13a2 2 0 0 1 2 2Z" />,

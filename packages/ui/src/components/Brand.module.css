@@ -5,6 +5,11 @@
   color: var(--aidex-color-text);
 }
 
+.stacked {
+  flex-direction: column;
+  gap: var(--aidex-space-4);
+}
+
 .mark {
   flex: none;
 }
@@ -33,4 +38,22 @@
 
 .lg .wordmark {
   font-size: 24px;
+}
+
+.xl {
+  gap: var(--aidex-space-6);
+}
+
+.xl.stacked {
+  gap: var(--aidex-space-4);
+}
+
+.xl .mark {
+  width: auto;
+  height: 72px;
+}
+
+.xl .wordmark {
+  font-size: 44px;
+  font-weight: 600;
 }

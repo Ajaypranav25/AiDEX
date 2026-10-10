@@ -1,5 +1,6 @@
 import type { ComponentPropsWithRef } from "react";
 import { cx } from "../utils/cx";
+import gapStyles from "./gap.module.css";
 import styles from "./Stack.module.css";
 
 /** Spacing step from the token scale; step N is N * 4px. */
@@ -31,7 +32,7 @@ export function Stack({
       className={cx(
         styles.stack,
         styles[direction],
-        styles[`gap${gap}`],
+        gapStyles[`gap${gap}`],
         styles[ALIGN_CLASS[align]],
         styles[JUSTIFY_CLASS[justify]],
         wrap && styles.wrap,

@@ -4,6 +4,10 @@
   padding-inline: var(--aidex-space-6);
 }
 
+.xs {
+  max-width: 616px;
+}
+
 .sm {
   max-width: 688px;
 }

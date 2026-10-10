@@ -21,7 +21,11 @@
   --aidex-color-accent: #1a8cff;
   --aidex-color-accent-border: #0b7bd4;
   --aidex-color-accent-soft: #0c1926;
+  --aidex-color-accent-subtle-border: #0c4566;
+  --aidex-color-on-accent: #04111d;
   --aidex-color-success: #10c77e;
+  --aidex-color-warning: #e0a33a;
+  --aidex-color-danger: #f26d78;
   --aidex-color-focus: #4ba3ff;
 
   /* Typography */

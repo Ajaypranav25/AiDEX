@@ -1,0 +1,36 @@
+.badge {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: var(--aidex-radius-full);
+}
+
+.md {
+  width: 44px;
+  height: 44px;
+}
+
+.lg {
+  width: 56px;
+  height: 56px;
+}
+
+.md svg {
+  width: 20px;
+  height: 20px;
+}
+
+.lg svg {
+  width: 24px;
+  height: 24px;
+}
+
+.neutral {
+  background: var(--aidex-color-surface-strong);
+  color: var(--aidex-color-text-secondary);
+}
+
+.accent {
+  background: var(--aidex-color-accent-soft);
+  color: var(--aidex-color-accent);
+}
