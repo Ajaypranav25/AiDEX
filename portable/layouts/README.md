@@ -32,6 +32,8 @@ The drive crate writes schema version 2 and reads schema versions 1 and 2. Both 
 | `private_memory` | `private/memory` | Portable user memory. |
 | `private_index` | `private/index` | Per-workspace search indexes. |
 
+Application bundles inside `app/` (`current.json`, `versions/<version>-<target>/`, `launcher/<target>/`, `staging/`) and the drive-root launchers (`AiDEX.exe`, `aidex`) are specified in [`portable/packaging/README.md`](../packaging/README.md#drive-layout). The root names `AiDEX.exe`, `aidex`, and their `.previous` / `.aidex-new` siblings are written only by the bundle installer, which never replaces a file that is not an AiDEX launcher.
+
 `public_*` and top-level operational directories hold data that may stay unencrypted. `private/` directories hold state that the owning service must protect; the layout itself does not encrypt anything. Daemon runtime metadata lives in `.aidex/runtime/`, which is not a manifest entry.
 
 Services resolve these directories through `aidex_drive::DrivePaths`, which reads the manifest without modifying it, requires schema v2, and creates directories only through `ensure_dir`, which accepts only declared directories (or paths beneath them) and refuses symbolic links, junctions, and non-directories.

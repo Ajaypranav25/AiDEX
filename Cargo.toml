@@ -3,10 +3,13 @@ resolver = "2"
 members = [
     "crates/aidexd",
     "crates/aidex-cli",
+    "crates/bundle",
     "crates/core",
     "crates/drive",
     "crates/events",
     "crates/host",
+    "crates/launcher",
+    "crates/packager",
     "crates/policy",
     "crates/providers",
     "crates/router",

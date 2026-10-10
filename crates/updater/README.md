@@ -1,3 +1,3 @@
 # Update and rollback
 
-Planned signed manifest verification, staged installation, self-test, atomic switch, and rollback. No updater is implemented.
+Planned signed manifest verification, staged installation, self-test, atomic switch, and rollback (#27). No updater is implemented. It builds on [`aidex-bundle`](../bundle/README.md): `install_with` already stages on the drive, verifies, commits immutable `app/versions/` directories, and switches `app/current.json` atomically, recording the previous bundle per target (`TargetPointer::previous`) as the rollback candidate. Signatures, SBOMs, downgrade rules, self-tests, and rollback commands remain to be added.
