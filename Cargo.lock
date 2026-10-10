@@ -62,6 +62,7 @@ name = "aidex-cli"
 version = "0.1.0"
 dependencies = [
  "aidex-bundle",
+ "aidex-context",
  "aidex-core",
  "aidex-drive",
  "aidex-events",
@@ -79,6 +80,25 @@ dependencies = [
  "serde_json",
  "tempfile",
  "zeroize",
+]
+
+[[package]]
+name = "aidex-context"
+version = "0.1.0"
+dependencies = [
+ "aidex-core",
+ "aidex-drive",
+ "aidex-events",
+ "aidex-policy",
+ "aidex-workspace",
+ "ignore",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "toml",
 ]
 
 [[package]]
@@ -305,6 +325,7 @@ name = "aidexd"
 version = "0.1.0"
 dependencies = [
  "aidex-bundle",
+ "aidex-context",
  "aidex-core",
  "aidex-drive",
  "aidex-events",

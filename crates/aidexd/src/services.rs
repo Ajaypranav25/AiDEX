@@ -10,6 +10,7 @@ mod models;
 pub use models::{EventsModelObserver, ModelServices, VaultCredentials, model_event_kind};
 
 use crate::{endpoint, lifecycle::ShutdownSignal};
+use aidex_context::ContextService;
 use aidex_core::ServiceErrorCode;
 use aidex_drive::DrivePaths;
 use aidex_events::{EventLog, EventSink, RetentionPolicy};
@@ -59,6 +60,7 @@ pub struct Services {
     models: ModelServices,
     sessions: Arc<SessionStore>,
     session_recovery: RecoveryReport,
+    context: Arc<ContextService>,
     updates: Result<Arc<Updater>, String>,
     update_recovery: Mutex<Option<Result<UpdateRecovery, String>>>,
 }
@@ -112,6 +114,8 @@ impl Services {
             Arc::new(EventsModelObserver::new(Arc::new(events.clone()))),
         )?;
         let (sessions, session_recovery) = open_sessions(&paths, &events)?;
+        let context = ContextService::open(&paths, Arc::new(events.clone()))
+            .map_err(|error| ServicesError::new("context", error.code(), error.to_string()))?;
         let updates = open_updates(&paths, &events, updater);
         Ok(Self {
             drive_root: drive_root.to_path_buf(),
@@ -125,6 +129,7 @@ impl Services {
             models,
             sessions: Arc::new(sessions),
             session_recovery,
+            context: Arc::new(context),
             updates,
             update_recovery: Mutex::new(None),
         })
@@ -184,6 +189,11 @@ impl Services {
         &self.session_recovery
     }
 
+    /// Local index, search, project rules, memory, and context packs
+    /// (`aidex-context`). Dropping the services cancels running index jobs.
+    pub fn context(&self) -> &Arc<ContextService> {
+        &self.context
+    }
     /// The drive's updater (`aidex-updater`), or why it is unavailable (a host without
     /// a bundle target, or an invalid built-in trust configuration).
     pub fn updates(&self) -> Result<&Arc<Updater>, &str> {

@@ -5,7 +5,15 @@ use crate::commands::{
     agent::AgentCommand, daemon::DaemonCommand, events::EventsCommand, omp::SessionOptions,
     session::SessionArgs, update::UpdateArgs, vault::VaultCommand, workspace::WorkspaceArgs,
 };
-use crate::commands::{model::ModelArgs, offline::OfflineArgs, provider::ProviderArgs};
+use crate::commands::{
+    context::{
+        index::IndexArgs, memory::MemoryArgs, pack::ContextArgs, rules::RulesArgs,
+        search::SearchArgs,
+    },
+    model::ModelArgs,
+    offline::OfflineArgs,
+    provider::ProviderArgs,
+};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -84,6 +92,16 @@ pub enum Commands {
     /// Inspect durable sessions, checkpoints, and resume plans.
     #[command(alias = "sessions")]
     Session(SessionArgs),
+    /// Build, inspect, or cancel the workspace's local search index.
+    Index(IndexArgs),
+    /// Search the workspace index offline (full text, file names, or symbols).
+    Search(SearchArgs),
+    /// Inspect the context packs the native agent receives.
+    Context(ContextArgs),
+    /// Inspect and edit session, workspace, and user memory.
+    Memory(MemoryArgs),
+    /// Show the workspace's project rules and instruction files.
+    Rules(RulesArgs),
     /// Check, apply, verify, and roll back signed AiDEX updates on this drive.
     Update(UpdateArgs),
 }
@@ -110,6 +128,11 @@ impl Commands {
             Some(Self::Provider(args)) => args.command.label(),
             Some(Self::Offline(args)) => args.command.label(),
             Some(Self::Session(args)) => args.command.label(),
+            Some(Self::Index(args)) => args.command.label(),
+            Some(Self::Search(args)) => args.label(),
+            Some(Self::Context(args)) => args.command.label(),
+            Some(Self::Memory(args)) => args.command.label(),
+            Some(Self::Rules(args)) => args.command.label(),
             Some(Self::Update(args)) => args.command.label(),
         }
     }

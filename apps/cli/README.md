@@ -37,6 +37,11 @@ bun run dev:cli -- vault lock --drive /path/to/drive
 bun run dev:cli -- daemon stop --drive /path/to/drive
 bun run dev:cli -- workspace add ~/src/project --name project --drive /path/to/drive
 bun run dev:cli -- workspace ephemeral create project --drive /path/to/drive
+bun run dev:cli -- index build --workspace project --drive /path/to/drive
+bun run dev:cli -- search --symbol parse_config --drive /path/to/drive
+bun run dev:cli -- context pack "fix the login timeout" --budget 8000 --drive /path/to/drive
+bun run dev:cli -- memory add --tag build "build with bun run build" --drive /path/to/drive
+bun run dev:cli -- rules show --drive /path/to/drive
 bun run dev:cli -- chat
 bun run dev:cli -- run "Explain this repository"
 bun run login:omp
@@ -70,6 +75,14 @@ bun run login:omp
 - `discover <PATH>` reports the enclosing Git repository and nested repositories (bounded scan, links not followed).
 - `ephemeral create <SOURCE>` copies a workspace (honouring `.gitignore`, skipping `.git/` and `.aidex/`, never following links); `ephemeral review <ID>` lists added/modified/deleted files with conflicts and unified diffs; `ephemeral apply <ID> [--path P ...]` re-reviews, shows the changes, asks for confirmation, and applies only the selected non-conflicting files, refusing if the workspace changed since that review (exit 1 when any selected change was skipped or failed); `ephemeral discard <ID>` deletes only the ephemeral directory.
 - `remove --delete-data`, `ephemeral apply`, and `ephemeral discard` need `--yes` or an interactive confirmation; without a terminal (or with `--json`) and without `--yes` they refuse with exit 2 and change nothing. Declining the prompt exits 9.
+
+Repository context commands use the daemon's `context.*`, `memory.*`, and `rules.show` methods. Each accepts `--workspace ID|NAME` (default: the selected workspace; none selected is exit 2), `--drive PATH`, and `--json`:
+
+- `aidex index build [--no-wait]` starts (or joins) the workspace's background index job and, unless `--no-wait`, prints progress every 2 s and the final status; a completed build exits 0, a cancelled one 9, a failed one 1. Interrupting the CLI does not stop the job; `aidex index cancel` does (committed batches are kept and the next build resumes). `aidex index status` prints counters, state (`empty`, `building`, `partial`, `complete`), repository branch/HEAD/remote names, any corruption recovery, and the latest job report (added/updated/unchanged/removed/redacted and skipped files by reason).
+- `aidex search <QUERY>... [--symbol | --file] [--path PREFIX] [--limit N]` searches the index offline: full text (every word must match), file names, or definitions. Secret files are never indexed and snippets are redacted.
+- `aidex context pack <TASK>... --budget N [--session ID] [--path P]... [--no-rules] [--no-memory] [--no-search] [--text]` shows the context pack the native agent would get: each item's tokens, trust, score, and source, the dropped candidates with reasons, and with `--text` the delimiter preamble and the delimited item texts. The total never exceeds the budget (1-100000).
+- `aidex memory list|add <TEXT>... [--tag T]...|edit <ID> [--text T] [--tag T]... [--clear-tags]|remove <ID>` with `--workspace ID|NAME` (default), `--user`, or `--session ID` inspects and edits memory. Secret-like text is refused (exit 2); memories added here are user-written.
+- `aidex rules show` prints the workspace's `.aidex/rules.toml` commands and guardrails (which can only tighten policy) and the instruction files found (`AGENTS.md`, `CLAUDE.md`, `.aidex/instructions.md`). An invalid rules file is exit 2.
 
 `aidex` and `aidex chat` open Oh My Pi's interactive terminal UI. AiDEX passes `--approval-mode always-ask`, disables OMP extensions, MCP, LSP, skills, session persistence, and automatic title generation, and requests a limited tool set. OMP still owns its CLI tool lifecycle and approval implementation; this is not an AiDEX sandbox or policy boundary.
 
