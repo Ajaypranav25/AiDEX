@@ -45,16 +45,18 @@ impl Ran {
     }
 }
 
-/// Run `program args` in `cwd`, killing it after `timeout`.
+/// Run `program args` in `cwd` with `env` added, killing it after `timeout`.
 pub fn run(
     program: &Path,
     args: &[&str],
     cwd: &Path,
+    env: &[(&str, &str)],
     timeout: Duration,
 ) -> Result<Ran, PackagerError> {
     let started = Instant::now();
     let mut child = Command::new(program)
         .args(args)
+        .envs(env.iter().copied())
         .current_dir(cwd)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

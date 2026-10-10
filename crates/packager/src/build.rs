@@ -1,4 +1,5 @@
-//! `aidex-packager build`: release binaries → verified bundle → archive + SHA256SUMS.
+//! `aidex-packager build`: release binaries → bundle with a CycloneDX SBOM → verified
+//! bundle → archive + SBOM copy + SHA256SUMS. Signing is a separate step (`sign`).
 
 use std::{
     ffi::OsString,
@@ -9,18 +10,20 @@ use std::{
 };
 
 use aidex_bundle::{
-    BundleFile, BundleManifest, FileRole, MANIFEST_FILE_NAME, MANIFEST_SCHEMA_VERSION,
-    PRODUCT_NAME, SHA256SUMS_FILE_NAME, Sha256Sums, StatePaths, Target, VerifyScope,
+    BUILD_TRUSTED_KEYS_ENV, BundleFile, BundleManifest, FileRole, MANIFEST_FILE_NAME,
+    MANIFEST_SCHEMA_VERSION, PRODUCT_NAME, SHA256SUMS_FILE_NAME, Sha256Sums, StatePaths, Target,
+    VerifyScope,
     archive::{ArchiveFormat, archive_file_name, bundle_root_name, write_archive},
-    layout, validate_bundle_path, verify_bundle,
+    layout, sha256_hex, validate_bundle_path, verify_bundle, write_atomic,
 };
 use aidex_core::Timestamp;
+use aidex_updater::sbom::SBOM_BUNDLE_PATH;
 use serde::Serialize;
 
 use crate::{
     cli::BuildArgs,
     error::PackagerError,
-    licenses,
+    licenses, sbom, signing,
     workspace::{GitInfo, Metadata, rustc_version},
 };
 
@@ -83,6 +86,12 @@ pub struct BuildReport {
     pub archive: PathBuf,
     pub archive_bytes: u64,
     pub archive_sha256: String,
+    /// `aidex-<version>-<target>.cdx.json` next to the archive (also inside the bundle
+    /// as `docs/sbom.cdx.json`).
+    pub sbom: PathBuf,
+    pub sbom_components: usize,
+    /// Names of the extra keys baked in with `--trust-key` (besides release keys).
+    pub trusted_keys: Vec<String>,
     pub sha256sums: PathBuf,
     pub timings: Timings,
 }
@@ -104,6 +113,16 @@ pub fn run(args: &BuildArgs) -> Result<BuildReport, PackagerError> {
         .target_dir
         .clone()
         .unwrap_or_else(|| metadata.target_directory.join("packager"));
+    let trust_env = signing::build_trust_env(&args.trust_key)?;
+    let trusted_keys = trust_env
+        .as_deref()
+        .map(|entries| {
+            entries
+                .split(',')
+                .filter_map(|entry| entry.split_once('=').map(|(name, _)| name.to_owned()))
+                .collect()
+        })
+        .unwrap_or_default();
 
     let cargo_started = Instant::now();
     cargo_build(
@@ -113,6 +132,7 @@ pub fn run(args: &BuildArgs) -> Result<BuildReport, PackagerError> {
         &triple,
         &target_dir,
         &created_at,
+        trust_env.as_deref(),
     )?;
     let cargo_build_ms = cargo_started.elapsed().as_millis();
 
@@ -135,9 +155,43 @@ pub fn run(args: &BuildArgs) -> Result<BuildReport, PackagerError> {
     let release = target_dir.join(&triple).join("release");
     let roots: Vec<&str> = SHIPPED.iter().map(|shipped| shipped.package).collect();
     let inventory = licenses::collect(&metadata, &roots)?;
-    let assembled = assemble(&staging, &release, target, &inventory, args);
-    let files = match assembled {
-        Ok(files) => files,
+    let rustc = rustc_version(&workspace);
+    let assembled = assemble(&staging, &release, target, &inventory, args).and_then(|mut files| {
+        let checksums = sbom::lock_checksums(&workspace)?;
+        let subject = sbom::Subject {
+            version: &version,
+            target,
+            rust_target: &triple,
+            git_commit: git.commit.as_deref(),
+            source_dirty: git.dirty,
+            rustc: rustc.as_deref(),
+            created_at: &created_at,
+        };
+        let document = sbom::generate(&metadata, &roots, &checksums, &subject, &files)?;
+        let summary = document
+            .validate()
+            .map_err(|error| PackagerError::new(format!("generated SBOM is invalid: {error}")))?;
+        let bytes = document.to_json().map_err(PackagerError::new)?;
+        let path = SBOM_BUNDLE_PATH
+            .split('/')
+            .fold(staging.clone(), |path, part| path.join(part));
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                PackagerError::io(format_args!("cannot create `{}`", parent.display()), error)
+            })?;
+        }
+        fs::write(&path, &bytes)
+            .map_err(|error| PackagerError::io("cannot write the SBOM", error))?;
+        files.push(BundleFile::describe(
+            &staging,
+            SBOM_BUNDLE_PATH,
+            FileRole::Doc,
+            false,
+        )?);
+        Ok((files, bytes, summary.components))
+    });
+    let (files, sbom_bytes, sbom_components) = match assembled {
+        Ok(assembled) => assembled,
         Err(error) => {
             let _ = fs::remove_dir_all(&staging);
             return Err(error);
@@ -151,7 +205,7 @@ pub fn run(args: &BuildArgs) -> Result<BuildReport, PackagerError> {
         source_dirty: git.dirty,
         target,
         rust_target: triple.clone(),
-        rustc: rustc_version(&workspace),
+        rustc,
         created_at: created_at.clone(),
         min_drive_schema: aidex_drive::CURRENT_SCHEMA_VERSION,
         state: StatePaths::current(),
@@ -179,10 +233,15 @@ pub fn run(args: &BuildArgs) -> Result<BuildReport, PackagerError> {
     let archive_started = Instant::now();
     let archive_path = out.join(archive_file_name(&version, target));
     let summary = write_archive(&bundle, &archive_path, ArchiveFormat::for_target(target))?;
+    let sbom_name = format!("{root_name}.cdx.json");
+    let sbom_path = out.join(&sbom_name);
+    write_atomic(&sbom_path, &sbom_bytes)?;
     let sums_path = out.join(SHA256SUMS_FILE_NAME);
     let mut sums = Sha256Sums::load(&sums_path)?;
     let archive_name = archive_file_name(&version, target);
     sums.set(&archive_name, &summary.sha256)
+        .map_err(PackagerError::new)?;
+    sums.set(&sbom_name, &sha256_hex(&sbom_bytes))
         .map_err(PackagerError::new)?;
     sums.store(&sums_path)?;
     let archive_ms = archive_started.elapsed().as_millis();
@@ -202,6 +261,9 @@ pub fn run(args: &BuildArgs) -> Result<BuildReport, PackagerError> {
         archive: summary.path,
         archive_bytes: summary.size,
         archive_sha256: summary.sha256,
+        sbom: sbom_path,
+        sbom_components,
+        trusted_keys,
         sha256sums: sums_path,
         timings: Timings {
             cargo_build_ms,
@@ -226,7 +288,9 @@ fn build_time(git: &GitInfo) -> Result<Timestamp, PackagerError> {
         .map_err(|error| PackagerError::new(format!("invalid build time: {error}")))
 }
 
-/// `cargo build --release --locked` of exactly the shipped binaries.
+/// `cargo build --release --locked` of exactly the shipped binaries. `trust_env` is
+/// baked in as `AIDEX_BUILD_TRUSTED_KEYS`; without it the variable is removed, so a
+/// stray value in the developer's shell never changes what a build trusts.
 fn cargo_build(
     cargo: &OsString,
     workspace: &Path,
@@ -234,6 +298,7 @@ fn cargo_build(
     triple: &str,
     target_dir: &Path,
     created_at: &Timestamp,
+    trust_env: Option<&str>,
 ) -> Result<(), PackagerError> {
     let mut command = Command::new(cargo);
     command
@@ -263,6 +328,10 @@ fn cargo_build(
             "SOURCE_DATE_EPOCH",
             created_at.unix_millis().div_euclid(1000).to_string(),
         );
+    match trust_env {
+        Some(entries) => command.env(BUILD_TRUSTED_KEYS_ENV, entries),
+        None => command.env_remove(BUILD_TRUSTED_KEYS_ENV),
+    };
     if matches!(target, Target::MacosArm64 | Target::MacosX64) {
         command.env("MACOSX_DEPLOYMENT_TARGET", "11.0");
     }

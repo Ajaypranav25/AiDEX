@@ -138,10 +138,12 @@ dependencies = [
  "aidex-bundle",
  "aidex-core",
  "aidex-drive",
+ "aidex-updater",
  "clap",
  "serde",
  "serde_json",
  "tempfile",
+ "toml",
 ]
 
 [[package]]

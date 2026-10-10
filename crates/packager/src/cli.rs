@@ -9,7 +9,7 @@ use clap::{Args, Parser, Subcommand};
 #[command(
     name = "aidex-packager",
     version,
-    about = "Build, install, and smoke-test portable AiDEX bundles"
+    about = "Build, sign, verify, install, and smoke-test portable AiDEX bundles"
 )]
 pub struct Cli {
     /// Print one JSON report on stdout instead of human-readable text.
@@ -30,6 +30,12 @@ pub enum Command {
     /// Install an archive into a fresh developer drive and exercise the launcher,
     /// CLI, and daemon from it, checking for host residue.
     Smoke(SmokeArgs),
+    /// Generate a development or CI signing key pair (never a release key).
+    Keygen(KeygenArgs),
+    /// Sign a bundle directory or archive with a signing key file (writes bundle.sig).
+    Sign(SignArgs),
+    /// Verify a bundle directory or archive: SHA256SUMS, every file, and the signature.
+    Verify(VerifyArgs),
 }
 
 #[derive(Debug, Args)]
@@ -55,6 +61,10 @@ pub struct BuildArgs {
     /// Prebuilt installer app (file or directory) to include under `installer/`.
     #[arg(long, value_name = "PATH")]
     pub installer: Option<PathBuf>,
+    /// Public key file (`<name>.pub.json`) the built binaries trust in addition to the
+    /// release keys (CI's ephemeral key or a developer key). Repeatable.
+    #[arg(long, value_name = "PUBLIC_KEY_FILE")]
+    pub trust_key: Vec<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -69,6 +79,54 @@ pub struct InstallArgs {
     /// removable-media check (for tests and CI; never use on a real drive by accident).
     #[arg(long)]
     pub init_dev_drive: bool,
+    #[command(flatten)]
+    pub trust: TrustArgs,
+}
+
+/// Which signatures `install`, `smoke`, and `verify` accept.
+#[derive(Debug, Args)]
+pub struct TrustArgs {
+    /// Also trust this public key file (`<name>.pub.json`). Repeatable.
+    #[arg(long, value_name = "PUBLIC_KEY_FILE")]
+    pub trust_key: Vec<PathBuf>,
+    /// Accept a bundle without bundle.sig (development only; an invalid or untrusted
+    /// signature is still refused).
+    #[arg(long)]
+    pub allow_unsigned: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct KeygenArgs {
+    /// Key name (`[A-Za-z0-9._-]`, at most 64 characters).
+    #[arg(long, default_value = "dev")]
+    pub name: String,
+    /// Directory for `<name>.key` (secret) and `<name>.pub.json`; keep it outside the
+    /// repository.
+    #[arg(long, value_name = "DIR")]
+    pub out: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct SignArgs {
+    /// Secret key file written by `keygen`.
+    #[arg(long, value_name = "KEY_FILE")]
+    pub key: PathBuf,
+    /// Bundle directory or archive to sign.
+    #[arg(value_name = "BUNDLE")]
+    pub bundle: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct VerifyArgs {
+    /// Bundle directory or archive to verify.
+    #[arg(value_name = "BUNDLE")]
+    pub bundle: PathBuf,
+    /// Also trust this public key file (`<name>.pub.json`). Repeatable.
+    #[arg(long, value_name = "PUBLIC_KEY_FILE")]
+    pub trust_key: Vec<PathBuf>,
+    /// Accept a bundle without bundle.sig (development only).
+    #[arg(long)]
+    pub allow_unsigned: bool,
 }
 
 #[derive(Debug, Args)]
@@ -82,6 +140,8 @@ pub struct SmokeArgs {
     /// Seconds allowed for each launched command.
     #[arg(long, default_value_t = 120)]
     pub timeout: u64,
+    #[command(flatten)]
+    pub trust: TrustArgs,
 }
 
 fn parse_target(value: &str) -> Result<Target, String> {
