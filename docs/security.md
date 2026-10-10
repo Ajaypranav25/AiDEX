@@ -19,7 +19,13 @@ These properties are requirements from the product specification, not current im
 - Secret names, kinds, consumer policies, and values are encrypted at rest. Tampering, truncation, swapped or foreign records, missing headers, unknown versions, and symlinked paths are explicit errors; nothing falls back to plaintext or to an empty vault. Interrupted writes leave the previous committed state readable.
 - Values leave the vault only when the broker resolves a scoped, expiring, revocable handle for a consumer the secret's policy names (`provider:`, `mcp:`, `process:`, `git:`). Model prompts, agents, sessions, logs, and shell environments can never be consumers. Handle issuance and resolution are in-process Rust APIs (`VaultService`), not IPC methods. Lock, idle auto-lock (30 min default), and daemon restart invalidate every handle.
 - There is no online lockout for an offline drive: passphrase strength is the protection against offline guessing. A lost passphrase without a recovery key is unrecoverable; encrypted backups protect against drive loss, not credential loss.
-- Not yet done: independent cryptographic review (required before release), memory locking, zeroization of IPC request buffers, whole-vault rollback detection, audit events, phone factor, and host-trust policies.
+- `vault.init|unlock|lock` record drive-wide `vault.unlocked`/`vault.locked` events (vault id only). Not yet done: independent cryptographic review (required before release), memory locking, zeroization of IPC request buffers, whole-vault rollback detection, audit events for secret changes and handle grants, phone factor, and host-trust policies.
+
+## Sessions (`crates/sessions`)
+
+- Session records must reference credentials by vault handle or `SecretRef`, never by value. As defence in depth every persisted text field (titles, messages, tool inputs and summaries, failure reasons, checkpoint labels and payloads, UTF-8 artifacts) passes through `aidex_events::redact_text` before it is written; binary artifacts are stored unchanged, and pattern-based redaction cannot recognise arbitrary secrets.
+- Approvals are referenced with the intent fingerprint they approve, are never carried into a branch, and pending ones are cancelled when a session is interrupted; a resume lists them as needing a new decision.
+- Host fingerprints are salted per drive (`private_config/host-salt`), never store the hostname, and read no hardware identifiers. The session database is not encrypted at rest.
 
 ## Model providers (`crates/providers`, `crates/router`)
 
@@ -42,6 +48,12 @@ These properties are requirements from the product specification, not current im
 
 See `crates/sandbox/README.md` for the full enforcement matrix and limitations.
 
+## Bundle integrity (implemented) and signatures (not yet)
+
+The drive-root launcher verifies before it executes: the drive manifest (closed schema), the `app/current.json` pointer (which cannot leave `app/versions/` and pins the SHA-256 of the selected `bundle.json`), the manifest itself (closed schema, host target, version, drive schema, no host extraction), and the size and SHA-256 of every critical binary, refusing symbolic links, junctions, and unlisted files beside the binaries. Any mismatch stops the launch with exit code 11 and nothing runs. Installation verifies everything before committing, switches the pointer atomically, and never overwrites a drive-root file that is not an AiDEX launcher.
+
+This is integrity, not authenticity. Nothing is signed: someone who can write to the drive can replace the launcher or rewrite the pointer and manifests, and a concurrent writer could swap a file between its check and its execution. Windows also loads the launcher's DLL imports from the drive root before any check runs. Signed manifests with a trust anchor outside the drive, SBOMs, and downgrade protection are issue #27.
+
 ## Policy evaluation (implemented) and enforcement (not yet)
 
 `crates/policy` (`aidex-policy`) implements deterministic policy evaluation: agents' requests are normalized into intents carrying broker-computed facts, and evaluation returns allow, deny, sandbox, rate-limit, or approval with the deciding rule and a human-readable effect summary. Hard safety rules (disk formatting, raw drive writes, credential export, secret dumping, deleting root/home/system directories, vault modification, broker disabling, AiDEX-protected paths) deny unconditionally, including when a shell command implies them; policy changes and destructive commands always need one-time approval. Any layer deny wins; otherwise the most specific layer, then the active profile, then deny-by-default decides. Privacy mode, network mode, host trust, and repository project rules can only tighten a decision. Policy files are closed-schema TOML and fail closed when malformed. Intent fingerprints let approvals bind to the exact intent.
@@ -51,6 +63,10 @@ This is a decision engine only. No execution broker routes or enforces agent act
 ## Event redaction (implemented)
 
 - Events (`aidex-events`) reference secrets by handle and name only. Every free-text event field is passed through `redact_text` (provider tokens, JWTs, bearer/authorization credentials, PEM private keys, URL passwords, password/token/secret/key assignments) and bounded before it is stored or streamed, and an identifier that looks like a credential refuses the event. Redaction is pattern based and is a last line of defence, not a substitute for keeping secret values out of events. The event log is not yet encrypted at rest.
+
+## Tools (`crates/tools`, implemented; not yet brokered)
+
+`aidex-tools` splits every tool call into a side-effect-free `plan` and a permit-gated `execute`. Plans validate input against closed schemas, resolve every path (including git pathspecs and the shell working directory) through `ConfinedRoot`, and record the facts policy needs: resolved paths with a name-based credential hint (`sensitive`), the classified command line, network use (git remotes are reported as unresolved destinations), destructive and remote-write effects, and implied actions (writes beneath `.aidex/` imply `policy.change`). A permit names the plan's SHA-256 fingerprint; execution refuses a different or altered plan, another workspace/session/call, a read-only permit for a writing tool, or a second execution. Writes re-check the target's hash under a per-path lock and fail with a conflict rather than clobber; file tools never modify `.git` (hooks there would run code). Git runs with fixed arguments, hooks and fsmonitor disabled, no pager/external diff/textconv, and `GIT_CEILING_DIRECTORIES` at the workspace root; processes are launched only through the `ProcessLauncher` trait, which the broker will implement over `aidex-sandbox` (the `DirectLauncher` behind the `direct-launcher` feature is unsandboxed and for tests only). Event summaries, failure messages, and process output are redacted and bounded; tool output is untrusted data. Until the broker (#17) lands, nothing in the daemon executes tools, `fs.read` returns file content unredacted (credential files must be gated by the broker's path classes), and confinement remains a point-in-time check.
 
 ## Workspace confinement
 

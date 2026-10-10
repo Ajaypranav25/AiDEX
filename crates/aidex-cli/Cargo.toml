@@ -12,6 +12,7 @@ aidex-events = { path = "../events" }
 aidex-host = { path = "../host" }
 aidex-providers = { path = "../providers" }
 aidex-router = { path = "../router" }
+aidex-sessions = { path = "../sessions" }
 aidex-workspace = { path = "../workspace" }
 aidexd = { path = "../aidexd" }
 clap.workspace = true

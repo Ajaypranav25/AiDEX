@@ -12,10 +12,11 @@ pub use models::{EventsModelObserver, ModelServices, VaultCredentials, model_eve
 use crate::{endpoint, lifecycle::ShutdownSignal};
 use aidex_core::ServiceErrorCode;
 use aidex_drive::DrivePaths;
-use aidex_events::{EventLog, RetentionPolicy};
+use aidex_events::{EventLog, EventSink, RetentionPolicy};
 use aidex_inference::{InferenceOptions, LocalInference};
 use aidex_providers::RegistryError;
 use aidex_sandbox::Sandbox;
+use aidex_sessions::{RecoveryReport, SessionStore};
 use aidex_vault::{VaultService, VaultServiceConfig};
 use aidex_workspace::WorkspaceRegistry;
 use std::{
@@ -59,6 +60,8 @@ pub struct Services {
     workspaces: WorkspaceRegistry,
     models: ModelServices,
     inference: LocalInference,
+    sessions: Arc<SessionStore>,
+    session_recovery: RecoveryReport,
 }
 
 impl Services {
@@ -99,6 +102,7 @@ impl Services {
             Arc::new(EventsModelObserver::new(Arc::new(events.clone()))),
         )?;
         let inference = open_inference(&paths, &models, &events)?;
+        let (sessions, session_recovery) = open_sessions(&paths, &events)?;
         Ok(Self {
             drive_root: drive_root.to_path_buf(),
             paths,
@@ -110,6 +114,8 @@ impl Services {
             workspaces,
             models,
             inference,
+            sessions: Arc::new(sessions),
+            session_recovery,
         })
     }
 
@@ -164,6 +170,16 @@ impl Services {
     pub fn inference(&self) -> &LocalInference {
         &self.inference
     }
+
+    /// Durable sessions, checkpoints, and resume plans (`aidex-sessions`).
+    pub fn sessions(&self) -> &Arc<SessionStore> {
+        &self.sessions
+    }
+
+    /// What startup recovery found (interrupted sessions, lost tool calls, event gaps).
+    pub fn session_recovery(&self) -> &RecoveryReport {
+        &self.session_recovery
+    }
 }
 
 /// Open local inference and register its `local` provider. A configured
@@ -199,6 +215,27 @@ impl Drop for Services {
     fn drop(&mut self) {
         self.inference.shutdown();
     }
+}
+
+/// Open the session store with the drive event log as its sink, then recover from an
+/// unclean stop before anything is served: active sessions become `interrupted`,
+/// running tool calls `lost`, and unprovable events explicit gaps.
+fn open_sessions(
+    paths: &DrivePaths,
+    events: &EventLog,
+) -> Result<(SessionStore, RecoveryReport), ServicesError> {
+    let session_error = |error: aidex_sessions::SessionError| {
+        ServicesError::new("sessions", error.code(), error.to_string())
+    };
+    let sink: Arc<dyn EventSink> = Arc::new(events.clone());
+    let store = SessionStore::open(paths, sink).map_err(session_error)?;
+    let latest = events
+        .latest_cursor()
+        .map_err(|error| ServicesError::new("events", error.code(), error.to_string()))?;
+    let report = store
+        .recover_on_startup(store.host(), Some(latest))
+        .map_err(session_error)?;
+    Ok((store, report))
 }
 
 /// Open the drive's event log and import PR #40's superseded log once, if present.
