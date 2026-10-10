@@ -1,5 +1,6 @@
 //! Portable local GGUF inference (spec §10, §11, §46, §66, §67, §86, §96, §97).
 
+pub mod composer;
 mod error;
 mod fsutil;
 pub mod gguf;
@@ -9,6 +10,7 @@ mod registry;
 pub mod runtime;
 mod verify;
 
+pub use composer::{ComposeRequest, HostSnapshot, LaunchPlan, RuntimeChoice, compose};
 pub use error::{InferenceError, Result};
 pub use import::{
     ImportOptions, ImportPhase, ImportProgress, STAGING_DIR, STALE_PARTIAL_AGE,
