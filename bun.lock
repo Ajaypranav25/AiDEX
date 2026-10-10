@@ -46,11 +46,24 @@
         "typescript": "~5.8.3",
       },
     },
+    "packages/ui": {
+      "name": "@aidex/ui",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@types/react": "^19.1.8",
+        "typescript": "~5.8.3",
+      },
+      "peerDependencies": {
+        "react": "^19.1.0",
+      },
+    },
   },
   "packages": {
     "@aidex/desktop": ["@aidex/desktop@workspace:apps/desktop"],
 
     "@aidex/installer": ["@aidex/installer@workspace:apps/installer"],
+
+    "@aidex/ui": ["@aidex/ui@workspace:packages/ui"],
 
     "@babel/helper-string-parser": ["@babel/helper-string-parser@7.29.7", "", {}, "sha512-Pb5ijPrZ89GDH8223L4UP8i6QApWxs04RbPQJTeWDV0/keR2E36MeKnyr6LYmUUvqRRI+Iv87SuF1W6ErINzYw=="],
 

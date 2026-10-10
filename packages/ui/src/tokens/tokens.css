@@ -1,0 +1,64 @@
+:root {
+  /* Surfaces */
+  --aidex-color-bg: #09090a;
+  --aidex-color-surface: #0b0c0d;
+  --aidex-color-surface-raised: #111417;
+  --aidex-color-surface-hover: #171a1f;
+  --aidex-color-surface-strong: #21252b;
+  --aidex-color-surface-stronger: #2e343d;
+
+  /* Borders */
+  --aidex-color-border-subtle: #1e2126;
+  --aidex-color-border: #2a2e35;
+  --aidex-color-border-strong: #3a3f47;
+
+  /* Text */
+  --aidex-color-text: #f5f6f8;
+  --aidex-color-text-secondary: #b7c5da;
+  --aidex-color-text-muted: #9aa6b6;
+
+  /* Accent and status */
+  --aidex-color-accent: #1a8cff;
+  --aidex-color-accent-border: #0b7bd4;
+  --aidex-color-accent-soft: #0c1926;
+  --aidex-color-success: #10c77e;
+  --aidex-color-focus: #4ba3ff;
+
+  /* Typography */
+  --aidex-font-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+  --aidex-font-display: "Inter Display", "Inter", "Segoe UI Variable Display", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+  --aidex-font-mono: "JetBrains Mono", "Cascadia Code", "SF Mono", Consolas, monospace;
+  --aidex-text-xs: 12px;
+  --aidex-text-sm: 14px;
+  --aidex-text-md: 15px;
+  --aidex-text-lg: 16px;
+  --aidex-text-xl: 20px;
+  --aidex-text-display: 48px;
+
+  /* Spacing: step N is N * 4px */
+  --aidex-space-1: 4px;
+  --aidex-space-2: 8px;
+  --aidex-space-3: 12px;
+  --aidex-space-4: 16px;
+  --aidex-space-5: 20px;
+  --aidex-space-6: 24px;
+  --aidex-space-7: 28px;
+  --aidex-space-8: 32px;
+  --aidex-space-9: 36px;
+  --aidex-space-10: 40px;
+  --aidex-space-11: 44px;
+  --aidex-space-12: 48px;
+
+  /* Shape */
+  --aidex-radius-sm: 8px;
+  --aidex-radius-md: 12px;
+  --aidex-radius-lg: 16px;
+  --aidex-radius-xl: 20px;
+  --aidex-radius-2xl: 28px;
+  --aidex-radius-full: 999px;
+
+  /* Motion */
+  --aidex-duration-fast: 120ms;
+  --aidex-duration-base: 180ms;
+  --aidex-ease: cubic-bezier(0.2, 0, 0, 1);
+}

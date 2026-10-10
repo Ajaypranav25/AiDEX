@@ -5,7 +5,8 @@
   "packageManager": "bun@1.3.14",
   "workspaces": [
     "apps/desktop",
-    "apps/installer"
+    "apps/installer",
+    "packages/ui"
   ],
   "scripts": {
     "dev:cli": "cargo run --manifest-path crates/aidex-cli/Cargo.toml --",
