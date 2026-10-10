@@ -4,6 +4,7 @@ import { CodeIcon, FileTextIcon, LightbulbIcon, MessageSquareIcon } from "@aidex
 import { Button, Container, Heading, SegmentedControl, Stack, Text } from "@aidex/ui/primitives";
 import { useNavigation } from "../../app/providers/navigation";
 import { usePreferences } from "../../app/providers/preferences";
+import { SystemOverview } from "./SystemOverview";
 
 type Mode = "chat" | "agent";
 
@@ -79,6 +80,7 @@ export function HomePage({ autoFocus = false }: Props) {
             </Stack>
           </Stack>
         </Stack>
+        <SystemOverview />
       </Stack>
     </Container>
   );

@@ -19,7 +19,7 @@ const networkColumns: readonly DataTableColumn<NetworkRule>[] = [
   { key: "scope", header: "Scope" },
 ];
 
-/** Filesystem mounts and network allowlist the broker enforces for agent processes. */
+/** Sample filesystem mounts and network allowlist; the policy engine (crates/policy) has no daemon methods yet. */
 export function PolicyRules() {
   const notify = useToast();
 
@@ -39,7 +39,7 @@ export function PolicyRules() {
     <>
       <section>
         <Stack gap={4}>
-          <SectionHeader title="Filesystem rules" meta="Agents see only these mounts" actions={addRuleButton("filesystem")} />
+          <SectionHeader title="Filesystem rules" meta="Sample rules · agents see only these mounts" actions={addRuleButton("filesystem")} />
           <DataTable
             caption="Filesystem rules"
             hideCaption
@@ -51,7 +51,7 @@ export function PolicyRules() {
       </section>
       <section>
         <Stack gap={4}>
-          <SectionHeader title="Network rules" meta="Allowlist mode" actions={addRuleButton("network")} />
+          <SectionHeader title="Network rules" meta="Sample rules · allowlist mode" actions={addRuleButton("network")} />
           <DataTable caption="Network rules" hideCaption columns={networkColumns} rows={sampleNetworkRules} rowKey={(row) => row.id} />
         </Stack>
       </section>

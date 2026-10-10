@@ -5,7 +5,7 @@ import { Button, Checkbox, Stack, Text } from "@aidex/ui/primitives";
 import { useToast } from "../../app/providers/toast";
 import { sampleResidue } from "./sample";
 
-/** Files AiDEX left on this computer, with a running total of what is selected for removal. */
+/** Sample of the residue report the cleanup service (issue #28) will produce, with a running total of the selection. */
 export function ResidueCleanup() {
   const notify = useToast();
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set(sampleResidue.map((item) => item.id)));
@@ -22,7 +22,7 @@ export function ResidueCleanup() {
 
   return (
     <section>
-      <SectionHeader title="Host cleanup" meta={`${totalMb} MB selected`} />
+      <SectionHeader title="Host cleanup (sample)" meta={`${totalMb} MB selected`} />
       <Stack gap={5}>
         <Text tone="secondary">AiDEX keeps your work on the drive. These leftovers on this computer are safe to remove.</Text>
         <Stack gap={4} role="group" aria-label="Items to remove">
