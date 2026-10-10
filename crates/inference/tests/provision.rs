@@ -225,6 +225,9 @@ fn linked_source_parent_cannot_escape_path_validation() {
             .is_err()
     );
     assert!(s.catalog().unwrap().models.is_empty());
+    #[cfg(unix)]
+    fs::remove_file(&link).unwrap();
+    #[cfg(windows)]
     fs::remove_dir(&link).unwrap();
     assert!(real.join("tiny.gguf").is_file());
 }
