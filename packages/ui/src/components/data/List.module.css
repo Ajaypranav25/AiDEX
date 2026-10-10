@@ -1,0 +1,8 @@
+.list {
+  container-type: inline-size;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--aidex-color-border);
+  list-style: none;
+}

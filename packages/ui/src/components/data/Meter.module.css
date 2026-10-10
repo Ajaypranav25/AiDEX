@@ -1,0 +1,64 @@
+.meter {
+  display: flex;
+  flex-direction: column;
+  gap: var(--aidex-space-2);
+  min-width: 0;
+}
+
+.accent {
+  --meter-color: var(--aidex-color-accent);
+}
+
+.success {
+  --meter-color: var(--aidex-color-success);
+}
+
+.warning {
+  --meter-color: var(--aidex-color-warning);
+}
+
+.danger {
+  --meter-color: var(--aidex-color-danger);
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--aidex-space-3);
+  font-size: var(--aidex-text-sm);
+  line-height: 1.4;
+}
+
+.label {
+  min-width: 0;
+  color: var(--aidex-color-text);
+  font-weight: 500;
+}
+
+.reading {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--aidex-space-1);
+  color: var(--aidex-color-text-secondary);
+}
+
+.alert {
+  color: var(--meter-color);
+}
+
+/* The track is a dim step of the fill's own hue, so the state reads across the whole bar. */
+.track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--aidex-radius-full);
+  background: color-mix(in srgb, var(--meter-color) 20%, transparent);
+}
+
+.fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--meter-color);
+  transition: width var(--aidex-duration-base) var(--aidex-ease);
+}

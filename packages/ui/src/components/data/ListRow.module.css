@@ -1,0 +1,121 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--aidex-space-3);
+  min-width: 0;
+  border-bottom: 1px solid var(--aidex-color-border);
+  transition: background-color var(--aidex-duration-fast) var(--aidex-ease);
+}
+
+.interactive:hover {
+  background: color-mix(in srgb, var(--aidex-color-text) 3%, transparent);
+}
+
+/* The inset bar is a non-color cue for the current row, alongside the tint. */
+.selected,
+.selected.interactive:hover {
+  background: var(--aidex-color-accent-soft);
+  box-shadow: inset 2px 0 0 var(--aidex-color-accent);
+}
+
+.main {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--aidex-space-4);
+  min-width: 0;
+  min-height: 64px;
+  padding: var(--aidex-space-2);
+}
+
+.action {
+  margin: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Keep the focus ring inside the row so neighbouring rows do not cover it. */
+.action:focus-visible {
+  outline-offset: -2px;
+}
+
+.media {
+  display: inline-flex;
+  flex: none;
+  color: var(--aidex-color-text-secondary);
+}
+
+.body {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: var(--aidex-space-4);
+  min-width: 0;
+}
+
+.title {
+  grid-column: 1;
+  color: var(--aidex-color-text);
+  font-size: var(--aidex-text-sm);
+  font-weight: 500;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.subtitle {
+  grid-column: 1;
+  margin-top: var(--aidex-space-1);
+  color: var(--aidex-color-text-muted);
+  font-size: var(--aidex-text-xs);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.meta {
+  display: flex;
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  gap: var(--aidex-space-3);
+  color: var(--aidex-color-text-muted);
+  font-size: var(--aidex-text-xs);
+  line-height: 1.4;
+  user-select: none;
+}
+
+.metaCell {
+  width: var(--list-meta-width, 120px);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chevron {
+  flex: none;
+  color: var(--aidex-color-text-muted);
+}
+
+.trailing {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--aidex-space-2);
+  padding-right: var(--aidex-space-2);
+}
+
+/* In narrow lists the meta columns become one wrapped line under the subtitle. */
+@container (max-width: 520px) {
+  .meta {
+    flex-wrap: wrap;
+    grid-column: 1;
+    grid-row: auto;
+    column-gap: var(--aidex-space-3);
+    row-gap: 0;
+    margin-top: var(--aidex-space-1);
+  }
+
+  .metaCell {
+    width: auto;
+  }
+}

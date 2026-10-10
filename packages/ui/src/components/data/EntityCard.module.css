@@ -1,0 +1,109 @@
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--aidex-space-3);
+  height: 100%;
+  transition:
+    border-color var(--aidex-duration-fast) var(--aidex-ease),
+    background-color var(--aidex-duration-fast) var(--aidex-ease);
+}
+
+.interactive:hover {
+  border-color: var(--aidex-color-border-strong);
+  background: var(--aidex-color-surface-raised);
+}
+
+.selected,
+.selected.interactive:hover {
+  border-color: var(--aidex-color-accent);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--aidex-space-3);
+  min-width: 0;
+}
+
+.media {
+  display: inline-flex;
+  flex: none;
+  color: var(--aidex-color-text-secondary);
+}
+
+.heading {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--aidex-space-1);
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  color: var(--aidex-color-text);
+  font-size: var(--aidex-text-md);
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.titleButton {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-weight: inherit;
+  line-height: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.titleButton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--aidex-color-text-muted);
+  font-size: var(--aidex-text-xs);
+  line-height: 1.4;
+}
+
+.check {
+  flex: none;
+  color: var(--aidex-color-accent);
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--aidex-space-2);
+}
+
+.description {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--aidex-color-text-secondary);
+  font-size: var(--aidex-text-sm);
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+}
+
+/* Footer actions sit above the stretched title target so they keep their own clicks. */
+.footer {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--aidex-space-2);
+  margin-top: auto;
+  padding-top: var(--aidex-space-1);
+}

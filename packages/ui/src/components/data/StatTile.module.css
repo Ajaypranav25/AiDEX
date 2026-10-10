@@ -1,0 +1,89 @@
+.tile {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--aidex-space-4);
+}
+
+.default {
+  --tile-tone: var(--aidex-color-text-secondary);
+}
+
+.accent {
+  --tile-tone: var(--aidex-color-accent);
+}
+
+.success {
+  --tile-tone: var(--aidex-color-success);
+}
+
+.warning {
+  --tile-tone: var(--aidex-color-warning);
+}
+
+.danger {
+  --tile-tone: var(--aidex-color-danger);
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--aidex-space-1);
+  min-width: 0;
+  margin: 0;
+}
+
+.label {
+  display: flex;
+  align-items: center;
+  gap: var(--aidex-space-2);
+  color: var(--aidex-color-text-secondary);
+  font-size: var(--aidex-text-sm);
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.marker::before {
+  content: "";
+  flex: none;
+  width: 3px;
+  height: 14px;
+  border-radius: var(--aidex-radius-full);
+  background: var(--tile-tone);
+}
+
+/* Proportional figures: tabular digits look loose at display sizes. */
+.value {
+  margin: 0;
+  color: var(--aidex-color-text);
+  font-family: var(--aidex-font-sans);
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.hint {
+  margin: 0;
+  color: var(--aidex-color-text-muted);
+  font-size: var(--aidex-text-xs);
+  line-height: 1.5;
+}
+
+.icon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--aidex-radius-md);
+  background: color-mix(in srgb, var(--tile-tone) 14%, transparent);
+  color: var(--tile-tone);
+}
+
+.icon svg {
+  width: 20px;
+  height: 20px;
+}
