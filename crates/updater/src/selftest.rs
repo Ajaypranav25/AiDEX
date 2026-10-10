@@ -1,7 +1,7 @@
 //! Run the staged binaries before switching to them.
 //!
-//! [`ProcessSelfTest`] runs, from the staging directory and with `AIDEX_DRIVE_ROOT`
-//! set to the drive: `aidex --version` and `aidexd --version` (exit 0, output names
+//! [`ProcessSelfTest`] runs the binaries in the staging directory, with the drive root
+//! as working directory and `AIDEX_DRIVE_ROOT` set to it: `aidex --version` and `aidexd --version` (exit 0, output names
 //! the bundle version) and `aidex doctor --json` (exit 0 or 1 — doctor reports host
 //! problems such as a missing optional agent with 1 — and a JSON report whose
 //! `cli_version` is the bundle version). Each command has a deadline and bounded
@@ -136,7 +136,10 @@ impl SelfTest for ProcessSelfTest {
             ("aidex --version", &cli, &["--version"][..]),
             ("aidexd --version", &daemon, &["--version"][..]),
         ] {
-            let ran = self.spawn(program, args, &bin, bundle_dir, drive_root, name)?;
+            // The drive root is the working directory: the staging directory is
+            // renamed into `app/versions/` right after, which Windows refuses while
+            // it is any process's working directory.
+            let ran = self.spawn(program, args, &bin, drive_root, drive_root, name)?;
             record(name, &ran);
             if ran.exit_code != Some(0) || !ran.stdout.contains(version.as_str()) {
                 return Err(failure(
@@ -151,7 +154,7 @@ impl SelfTest for ProcessSelfTest {
             &cli,
             &["doctor", "--json"],
             &bin,
-            bundle_dir,
+            drive_root,
             drive_root,
             name,
         )?;
