@@ -1,0 +1,102 @@
+.button {
+  user-select: none;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--aidex-color-text);
+  cursor: pointer;
+  transition:
+    background-color var(--aidex-duration-fast) var(--aidex-ease),
+    color var(--aidex-duration-fast) var(--aidex-ease);
+}
+
+.button:disabled {
+  cursor: not-allowed;
+}
+
+.ghost:disabled,
+.soft:disabled {
+  opacity: 0.45;
+}
+
+.sm {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--aidex-radius-sm);
+}
+
+.md {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+}
+
+.lg {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--aidex-radius-md);
+}
+
+.xl {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+}
+
+.sm svg {
+  width: 18px;
+  height: 18px;
+}
+
+.md svg {
+  width: 20px;
+  height: 20px;
+}
+
+.lg svg {
+  width: 22px;
+  height: 22px;
+}
+
+.xl svg {
+  width: 24px;
+  height: 24px;
+}
+
+.circle {
+  border-radius: var(--aidex-radius-full);
+}
+
+.ghost:hover:not(:disabled) {
+  background: var(--aidex-color-surface-hover);
+}
+
+.soft {
+  background: var(--aidex-color-surface-strong);
+}
+
+.soft:hover:not(:disabled) {
+  background: var(--aidex-color-surface-stronger);
+}
+
+/* Neutral fill; it doubles as the idle look of a primary action. */
+.solid {
+  background: var(--aidex-color-surface-stronger);
+}
+
+.primary {
+  background: var(--aidex-color-accent);
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--aidex-color-accent-border);
+}
+
+.selected,
+.selected:hover:not(:disabled) {
+  background: var(--aidex-color-accent-soft);
+  color: var(--aidex-color-accent);
+}

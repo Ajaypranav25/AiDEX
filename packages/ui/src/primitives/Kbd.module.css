@@ -1,0 +1,15 @@
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--aidex-space-1);
+  min-height: 26px;
+  padding: 0 var(--aidex-space-2);
+  border-radius: 7px;
+  background: var(--aidex-color-surface-strong);
+  color: var(--aidex-color-text-secondary);
+  font-family: var(--aidex-font-sans);
+  font-size: var(--aidex-text-xs);
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
