@@ -16,6 +16,9 @@ crates/aidexd (`aidexd`)
    ├── transport: handshake, Router (`<domain>.<verb>`), bounded streams
    └── Services ── crates/core, drive, events, sessions, storage
 
+crates/policy (`aidex-policy`)
+   └── pure policy evaluation; not yet wired into the daemon (broker work, #17)
+
 apps/desktop, apps/installer
    └── future clients of the same daemon API
 ```
