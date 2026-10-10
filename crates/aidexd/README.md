@@ -17,7 +17,7 @@ uses. Wire format, handshake, error codes, and naming rules:
 | `stream` | `NotificationSink` for subscription methods |
 | `transport` (private) | listener, per-connection reader/writer threads, bounded outbox, shutdown |
 | `services` | `Services`, built once and shared with handlers as `Arc<Services>` |
-| `methods/<domain>` | JSON-RPC adapters: `daemon.*` (status/ping/stop), `events.*` (replay) |
+| `methods/<domain>` | JSON-RPC adapters: `daemon.*` (status/ping/stop), `events.*` (replay), `workspace.*` (registry, discovery, ephemeral review/apply/discard over `aidex-workspace`) |
 | `lifecycle` | `Daemon`, `DaemonHandle`, `serve`, `launch`, `stop`, stale-endpoint recovery |
 | `client` | `Client`, `Subscription`, `ClientError` |
 
