@@ -2,15 +2,18 @@ import type { ComponentPropsWithRef, ReactNode } from "react";
 import { cx } from "../utils/cx";
 import styles from "./Button.module.css";
 
-export type ButtonVariant = "raised" | "outline" | "ghost";
-export type ButtonSize = "md" | "lg";
+export type ButtonVariant = "primary" | "tonal" | "raised" | "outline" | "ghost";
+export type ButtonSize = "md" | "lg" | "xl";
 
 export type ButtonProps = ComponentPropsWithRef<"button"> & {
   variant?: ButtonVariant;
   size?: ButtonSize;
+  shape?: "rounded" | "pill";
+  /** `center` groups icon and label in the middle; a full-width button then pins `trailing` to its end. */
+  align?: "start" | "center";
   /** Leading icon; sized by the button. */
   icon?: ReactNode;
-  /** Trailing content such as a keyboard hint, pushed to the end. */
+  /** Trailing content such as a keyboard hint or arrow. */
   trailing?: ReactNode;
   fullWidth?: boolean;
 };
@@ -18,6 +21,8 @@ export type ButtonProps = ComponentPropsWithRef<"button"> & {
 export function Button({
   variant = "outline",
   size = "md",
+  shape = "rounded",
+  align = "start",
   icon,
   trailing,
   fullWidth = false,
@@ -29,7 +34,16 @@ export function Button({
   return (
     <button
       type={type}
-      className={cx(styles.button, styles[variant], styles[size], fullWidth && styles.fullWidth, className)}
+      className={cx(
+        styles.button,
+        styles[variant],
+        styles[size],
+        shape === "pill" && styles.pill,
+        align === "center" && styles.center,
+        fullWidth && styles.fullWidth,
+        align === "center" && fullWidth && trailing != null && styles.pinnedTrailing,
+        className,
+      )}
       {...props}
     >
       {icon ? <span className={styles.icon}>{icon}</span> : null}

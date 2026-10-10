@@ -1,0 +1,14 @@
+/* Token gap scale shared by layout primitives; step N is N * 4px. */
+.gap0 { gap: 0; }
+.gap1 { gap: var(--aidex-space-1); }
+.gap2 { gap: var(--aidex-space-2); }
+.gap3 { gap: var(--aidex-space-3); }
+.gap4 { gap: var(--aidex-space-4); }
+.gap5 { gap: var(--aidex-space-5); }
+.gap6 { gap: var(--aidex-space-6); }
+.gap7 { gap: var(--aidex-space-7); }
+.gap8 { gap: var(--aidex-space-8); }
+.gap9 { gap: var(--aidex-space-9); }
+.gap10 { gap: var(--aidex-space-10); }
+.gap11 { gap: var(--aidex-space-11); }
+.gap12 { gap: var(--aidex-space-12); }

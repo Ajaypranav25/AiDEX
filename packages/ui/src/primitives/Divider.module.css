@@ -1,0 +1,26 @@
+.rule {
+  width: 100%;
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--aidex-color-border-subtle);
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: var(--aidex-space-4);
+  color: var(--aidex-color-text-secondary);
+  font-size: var(--aidex-text-sm);
+  user-select: none;
+}
+
+.line {
+  flex: 1;
+  height: 1px;
+  background: var(--aidex-color-border);
+}
+
+.label {
+  flex: none;
+  line-height: 1;
+}

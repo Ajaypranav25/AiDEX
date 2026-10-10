@@ -1,0 +1,27 @@
+.progress {
+  display: flex;
+  align-items: center;
+  gap: var(--aidex-space-6);
+}
+
+.track {
+  flex: 1;
+  height: 8px;
+  overflow: hidden;
+  border-radius: var(--aidex-radius-full);
+  background: var(--aidex-color-surface-strong);
+}
+
+.fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--aidex-color-accent);
+  transition: width var(--aidex-duration-base) var(--aidex-ease);
+}
+
+.count {
+  flex: none;
+  color: var(--aidex-color-text);
+  font-size: var(--aidex-text-lg);
+  font-variant-numeric: tabular-nums;
+}

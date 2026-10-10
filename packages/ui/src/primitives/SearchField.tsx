@@ -1,21 +1,9 @@
-import type { ComponentPropsWithRef } from "react";
 import { SearchIcon } from "../icons/actions";
-import { cx } from "../utils/cx";
-import styles from "./SearchField.module.css";
+import { TextField, type TextFieldProps } from "./TextField";
 
-export type SearchFieldProps = Omit<ComponentPropsWithRef<"input">, "type" | "size"> & {
-  /** Accessible label; visually hidden because the icon and placeholder carry the meaning. */
-  label: string;
-  /** Applied to the outer field, not the input. */
-  className?: string;
-};
+export type SearchFieldProps = Omit<TextFieldProps, "type" | "shape" | "leadingIcon">;
 
-export function SearchField({ label, className, ...inputProps }: SearchFieldProps) {
-  return (
-    <label className={cx(styles.field, className)}>
-      <SearchIcon className={styles.icon} />
-      <span className={styles.visuallyHidden}>{label}</span>
-      <input type="search" className={styles.input} {...inputProps} />
-    </label>
-  );
+/** Pill-shaped search input with a leading search icon. */
+export function SearchField(props: SearchFieldProps) {
+  return <TextField type="search" shape="pill" leadingIcon={<SearchIcon />} {...props} />;
 }
