@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/aidexd",
     "crates/aidex-cli",
+    "crates/broker",
     "crates/bundle",
     "crates/core",
     "crates/drive",
