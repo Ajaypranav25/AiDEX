@@ -17,10 +17,7 @@ use url::Url;
 
 #[test]
 fn unavailable_host_identity_leaves_service_usable_and_denies_signin_before_network() {
-    let root = tempfile::tempdir().unwrap();
-    let vault = Arc::new(
-        VaultService::open(root.path().join("vault"), VaultServiceConfig::default()).unwrap(),
-    );
+    let (_root, vault) = vault();
     let admissions = Arc::new(AtomicUsize::new(0));
     let observed = admissions.clone();
     let mut service = AuthService::with_network_gate(
@@ -37,7 +34,7 @@ fn unavailable_host_identity_leaves_service_usable_and_denies_signin_before_netw
         service.start("openai", |_, _| Ok(())),
         Err(AuthError::Unavailable)
     ));
-    assert_eq!(admissions.load(Ordering::SeqCst), 0);
+    assert_eq!(admissions.load(Ordering::SeqCst), 1);
     assert!(service.flows.lock().unwrap().is_empty());
 }
 
@@ -402,6 +399,7 @@ fn cancellation_and_expiry_close_the_callback_listener() {
         .into_owned();
     assert!(reqwest::blocking::get(callback).is_err());
     let mut expiring = AuthService::new(vault).unwrap();
+    expiring.host_key = Ok("fixture-host-one".into());
     expiring.network_allowed = Arc::new(|| true);
     expiring.discovery = format!("{}/discovery", fixture.base);
     expiring.ttl = Duration::from_millis(30);

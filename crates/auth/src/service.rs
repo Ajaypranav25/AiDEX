@@ -198,12 +198,15 @@ impl AuthService {
         connected: impl Fn(&str, &str) -> Result<(), AuthError> + Send + Sync + 'static,
     ) -> Result<StartResult, AuthError> {
         storage::validate_provider(provider)?;
-        // Unsupported host identity disables sign-in, not the rest of Core.
-        // Resolve it before discovery so a denied attempt has no network effects.
-        let host_key = self.host_key.as_ref().map_err(|error| *error)?;
         let lock = self.provider_lock(provider);
         let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         let profile = self.profile(provider)?;
+        if !(self.network_allowed)() {
+            return Err(AuthError::NetworkOffline);
+        }
+        // Keep vault/offline policy errors primary; unsupported host identity
+        // still denies sign-in before discovery or any network effects.
+        let host_key = self.host_key.as_ref().map_err(|error| *error)?;
         {
             let mut flows = self.flows.lock().unwrap_or_else(|e| e.into_inner());
             if flows.values().any(|f| {
