@@ -164,6 +164,18 @@ fn healthy_process_registers_local_provider_and_tears_down() {
     assert_eq!(ready.state, "ready");
     assert_eq!(ready.backend, Some(Backend::Cpu));
     assert!(!ready.controls.is_empty());
+    let plan = ready
+        .plan
+        .as_ref()
+        .expect("a start records its launch plan");
+    assert_eq!((plan.threads, plan.context_window), (2, 2048));
+    assert!(
+        plan.reasons
+            .iter()
+            .any(|reason| reason.contains("runtime is CPU-only")),
+        "{:?}",
+        plan.reasons
+    );
     let provider = registry
         .provider(&ProviderId::new("local-llama").unwrap())
         .unwrap();

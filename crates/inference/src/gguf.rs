@@ -8,6 +8,27 @@ use std::{
 pub(crate) struct Header {
     pub version: u32,
     pub context: Option<u32>,
+    /// Attention shape used to estimate the KV cache (`<arch>.block_count`,
+    /// `<arch>.embedding_length`, `<arch>.attention.head_count[_kv]`).
+    pub shape: Shape,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Shape {
+    pub block_count: Option<u64>,
+    pub embedding_length: Option<u64>,
+    pub head_count: Option<u64>,
+    pub head_count_kv: Option<u64>,
+}
+impl Shape {
+    /// f16 K+V cache bytes per context token, when the shape is known.
+    pub fn kv_bytes_per_token(&self) -> Option<u64> {
+        let layers = self.block_count?;
+        let embedding = self.embedding_length?;
+        let heads = self.head_count.filter(|h| *h > 0).unwrap_or(1);
+        let kv_heads = self.head_count_kv.filter(|h| *h > 0).unwrap_or(heads);
+        let kv_width = (embedding / heads).checked_mul(kv_heads)?;
+        layers.checked_mul(kv_width)?.checked_mul(2 * 2)
+    }
 }
 struct Reader {
     file: File,
@@ -168,6 +189,7 @@ pub(crate) fn inspect(path: &Path) -> Result<Header, InferenceError> {
         return Err(bad("invalid GGUF counts"));
     }
     let mut context = None;
+    let mut shape = Shape::default();
     let mut alignment = 32u64;
     for _ in 0..metadata {
         let key = r.string()?;
@@ -175,6 +197,15 @@ pub(crate) fn inspect(path: &Path) -> Result<Header, InferenceError> {
         let value = r.value(t, 0)?;
         if key.ends_with(".context_length") {
             context = value.and_then(|v| u32::try_from(v).ok()).filter(|v| *v > 0);
+        }
+        if key.ends_with(".block_count") {
+            shape.block_count = value;
+        } else if key.ends_with(".embedding_length") {
+            shape.embedding_length = value;
+        } else if key.ends_with(".attention.head_count") {
+            shape.head_count = value;
+        } else if key.ends_with(".attention.head_count_kv") {
+            shape.head_count_kv = value;
         }
         if key == "general.alignment" {
             alignment = value.ok_or_else(|| bad("invalid GGUF alignment"))?;
@@ -232,5 +263,9 @@ pub(crate) fn inspect(path: &Path) -> Result<Header, InferenceError> {
             return Err(bad("GGUF tensor payloads overlap"));
         }
     }
-    Ok(Header { version, context })
+    Ok(Header {
+        version,
+        context,
+        shape,
+    })
 }

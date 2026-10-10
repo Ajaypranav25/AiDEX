@@ -171,6 +171,7 @@ version = "0.1.0"
 dependencies = [
  "aidex-core",
  "aidex-drive",
+ "aidex-host",
  "aidex-providers",
  "aidex-sandbox",
  "fs2",

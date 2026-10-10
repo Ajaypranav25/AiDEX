@@ -79,6 +79,12 @@ pub struct RuntimeInfo {
     pub verified: bool,
     pub gpu_supported: bool,
 }
+/// Host facts local inference plans with (`inference.host`).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostReport {
+    pub resources: aidex_host::HostResources,
+    pub gpu: aidex_host::GpuStatus,
+}
 #[derive(Clone, Debug, Serialize)]
 pub struct InferenceStatus {
     pub state: String,
@@ -90,6 +96,8 @@ pub struct InferenceStatus {
     pub pid: Option<u32>,
     pub context_window: Option<u32>,
     pub threads: Option<u32>,
+    /// How the running (or starting) model's settings were chosen, with reasons.
+    pub plan: Option<crate::LaunchPlan>,
     pub controls: Vec<aidex_sandbox::PlannedControl>,
     pub limitations: Vec<String>,
 }
