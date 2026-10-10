@@ -40,6 +40,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "aidex-broker"
+version = "0.1.0"
+dependencies = [
+ "aidex-core",
+ "aidex-drive",
+ "aidex-events",
+ "aidex-policy",
+ "aidex-providers",
+ "aidex-sandbox",
+ "aidex-tools",
+ "aidex-vault",
+ "aidex-workspace",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "toml 0.8.2",
+]
+
+[[package]]
 name = "aidex-core"
 version = "0.1.0"
 dependencies = [
@@ -89,6 +109,17 @@ name = "aidex-host"
 version = "0.1.0"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "aidex-policy"
+version = "0.1.0"
+dependencies = [
+ "aidex-core",
+ "globset",
+ "serde",
+ "sha2",
+ "toml 0.8.2",
 ]
 
 [[package]]
@@ -152,6 +183,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "aidex-tools"
+version = "0.1.0"
+dependencies = [
+ "aidex-core",
+ "aidex-events",
+ "aidex-policy",
+ "aidex-sandbox",
+ "aidex-workspace",
+ "globset",
+ "ignore",
+ "regex",
+ "schemars 0.8.22",
+ "serde",
+ "serde_json",
+ "serde_path_to_error",
+ "sha2",
+ "similar",
+]
+
+[[package]]
 name = "aidex-vault"
 version = "0.1.0"
 dependencies = [
@@ -187,13 +238,16 @@ dependencies = [
 name = "aidexd"
 version = "0.1.0"
 dependencies = [
+ "aidex-broker",
  "aidex-core",
  "aidex-drive",
  "aidex-events",
  "aidex-host",
+ "aidex-policy",
  "aidex-providers",
  "aidex-router",
  "aidex-sessions",
+ "aidex-tools",
  "aidex-vault",
  "aidex-workspace",
  "getrandom 0.3.4",
@@ -3254,6 +3308,17 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
+]
+
+[[package]]
+name = "serde_path_to_error"
+version = "0.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "10a9ff822e371bb5403e391ecd83e182e0e77ba7f6fe0160b795797109d1b457"
+dependencies = [
+ "itoa",
+ "serde",
+ "serde_core",
 ]
 
 [[package]]
