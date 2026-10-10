@@ -1,3 +1,3 @@
-# Local models and runtime (screen 31)
+# Models step
 
-`ModelsStep` lists sample GGUF models (the embedding model is required), the required llama.cpp runtime, and acceleration backends with sample host notes, plus a live size meter against the drive's free space. At least one chat model is required. No model downloads or imports are implemented.
+Step 3: choose sample model packages, optionally a GGUF file path (required when "Bring your own GGUF" is checked), and the execution backend. The llama.cpp runtime is always included.

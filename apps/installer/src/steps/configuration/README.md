@@ -1,3 +1,3 @@
-# Installation configuration (screen 30)
+# Setup step
 
-`ConfigurationStep` offers Lite, Developer, and Custom profiles with size estimates against the chosen drive's free space. Custom reveals component bundles; choosing a profile presets the selections refined in the next two steps. Nothing is persisted.
+Step 2: pick Lite, Developer, or Custom. Lite and Developer reset the component selections; changing components later turns the setup into Custom.
