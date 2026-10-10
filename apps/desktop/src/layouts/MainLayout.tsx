@@ -209,7 +209,10 @@ export function MainLayout({ Sidebar, onNewSession, children }: Props) {
   );
 }
 
-/** Back and forward through the screens visited in this session. */
+/**
+ * Back and forward through the screens visited in this session. At either end a button is only
+ * aria-disabled, so the one just pressed keeps keyboard focus; pressing it then does nothing.
+ */
 function HistoryButtons() {
   const { back, forward, canGoBack, canGoForward } = useNavigation();
   const shortcuts = historyShortcutLabels[useApplePlatform() ? "apple" : "other"];
@@ -220,8 +223,8 @@ function HistoryButtons() {
         label="Back"
         title={`Back (${shortcuts.back.label})`}
         aria-keyshortcuts={shortcuts.back.aria}
+        aria-disabled={!canGoBack}
         icon={<ChevronLeftIcon />}
-        disabled={!canGoBack}
         onClick={back}
       />
       <IconButton
@@ -229,8 +232,8 @@ function HistoryButtons() {
         label="Forward"
         title={`Forward (${shortcuts.forward.label})`}
         aria-keyshortcuts={shortcuts.forward.aria}
+        aria-disabled={!canGoForward}
         icon={<ChevronRightIcon />}
-        disabled={!canGoForward}
         onClick={forward}
       />
     </>

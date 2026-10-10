@@ -30,24 +30,37 @@ const button = (name: string) => screen.getByRole("button", { name });
 const banner = () => screen.getByRole("banner");
 
 describe("MainLayout history buttons", () => {
-  it("walk back and forward through the visited screens and disable at either end", async () => {
+  it("walk back and forward through the visited screens and report when an end is reached", async () => {
     const user = userEvent.setup();
     renderLayout();
-    expect(button("Back")).toBeDisabled();
-    expect(button("Forward")).toBeDisabled();
+    expect(button("Back")).toHaveAttribute("aria-disabled", "true");
+    expect(button("Forward")).toHaveAttribute("aria-disabled", "true");
 
     await user.click(button("Open settings"));
     expect(banner()).toHaveTextContent("Settings");
-    expect(button("Back")).toBeEnabled();
+    expect(button("Back")).toHaveAttribute("aria-disabled", "false");
 
     await user.click(button("Back"));
     expect(banner()).toHaveTextContent("Chat");
-    expect(button("Back")).toBeDisabled();
-    expect(button("Forward")).toBeEnabled();
+    expect(button("Back")).toHaveAttribute("aria-disabled", "true");
+    expect(button("Forward")).toHaveAttribute("aria-disabled", "false");
 
     await user.click(button("Forward"));
     expect(banner()).toHaveTextContent("Settings");
-    expect(button("Forward")).toBeDisabled();
+    expect(button("Forward")).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("stay focusable at either end, so pressing one never drops keyboard focus", async () => {
+    const user = userEvent.setup();
+    renderLayout();
+    await user.click(button("Open settings"));
+
+    await user.click(button("Back"));
+    await user.click(button("Back"));
+
+    expect(button("Back")).not.toHaveAttribute("disabled");
+    expect(button("Back")).toHaveFocus();
+    expect(banner()).toHaveTextContent("Chat");
   });
 
   it("name their shortcuts for each platform", () => {
