@@ -3,7 +3,7 @@
 
 use crate::commands::{
     agent::AgentCommand, daemon::DaemonCommand, events::EventsCommand, omp::SessionOptions,
-    vault::VaultCommand, workspace::WorkspaceArgs,
+    session::SessionArgs, vault::VaultCommand, workspace::WorkspaceArgs,
 };
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -74,6 +74,9 @@ pub enum Commands {
     /// Manage host, drive, and ephemeral workspaces.
     #[command(alias = "project")]
     Workspace(WorkspaceArgs),
+    /// Inspect durable sessions, checkpoints, and resume plans.
+    #[command(alias = "sessions")]
+    Session(SessionArgs),
 }
 
 impl Commands {
@@ -94,6 +97,7 @@ impl Commands {
             Some(Self::Doctor) => "aidex doctor",
             Some(Self::Vault { command }) => command.label(),
             Some(Self::Workspace(args)) => args.command.label(),
+            Some(Self::Session(args)) => args.command.label(),
         }
     }
 }

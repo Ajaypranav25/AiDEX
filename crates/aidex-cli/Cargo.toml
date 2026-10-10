@@ -10,6 +10,7 @@ aidex-core = { path = "../core" }
 aidex-drive = { path = "../drive" }
 aidex-events = { path = "../events" }
 aidex-host = { path = "../host" }
+aidex-sessions = { path = "../sessions" }
 aidex-workspace = { path = "../workspace" }
 aidexd = { path = "../aidexd" }
 clap.workspace = true
