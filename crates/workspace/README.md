@@ -61,4 +61,6 @@ workspaces/ephemeral/<id>/tree/            ephemeral workspace root
 - Windows 8.3 short names are not normalized; they resolve as the directories they alias but compare differently (which can only cause a false refusal). NTFS per-directory case sensitivity is not detected. Reserved-name rules are enforced only on Windows.
 - Empty directories are not tracked by the baseline or by review; directory deletions are not applied (emptied directories remain). File permissions other than the Unix mode bits are not preserved.
 - Review requires the source to be available. Very large reviews are bounded, not paginated; the daemon truncates the listed entries to fit one IPC message while the digest still covers every change.
+  Changes, conflicts, and unsupported entries are trimmed independently, including
+  reviews with no changes. The digest and total change/conflict counts remain complete.
 - No mirror/clone workspaces, worktree management (§33.1), or git integration beyond detecting `.git`. Workspace events are returned as values, not published: `aidex-events` wiring comes later.
