@@ -1,0 +1,31 @@
+[package]
+name = "aidex-inference"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Portable local GGUF inference through a managed, integrity-checked llama.cpp runtime."
+autobins = false
+
+[dependencies]
+aidex-core = { path = "../core" }
+aidex-drive = { path = "../drive" }
+aidex-events = { path = "../events" }
+aidex-host = { path = "../host" }
+aidex-providers = { path = "../providers" }
+aidex-sandbox = { path = "../sandbox" }
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
+getrandom = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+toml = { version = "0.8", default-features = false, features = ["parse", "display"] }
+ureq = { version = "3.4", default-features = false, features = ["rustls"] }
+zeroize = "1.8"
+zip = { version = "4.6", default-features = false, features = ["deflate-flate2"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
