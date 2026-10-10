@@ -73,7 +73,7 @@
   border-radius: var(--aidex-radius-full);
 }
 
-.ghost:hover:not(:disabled) {
+.ghost:hover:not(:disabled):not([aria-disabled="true"]) {
   background: var(--aidex-color-surface-hover);
 }
 
@@ -81,7 +81,7 @@
   background: var(--aidex-color-surface-strong);
 }
 
-.soft:hover:not(:disabled) {
+.soft:hover:not(:disabled):not([aria-disabled="true"]) {
   background: var(--aidex-color-surface-stronger);
 }
 
@@ -94,7 +94,7 @@
   background: var(--aidex-color-accent);
 }
 
-.primary:hover:not(:disabled) {
+.primary:hover:not(:disabled):not([aria-disabled="true"]) {
   background: var(--aidex-color-accent-border);
 }
 
