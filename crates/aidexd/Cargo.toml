@@ -6,12 +6,14 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+aidex-core = { path = "../core" }
 aidex-drive = { path = "../drive" }
 aidex-events = { path = "../events" }
 aidex-host = { path = "../host" }
 getrandom = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
 [dev-dependencies]
 tempfile = "3"
 
