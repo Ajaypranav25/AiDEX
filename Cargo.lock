@@ -27,6 +27,7 @@ dependencies = [
 name = "aidex-cli"
 version = "0.1.0"
 dependencies = [
+ "aidex-core",
  "aidex-drive",
  "aidex-events",
  "aidex-host",
@@ -61,6 +62,7 @@ dependencies = [
 name = "aidex-events"
 version = "0.1.0"
 dependencies = [
+ "aidex-core",
  "rusqlite",
  "serde",
  "serde_json",
@@ -128,6 +130,7 @@ dependencies = [
  "aidex-events",
  "aidex-host",
  "getrandom",
+ "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
