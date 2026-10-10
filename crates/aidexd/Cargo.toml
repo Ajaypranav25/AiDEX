@@ -1,0 +1,16 @@
+[package]
+name = "aidexd"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+aidex-host = { path = "../host" }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "aidexd"
+path = "src/main.rs"
