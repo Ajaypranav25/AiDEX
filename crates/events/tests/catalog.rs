@@ -159,7 +159,8 @@ fn every_text_bearing_kind_is_redacted_before_storage_and_delivery() {
                 .next_timeout(std::time::Duration::from_secs(5))
                 .unwrap()
                 .unwrap();
-            assert_eq!(delivered, returned);
+            assert_eq!(delivered.cursor, returned.cursor);
+            assert_eq!(delivered.event.as_ref(), Some(&returned));
             let wire = serde_json::to_value(&returned).unwrap();
             assert!(leaks(&wire).is_empty(), "{} leaked {wire}", returned.name());
             if has_text {

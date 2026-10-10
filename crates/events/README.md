@@ -25,9 +25,16 @@ let envelope: EventEnvelope = log.append(EventScope::global(), EventKind::DriveS
 let page: ReplayPage = log.replay(&EventFilter::for_workspace(ws).with_kind("tool"), Cursor::ZERO, 256)?;
 // page.events, page.next_cursor (resume after this), page.has_more
 
-// Subscribe: history first (paged from disk), then live events, in cursor order.
+// Subscribe: history first, then live events and consumed durable watermarks.
 let mut subscription = log.subscribe(EventFilter::all(), last_acknowledged)?;
-while let Some(envelope) = subscription.next_timeout(Duration::from_secs(1))? { /* ... */ }
+while let Some(item) = subscription.next_timeout(Duration::from_secs(1))? {
+    if let Some(envelope) = item.event {
+        process_event(&envelope)?;
+        if envelope.is_durable() { last_acknowledged = envelope.cursor; }
+    } else {
+        last_acknowledged = item.cursor;
+    }
+}
 
 log.latest_cursor()?; log.oldest_cursor()?; log.prune()?;
 log.import_legacy(&old_pr40_file)?; // read-only, once, only into an empty log
@@ -45,7 +52,8 @@ Key types: `EventKind` (catalog; `name()`, `domain()`, `is_durable()`), `EventEn
 first), `Cursor(u64)` (`Cursor::ZERO`), `EventScope { workspace_id, session_id }`
 (`global()`, `workspace(..)`, `session(ws, ses)`), `EventFilter { workspace_id,
 session_id, kinds }`, `RetentionPolicy { max_events, max_age }`, `ReplayPage`,
-`Subscription`, `EventSink`, `EventError` (with `code() -> ServiceErrorCode`),
+`Subscription`, `SubscriptionItem { event: Option<EventEnvelope>, cursor }`, `EventSink`,
+`EventError` (with `code() -> ServiceErrorCode`),
 `LegacyImport`. Small payload enums: `Outcome`, `MessageRole`, `RiskLevel`,
 `ApprovalScope`, `Verdict`, `ProcessStream`, `FileChange`, `SandboxLevel`,
 `WorkspaceKind`, `DaemonStopReason`, `ExtensionKind`, `LegacyRecord`,
@@ -67,10 +75,18 @@ session_id, kinds }`, `RetentionPolicy { max_events, max_age }`, `ReplayPage`,
 - **Subscriptions.** A subscription is registered at a live-from cursor under the
   log lock: durable history up to it is paged from disk, everything after it is
   offered to a bounded live queue (default 1024 events, at most 4 MiB). Delivery is
-  in cursor order without duplicates or gaps. Publishers never block: a full queue
-  marks the subscriber lagged and drops its queue; the subscriber then catches up
-  from disk after the last cursor it delivered and rejoins. Dropping a subscription
-  unregisters it.
+  in cursor order without duplicates or gaps. An item with `Some(event)` carries
+  `event.cursor`; process it before acknowledging its durable cursor, never an
+  ephemeral cursor. An item with `event: None` is a consumed watermark: every
+  durable event through `item.cursor` was delivered earlier or filtered out;
+  acknowledge it only after processing preceding items. Watermarks never
+  overtake queued matching events, are coalesced in constant space for nonmatches,
+  and are progress notifications, not periodic heartbeats. Publishers never block:
+  a full event queue marks the subscriber lagged and drops its queue; the subscriber
+  then catches up from disk after the last consumed cursor and rejoins. A successful legacy
+  import also sends existing subscribers through disk catch-up before later live
+  events; if import retention removed unseen history, they report `CursorExpired`
+  rather than skipping it. Dropping a subscription unregisters it.
 - **Ephemeral events** (`agent.delta`, `process.output`) are never stored and take
   no cursor; their envelope carries the latest durable cursor. They reach live
   subscribers only, and are lost while a subscriber lags.
