@@ -49,6 +49,11 @@ pub(crate) fn prepare_config_file(paths: &DrivePaths, name: &str) -> Result<Path
 pub enum ProviderKind {
     /// Any server speaking the OpenAI `/v1/models` + `/v1/chat/completions` API.
     OpenaiCompatible,
+    OpenaiResponses,
+    Anthropic,
+    Gemini,
+    AzureOpenai,
+    Bedrock,
     /// A managed local llama.cpp runtime (registered at runtime, never configured).
     LlamaCpp,
     /// The deterministic in-process [`crate::FakeProvider`].
@@ -59,6 +64,11 @@ impl ProviderKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::OpenaiCompatible => "openai-compatible",
+            Self::OpenaiResponses => "openai-responses",
+            Self::Anthropic => "anthropic",
+            Self::Gemini => "gemini",
+            Self::AzureOpenai => "azure-openai",
+            Self::Bedrock => "bedrock",
             Self::LlamaCpp => "llama-cpp",
             Self::Fake => "fake",
         }
@@ -70,6 +80,11 @@ impl std::str::FromStr for ProviderKind {
     fn from_str(text: &str) -> Result<Self, Self::Err> {
         match text {
             "openai-compatible" => Ok(Self::OpenaiCompatible),
+            "openai-responses" => Ok(Self::OpenaiResponses),
+            "anthropic" => Ok(Self::Anthropic),
+            "gemini" => Ok(Self::Gemini),
+            "azure-openai" => Ok(Self::AzureOpenai),
+            "bedrock" => Ok(Self::Bedrock),
             "llama-cpp" => Ok(Self::LlamaCpp),
             "fake" => Ok(Self::Fake),
             _ => Err("unknown provider kind (use openai-compatible)".into()),
@@ -236,7 +251,7 @@ impl ProviderConfig {
     /// Structural checks that need no network. Endpoint parsing and locality
     /// rules are checked when the provider is built.
     pub fn validate(&self) -> Result<(), String> {
-        if self.kind != ProviderKind::OpenaiCompatible {
+        if matches!(self.kind, ProviderKind::Fake | ProviderKind::LlamaCpp) {
             return Err(format!(
                 "provider `{}`: only kind `openai-compatible` can be configured",
                 self.id
@@ -248,6 +263,13 @@ impl ProviderConfig {
                     "provider `{}`: secret names are 1-128 ASCII letters, digits, `.`, `_`, or `-`, starting with a letter or digit",
                     self.id
                 ));
+            }
+            if secret_name.starts_with("oauth.")
+                && (secret_name != &format!("oauth.{}.access", self.id)
+                    || self.kind != ProviderKind::OpenaiResponses
+                    || self.base_url.trim_end_matches('/') != "https://api.openai.com/v1")
+            {
+                return Err("OAuth credentials are bound to their registered account and the trusted OpenAI Responses endpoint".into());
             }
         }
         let mut seen = std::collections::HashSet::new();

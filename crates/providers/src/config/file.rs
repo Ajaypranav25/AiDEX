@@ -143,10 +143,10 @@ pub(crate) fn write_toml<T: Serialize>(path: &Path, value: &T) -> Result<(), Con
         path: path.to_path_buf(),
         message: format!("cannot encode configuration: {error}"),
     })?;
-    if let Ok(metadata) = fs::symlink_metadata(path) {
-        if !metadata.file_type().is_file() {
-            return Err(ConfigError::UnsafePath(path.to_path_buf()));
-        }
+    if let Ok(metadata) = fs::symlink_metadata(path)
+        && !metadata.file_type().is_file()
+    {
+        return Err(ConfigError::UnsafePath(path.to_path_buf()));
     }
     let parent = path
         .parent()

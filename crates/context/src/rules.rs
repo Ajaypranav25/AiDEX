@@ -265,10 +265,10 @@ fn read_confined(
     let truncated = size > max;
     if truncated {
         // Cut on a character boundary.
-        if let Err(error) = std::str::from_utf8(&bytes) {
-            if error.error_len().is_none() {
-                bytes.truncate(error.valid_up_to());
-            }
+        if let Err(error) = std::str::from_utf8(&bytes)
+            && error.error_len().is_none()
+        {
+            bytes.truncate(error.valid_up_to());
         }
     }
     Ok(Some(ConfinedFile {

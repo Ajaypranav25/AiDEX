@@ -1,46 +1,36 @@
 import { SidebarItem, SidebarSection } from "@aidex/ui/desktop";
-import { FolderIcon, FolderPlusIcon, PlusIcon } from "@aidex/ui/icons";
+import { FolderIcon, PlusIcon } from "@aidex/ui/icons";
 import { useNavigation } from "../../app/providers/navigation";
-import { usePreferences } from "../../app/providers/preferences";
+import { useRpc } from "../../hooks/useRpc";
 import { SectionSidebar } from "../../layouts/SectionSidebar";
-import { sampleWorkspaces, type SampleWorkspace } from "../../lib/sample/workspaces";
-import { filterOf } from "./workspaceFilters";
-
 export function WorkspacesSidebar() {
-  const { route, navigate, replace } = useNavigation();
-  const { setWorkspaceId } = usePreferences();
-  const showingAll = route.page === "workspaces" && filterOf(route.tab) === "all";
-
-  const openWorkspace = (id: string) => {
-    setWorkspaceId(id);
-    navigate({ page: "workspace", id });
-  };
-
-  const workspaceItem = ({ id, name, Icon, iconTone }: SampleWorkspace) => (
-    <SidebarItem key={id} label={name} icon={<Icon />} iconTone={iconTone} onSelect={() => openWorkspace(id)} />
-  );
-
+  const { route, navigate } = useNavigation();
+  const workspaces = useRpc("workspace.list");
   return (
-    <SectionSidebar
-      title="Workspaces"
-      action={{ label: "Add workspace", icon: <PlusIcon />, onClick: () => navigate({ page: "workspace-create" }) }}
-    >
-      <SidebarSection title="Browse">
+    <SectionSidebar title="Workspaces">
+      <SidebarSection title="Projects">
         <SidebarItem
           label="All workspaces"
           icon={<FolderIcon />}
-          active={showingAll}
-          count={sampleWorkspaces.length}
-          onSelect={() => replace({ page: "workspaces" })}
+          active={route.page === "workspaces"}
+          onSelect={() => navigate({ page: "workspaces" })}
         />
         <SidebarItem
-          label="Create or import"
-          icon={<FolderPlusIcon />}
+          label="Add workspace"
+          icon={<PlusIcon />}
+          active={route.page === "workspace-create"}
           onSelect={() => navigate({ page: "workspace-create" })}
         />
+        {(workspaces.data?.workspaces ?? []).map((workspace) => (
+          <SidebarItem
+            key={workspace.id}
+            label={workspace.name}
+            icon={<FolderIcon />}
+            active={route.id === workspace.id}
+            onSelect={() => navigate({ page: "workspace", id: workspace.id })}
+          />
+        ))}
       </SidebarSection>
-      <SidebarSection title="Pinned">{sampleWorkspaces.filter((w) => w.pinned).map(workspaceItem)}</SidebarSection>
-      <SidebarSection title="Recent">{sampleWorkspaces.filter((w) => !w.pinned).map(workspaceItem)}</SidebarSection>
     </SectionSidebar>
   );
 }

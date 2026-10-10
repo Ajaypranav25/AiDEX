@@ -164,16 +164,16 @@ fn apply(
     let mut client = connect(drive)?;
     let review: EphemeralReview = client.call_as(EPHEMERAL_REVIEW, json!({ "id": id }))?;
     let listed = |path: &WorkspacePath| review.changes.iter().any(|change| change.path == *path);
-    if let Some(missing) = selected.iter().find(|path| !listed(path)) {
-        if !review.truncated {
-            return Err(CliError::new(
-                Exit::Usage,
-                format!(
-                    "`{}` is not a change in this ephemeral workspace",
-                    missing.as_str()
-                ),
-            ));
-        }
+    if let Some(missing) = selected.iter().find(|path| !listed(path))
+        && !review.truncated
+    {
+        return Err(CliError::new(
+            Exit::Usage,
+            format!(
+                "`{}` is not a change in this ephemeral workspace",
+                missing.as_str()
+            ),
+        ));
     }
     let source: Workspace = client.call_as(GET, json!({ "id": review.source_id.as_str() }))?;
     let to_apply: Vec<_> = review

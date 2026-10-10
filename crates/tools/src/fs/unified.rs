@@ -171,10 +171,10 @@ pub(super) fn apply(content: &str, diff: &str) -> Result<String, (usize, String)
                 .map_or(ending, |(_, ending)| *ending);
             output.push((text.clone(), line_ending));
         }
-        if hunk.new_no_newline {
-            if let Some(last) = output.last_mut() {
-                last.1 = "";
-            }
+        if hunk.new_no_newline
+            && let Some(last) = output.last_mut()
+        {
+            last.1 = "";
         }
         cursor = at + hunk.old.len();
     }

@@ -44,6 +44,7 @@ pub(crate) struct HttpRequest {
     /// Full `Authorization` header value; moved into the worker and zeroized
     /// once the request is sent.
     pub authorization: Option<Zeroizing<String>>,
+    pub headers: Vec<(String, Zeroizing<String>)>,
     pub stream: bool,
 }
 
@@ -55,6 +56,10 @@ pub(crate) enum Frame {
     },
     /// One line of a successful `text/event-stream` body (without the newline).
     Line(String),
+    Event {
+        event_type: String,
+        payload: String,
+    },
     /// A complete body (non-streaming success, or an error body).
     Body(String),
     End,
@@ -71,12 +76,15 @@ impl Exchange {
         agent: &ureq::Agent,
         request: HttpRequest,
         limits: Limits,
+        cancel: &CancelToken,
     ) -> Result<Self, ProviderError> {
+        check_cancel(cancel)?;
         let (sender, frames) = sync_channel(CHANNEL_DEPTH);
         let agent = agent.clone();
+        let cancel = cancel.clone();
         thread::Builder::new()
             .name("aidex-provider-http".into())
-            .spawn(move || run(&agent, request, limits, &sender))
+            .spawn(move || run(&agent, request, limits, &cancel, &sender))
             .map_err(|_| ProviderError::unavailable("cannot start an HTTP worker thread"))?;
         Ok(Self { frames })
     }
@@ -103,38 +111,76 @@ impl Exchange {
     }
 }
 
-fn run(agent: &ureq::Agent, request: HttpRequest, limits: Limits, sender: &SyncSender<Message>) {
+pub(crate) fn check_cancel(cancel: &CancelToken) -> Result<(), ProviderError> {
+    match cancel.state() {
+        Some(CancelReason::Cancelled) => Err(ProviderError::Cancelled),
+        Some(CancelReason::DeadlineExceeded) => Err(ProviderError::Timeout),
+        None => Ok(()),
+    }
+}
+
+fn run(
+    agent: &ureq::Agent,
+    request: HttpRequest,
+    limits: Limits,
+    cancel: &CancelToken,
+    sender: &SyncSender<Message>,
+) {
+    if let Err(error) = check_cancel(cancel) {
+        let _ = sender.send(Err(error));
+        return;
+    }
     let HttpRequest {
         url,
         method,
         authorization,
+        headers,
         stream,
     } = request;
     let accept = if stream {
-        "text/event-stream, application/json"
+        "text/event-stream, application/vnd.amazon.eventstream, application/json"
     } else {
         "application/json"
     };
     let response = match method {
         Method::Get => {
             let mut builder = agent.get(&url).header("Accept", accept);
+            for (name, value) in &headers {
+                builder = builder.header(name.as_str(), value.as_str());
+            }
             if let Some(value) = &authorization {
                 builder = builder.header("Authorization", value.as_str());
             }
-            builder.call()
+            match check_cancel(cancel) {
+                Ok(()) => builder.call(),
+                Err(error) => {
+                    let _ = sender.send(Err(error));
+                    return;
+                }
+            }
         }
         Method::Post(body) => {
             let mut builder = agent
                 .post(&url)
                 .header("Accept", accept)
                 .content_type("application/json");
+            for (name, value) in &headers {
+                builder = builder.header(name.as_str(), value.as_str());
+            }
             if let Some(value) = &authorization {
                 builder = builder.header("Authorization", value.as_str());
             }
-            builder.send(&body[..])
+            match check_cancel(cancel) {
+                Ok(()) => builder.send(&body[..]),
+                Err(error) => {
+                    let _ = sender.send(Err(error));
+                    return;
+                }
+            }
         }
     };
     drop(authorization);
+    drop(headers);
     let mut response = match response {
         Ok(response) => response,
         Err(error) => {
@@ -149,15 +195,20 @@ fn run(agent: &ureq::Agent, request: HttpRequest, limits: Limits, sender: &SyncS
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.trim().parse::<u64>().ok())
         .map(Duration::from_secs);
-    let event_stream = headers
+    let aws_stream = headers
         .get("content-type")
-        .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| {
-            value
-                .trim_start()
-                .to_ascii_lowercase()
-                .starts_with("text/event-stream")
-        });
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|v| v.starts_with("application/vnd.amazon.eventstream"));
+    let event_stream = aws_stream
+        || headers
+            .get("content-type")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| {
+                value
+                    .trim_start()
+                    .to_ascii_lowercase()
+                    .starts_with("text/event-stream")
+            });
     if sender
         .send(Ok(Frame::Head {
             status,
@@ -170,6 +221,22 @@ fn run(agent: &ureq::Agent, request: HttpRequest, limits: Limits, sender: &SyncS
     }
     let success = (200..300).contains(&status);
     let mut reader = BufReader::new(response.body_mut().as_reader());
+    if success && aws_stream {
+        loop {
+            let message = match super::eventstream::read_frame(&mut reader, limits.max_line) {
+                Ok(Some((event_type, payload))) => Ok(Frame::Event {
+                    event_type,
+                    payload,
+                }),
+                Ok(None) => Ok(Frame::End),
+                Err(error) => Err(map_body_error(&error)),
+            };
+            let last = !matches!(message, Ok(Frame::Event { .. }));
+            if sender.send(message).is_err() || last {
+                return;
+            }
+        }
+    }
     if success && event_stream {
         loop {
             let message = match read_line_bounded(&mut reader, limits.max_line) {

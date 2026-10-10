@@ -2,6 +2,8 @@
 //! its own path, verifies the drive manifest and the active bundle's critical binaries,
 //! and only then runs the bundle's `aidex` CLI with the caller's arguments.
 
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 mod error;
 mod info;
 mod launch;

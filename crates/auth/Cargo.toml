@@ -1,0 +1,30 @@
+[package]
+name = "aidex-auth"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+aidex-vault = { path = "../vault" }
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+getrandom = "0.3"
+jsonwebtoken = "9.3"
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+url = "2"
+zeroize = { version = "1.8", features = ["derive"] }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+
+[dev-dependencies]
+tempfile = "3"
+rsa = { version = "0.9", features = ["pem"] }
+rand = "0.8"
+
+[lints]
+workspace = true

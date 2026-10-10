@@ -100,13 +100,13 @@ fn current_content(
                 return Err(ToolError::conflict(display, "the file already exists"));
             }
             let bytes = read_capped(absolute, ctx.limits.max_write_bytes, "the existing file")?;
-            if let Some(expected) = &input.expected_sha256 {
-                if !expected.eq_ignore_ascii_case(&sha256_hex(&bytes)) {
-                    return Err(ToolError::conflict(
-                        display,
-                        "its SHA-256 differs from expected_sha256",
-                    ));
-                }
+            if let Some(expected) = &input.expected_sha256
+                && !expected.eq_ignore_ascii_case(&sha256_hex(&bytes))
+            {
+                return Err(ToolError::conflict(
+                    display,
+                    "its SHA-256 differs from expected_sha256",
+                ));
             }
             Ok(Some(bytes))
         }

@@ -150,18 +150,19 @@ fn redact_core(core: &str) -> (String, Pending) {
     if lower == "bearer" || lower == "basic" || lower == "token" {
         return (core.to_owned(), Pending::Value);
     }
-    if let Some(name) = lower.strip_suffix(':') {
-        if is_secret_name(name) || name == "authorization" || name == "cookie" {
-            return (core.to_owned(), Pending::Value);
-        }
+    if let Some(name) = lower.strip_suffix(':')
+        && (is_secret_name(name) || name == "authorization" || name == "cookie")
+    {
+        return (core.to_owned(), Pending::Value);
     }
     if core.contains("://") {
         return (redact_known_tokens(&redact_url(core)), Pending::None);
     }
-    if let Some((name, value)) = core.split_once('=') {
-        if !value.is_empty() && is_secret_name(name) {
-            return (format!("{name}={REDACTED}"), Pending::None);
-        }
+    if let Some((name, value)) = core.split_once('=')
+        && !value.is_empty()
+        && is_secret_name(name)
+    {
+        return (format!("{name}={REDACTED}"), Pending::None);
     }
     (redact_known_tokens(core), Pending::None)
 }
@@ -248,12 +249,10 @@ fn redact_known_tokens(text: &str) -> String {
             .chars()
             .next_back()
             .is_none_or(|ch| !ch.is_ascii_alphanumeric());
-        if boundary {
-            if let Some(length) = credential_length(rest) {
-                out.push_str(REDACTED);
-                index += length;
-                continue;
-            }
+        if boundary && let Some(length) = credential_length(rest) {
+            out.push_str(REDACTED);
+            index += length;
+            continue;
         }
         let Some(ch) = rest.chars().next() else {
             break;

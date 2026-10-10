@@ -300,10 +300,11 @@ fn index_file(
     previous: Option<&Existing>,
     skipped: &mut SkipCounts,
 ) -> Result<FileOutcome, ContextError> {
-    if let Some(previous) = previous {
-        if previous.size == candidate.size && previous.mtime_ns == candidate.mtime_ns {
-            return Ok(FileOutcome::Unchanged);
-        }
+    if let Some(previous) = previous
+        && previous.size == candidate.size
+        && previous.mtime_ns == candidate.mtime_ns
+    {
+        return Ok(FileOutcome::Unchanged);
     }
     let (bytes, metadata) = match read_file(target, &candidate.path, options.max_file_bytes) {
         Ok(read) => read,
@@ -323,16 +324,16 @@ fn index_file(
     let size = bytes.len() as u64;
     let mtime_ns = walk::mtime_ns(&metadata);
     let sha256 = fsio::sha256_hex(&bytes);
-    if let Some(previous) = previous {
-        if previous.sha256 == sha256 {
-            transaction
-                .prepare_cached("UPDATE files SET size = ?1, mtime_ns = ?2 WHERE id = ?3")
-                .and_then(|mut statement| {
-                    statement.execute(params![size as i64, mtime_ns, previous.id])
-                })
-                .map_err(sql("cannot update an indexed file"))?;
-            return Ok(FileOutcome::Touched);
-        }
+    if let Some(previous) = previous
+        && previous.sha256 == sha256
+    {
+        transaction
+            .prepare_cached("UPDATE files SET size = ?1, mtime_ns = ?2 WHERE id = ?3")
+            .and_then(|mut statement| {
+                statement.execute(params![size as i64, mtime_ns, previous.id])
+            })
+            .map_err(sql("cannot update an indexed file"))?;
+        return Ok(FileOutcome::Touched);
     }
     if bytes[..bytes.len().min(BINARY_PROBE)].contains(&0) {
         skipped.binary += 1;

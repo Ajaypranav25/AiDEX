@@ -8,6 +8,7 @@ fn main() {
         .and_then(|path| std::env::split_paths(&path).next())
         .map(|entry| entry.display().to_string());
     let report = serde_json::json!({
+        "executable": std::env::current_exe().ok().map(|path| path.file_name().unwrap().to_string_lossy().into_owned()),
         "args": args,
         "drive_root": env("AIDEX_DRIVE_ROOT"),
         "bundle_dir": env("AIDEX_BUNDLE_DIR"),

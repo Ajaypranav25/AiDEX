@@ -12,11 +12,13 @@
 mod active;
 #[cfg(feature = "archive")]
 pub mod archive;
+mod catalog;
 mod digest;
 mod entry;
 mod error;
 mod fsutil;
 mod install;
+mod jobs;
 mod journal;
 pub mod layout;
 mod manifest;
@@ -28,6 +30,7 @@ mod target;
 mod verify;
 
 pub use active::{ActiveBundle, resolve_active};
+pub use catalog::{BundleCatalog, desktop_catalog};
 pub use digest::{is_sha256_hex, sha256_file, sha256_hex};
 pub use entry::{LAUNCHER_MARKER, is_aidex_launcher, unix_entry_script};
 pub use error::{BundleError, BundleErrorKind, DocumentError, IntegrityProblem, SignatureError};
@@ -36,6 +39,7 @@ pub use install::{
     InstallReport, InstallSource, InstallStep, LauncherPlacement, PlacementAction, install,
     install_signed, install_with, steps,
 };
+pub use jobs::{InstallJob, InstallJobs, JobState};
 pub use journal::{
     JOURNAL_FILE_NAME, JOURNAL_SCHEMA_VERSION, JournalOperation, JournalState, UPDATE_ID_PREFIX,
     UpdateJournal, journal_path,

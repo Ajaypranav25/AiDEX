@@ -4,6 +4,8 @@ pub(crate) mod monitor;
 mod output;
 
 use std::{
+    io::Write,
+    process::ChildStdin,
     sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError},
     time::{Duration, Instant},
 };
@@ -94,6 +96,7 @@ pub(crate) struct ProcessShared {
     state: Mutex<RunState>,
     cond: Condvar,
     output: Mutex<OutputState>,
+    pub(crate) stdin: Mutex<Option<ChildStdin>>,
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -110,6 +113,7 @@ impl ProcessShared {
             tree: OnceLock::new(),
             root_pid: OnceLock::new(),
             registry,
+            stdin: Mutex::new(None),
             state: Mutex::new(RunState {
                 kill_reason: None,
                 finished: None,
@@ -159,6 +163,7 @@ impl ProcessShared {
     }
 
     pub(crate) fn finish(&self, result: Result<ExitStatusInfo, SandboxError>) {
+        lock(&self.stdin).take();
         let mut state = lock(&self.state);
         if state.finished.is_none() {
             state.finished = Some(result);
@@ -262,6 +267,23 @@ pub struct ManagedProcess {
 }
 
 impl ManagedProcess {
+    /// Write to an explicitly interactive process. Never logs supplied bytes.
+    pub fn write_stdin(&self, bytes: &[u8]) -> Result<(), SandboxError> {
+        if !self.is_running() {
+            return Err(SandboxError::Io("process input is closed".into()));
+        }
+        let mut guard = lock(&self.shared.stdin);
+        let pipe = guard
+            .as_mut()
+            .ok_or_else(|| SandboxError::Io("process input is closed".into()))?;
+        pipe.write_all(bytes)
+            .and_then(|()| pipe.flush())
+            .map_err(|_| SandboxError::Io("writing process input failed".into()))
+    }
+    /// End the interactive stream; fixed-input processes already have closed stdin.
+    pub fn close_stdin(&self) {
+        lock(&self.shared.stdin).take();
+    }
     /// Registry identifier (`proc_<ULID>`).
     pub fn id(&self) -> &EntityId {
         &self.shared.id

@@ -238,6 +238,7 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
     let shared = Arc::clone(services);
     router.register(LOCK, move |_context, params| {
         expect_no_params(&params)?;
+        shared.native().cancel_all();
         let vault_id = shared.vault().status().vault_id;
         let outcome = shared.vault().lock();
         if let (true, Some(vault_id)) = (outcome.was_unlocked, vault_id) {
