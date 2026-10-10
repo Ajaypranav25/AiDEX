@@ -212,7 +212,7 @@ pub fn import_model_with(
             _ => InferenceError::io(format!("cannot create {}", display(&model_dir)), &error),
         })?;
         let model_path = model_dir.join(MODEL_FILE);
-        fs::rename(&partial, &model_path).map_err(|error| {
+        fsutil::rename(&partial, &model_path).map_err(|error| {
             InferenceError::io(
                 format!("cannot move the model into {}", display(&model_path)),
                 &error,

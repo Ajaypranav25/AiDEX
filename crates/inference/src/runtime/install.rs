@@ -191,7 +191,7 @@ fn install_hashed(
             message: error.to_string(),
         })?;
         fsutil::write_atomic(&staging.join(MANIFEST_FILE), &json)?;
-        fs::rename(&staging, &target).map_err(|error| {
+        fsutil::rename(&staging, &target).map_err(|error| {
             InferenceError::io(
                 format!("cannot move runtime into {}", display(&target)),
                 &error,

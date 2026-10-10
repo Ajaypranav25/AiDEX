@@ -131,7 +131,7 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
             InferenceError::io(format!("cannot sync {}", display(&temp)), &error)
         })?;
         drop(file);
-        fs::rename(&temp, path).map_err(|error| {
+        rename(&temp, path).map_err(|error| {
             InferenceError::io(format!("cannot replace {}", display(path)), &error)
         })?;
         sync_dir(parent);
@@ -141,6 +141,31 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
         let _ = fs::remove_file(&temp);
     }
     result
+}
+
+/// `fs::rename`, retried briefly on Windows when another process (typically an
+/// antivirus scanner inspecting a freshly written executable) still holds a
+/// handle and the move fails with "access denied" or a sharing violation.
+pub(crate) fn rename(from: &Path, to: &Path) -> io::Result<()> {
+    const ATTEMPTS: u32 = 40;
+    let mut attempt = 0;
+    loop {
+        match fs::rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(error)
+                if cfg!(windows)
+                    && attempt < ATTEMPTS
+                    && (error.kind() == io::ErrorKind::PermissionDenied
+                        || error.raw_os_error() == Some(32)) =>
+            {
+                attempt += 1;
+                std::thread::sleep(std::time::Duration::from_millis(
+                    50 * u64::from(attempt.min(5)),
+                ));
+            }
+            Err(error) => return Err(error),
+        }
+    }
 }
 
 /// Best-effort directory fsync so a rename survives power loss (Unix only;
