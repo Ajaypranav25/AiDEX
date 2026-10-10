@@ -11,6 +11,7 @@ aidex-core = { path = "../core" }
 aidex-drive = { path = "../drive" }
 aidex-events = { path = "../events" }
 aidex-host = { path = "../host" }
+aidex-inference = { path = "../inference" }
 aidex-providers = { path = "../providers" }
 aidex-router = { path = "../router" }
 aidex-sessions = { path = "../sessions" }
