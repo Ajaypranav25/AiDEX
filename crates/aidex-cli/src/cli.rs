@@ -10,6 +10,7 @@ use crate::commands::{
         index::IndexArgs, memory::MemoryArgs, pack::ContextArgs, rules::RulesArgs,
         search::SearchArgs,
     },
+    inference::InferenceArgs,
     model::ModelArgs,
     offline::OfflineArgs,
     provider::ProviderArgs,
@@ -85,6 +86,8 @@ pub enum Commands {
     Workspace(WorkspaceArgs),
     /// Inspect models, choose the default, and explain routing.
     Model(ModelArgs),
+    /// Import GGUF models and run them on the drive's verified llama.cpp runtime.
+    Inference(InferenceArgs),
     /// Configure model providers (credentials come from the vault).
     Provider(ProviderArgs),
     /// Refuse or allow remote provider traffic.
@@ -125,6 +128,7 @@ impl Commands {
             Some(Self::Vault { command }) => command.label(),
             Some(Self::Workspace(args)) => args.command.label(),
             Some(Self::Model(args)) => args.command.label(),
+            Some(Self::Inference(args)) => args.command.label(),
             Some(Self::Provider(args)) => args.command.label(),
             Some(Self::Offline(args)) => args.command.label(),
             Some(Self::Session(args)) => args.command.label(),

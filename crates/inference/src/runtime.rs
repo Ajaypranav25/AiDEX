@@ -157,7 +157,7 @@ pub(crate) fn install(
     files::write_json(&stage.0.join(MANIFEST), &manifest)?;
     verify(&stage.0, &manifest, cancel)?;
     files::check_cancel(cancel)?;
-    fs::rename(&stage.0, &target)?;
+    files::rename(&stage.0, &target)?;
     inspect(paths)?
         .map(|p| p.0)
         .ok_or_else(|| InferenceError::Integrity("runtime disappeared after install".into()))

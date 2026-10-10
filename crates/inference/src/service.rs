@@ -1,6 +1,7 @@
-use crate::{catalog, files, runtime, *};
+use crate::{catalog, files, plan, runtime, *};
 use aidex_core::CancelToken;
 use aidex_drive::DrivePaths;
+use aidex_host::{GpuProbeOptions, GpuStatus, HostResources, probe_gpus};
 use aidex_providers::{
     EgressGate, ModelConfig, ModelId, NoVault, OpenAiCompatibleProvider, ProviderConfig,
     ProviderId, ProviderKind, ProviderRegistry,
@@ -47,6 +48,7 @@ struct State {
     restoring: bool,
     model_name: Option<String>,
     startup_error: Option<String>,
+    plan: Option<LaunchPlan>,
 }
 
 /// One inference server per drive/service. Mutations fail with Conflict while
@@ -61,6 +63,7 @@ pub struct InferenceService {
     state: Mutex<State>,
     shutdown: AtomicBool,
     restore_cancel: Mutex<Option<CancelToken>>,
+    gpu: Mutex<GpuStatus>,
 }
 struct Operation<'a> {
     service: &'a InferenceService,
@@ -93,6 +96,7 @@ impl InferenceService {
             state: Mutex::new(State::default()),
             shutdown: AtomicBool::new(false),
             restore_cancel: Mutex::new(None),
+            gpu: Mutex::new(GpuStatus::NotProbed),
         })
     }
     fn begin(&self, cancel: &CancelToken) -> Result<Operation<'_>, InferenceError> {
@@ -246,36 +250,36 @@ impl InferenceService {
                 "runtime checksum verification failed".into(),
             ));
         }
-        let context = options
-            .context_window
-            .unwrap_or_else(|| model.context_window.unwrap_or(4096).min(4096));
-        if !(512..=262144).contains(&context)
-            || model.context_window.is_some_and(|limit| context > limit)
-        {
-            return Err(InferenceError::Invalid(
-                "context window must be 512-262144 and within model metadata limit".into(),
-            ));
-        }
-        let threads = options.threads.unwrap_or_else(|| {
-            thread::available_parallelism()
-                .map(|n| n.get() as u32)
-                .unwrap_or(1)
-                .min(8)
-        });
-        if !(1..=256).contains(&threads) {
-            return Err(InferenceError::Invalid("threads must be 1-256".into()));
-        }
+        let header = crate::gguf::inspect(
+            &self
+                .paths
+                .models()
+                .join(&options.model_id)
+                .join("model.gguf"),
+        )?;
+        let plan = plan::compose(
+            &options,
+            &plan::ModelFacts {
+                size_bytes: model.size_bytes,
+                context_limit: model.context_window,
+                shape: header.shape,
+            },
+            runtime.gpu_supported,
+            &HostResources::current(),
+            &self.gpu(),
+        )?;
         let configured = options.clone();
         let actual = StartOptions {
-            backend: Backend::Cpu,
-            context_window: Some(context),
-            threads: Some(threads),
+            backend: plan.backend,
+            context_window: Some(plan.context_window),
+            threads: Some(plan.threads),
             ..options
         };
         {
             let mut state = lock(&self.state);
             state.starting = true;
             state.options = Some(actual.clone());
+            state.plan = Some(plan);
         }
         let result = self
             .launch(&actual, &manifest, &model.name, cancel)
@@ -467,6 +471,25 @@ impl InferenceService {
         lock(&self.state).starting = false;
         Ok(self.status())
     }
+    /// Host memory/CPU facts and the GPU status the next start plans with.
+    /// `probe_gpu` runs the opt-in GPU probe (`nvidia-smi`, or the Apple Silicon
+    /// GPU as a platform fact) once and keeps its result for later starts.
+    pub fn host(&self, probe_gpu: bool) -> HostReport {
+        let gpu = {
+            let mut cached = lock(&self.gpu);
+            if probe_gpu {
+                *cached = probe_gpus(&GpuProbeOptions::default());
+            }
+            cached.clone()
+        };
+        HostReport {
+            resources: HostResources::current(),
+            gpu,
+        }
+    }
+    fn gpu(&self) -> GpuStatus {
+        lock(&self.gpu).clone()
+    }
     pub fn cancel_operations(&self) {
         if let Some(cancel) = lock(&self.restore_cancel).as_ref() {
             cancel.cancel();
@@ -497,6 +520,7 @@ impl InferenceService {
         state.endpoint = None;
         state.model_name = None;
         state.startup_error = None;
+        state.plan = None;
         if state.registered {
             let _ = self
                 .registry
@@ -518,6 +542,7 @@ impl InferenceService {
             state.process = None;
             state.options = None;
             state.endpoint = None;
+            state.plan = None;
             if state.registered {
                 let _ = self
                     .registry
@@ -525,7 +550,7 @@ impl InferenceService {
                 state.registered = false;
             }
         }
-        InferenceStatus{state:if state.starting || state.restoring{"starting"}else if state.process.is_some(){"ready"}else if state.startup_error.is_some(){"failed"}else{"stopped"}.into(),model_name:state.model_name.clone(),startup_error:state.startup_error.clone(),model_id:state.options.as_ref().map(|o|o.model_id.clone()),backend:state.options.as_ref().map(|o|o.backend),endpoint:state.endpoint.clone(),pid:state.process.as_ref().map(|p|p.pid()),context_window:state.options.as_ref().and_then(|o|o.context_window),threads:state.options.as_ref().and_then(|o|o.threads),controls:state.process.as_ref().map(|p|p.plan().controls.clone()).unwrap_or_default(),limitations:vec!["GPU availability is not proven; auto uses CPU".into(),"Brokered runtime has a killable process tree and cleared environment; filesystem and network are not OS-confined".into(),"The runtime binds IPv4 loopback only; local applications can access its credential-free API".into()]}
+        InferenceStatus{state:if state.starting || state.restoring{"starting"}else if state.process.is_some(){"ready"}else if state.startup_error.is_some(){"failed"}else{"stopped"}.into(),model_name:state.model_name.clone(),startup_error:state.startup_error.clone(),model_id:state.options.as_ref().map(|o|o.model_id.clone()),backend:state.options.as_ref().map(|o|o.backend),endpoint:state.endpoint.clone(),pid:state.process.as_ref().map(|p|p.pid()),context_window:state.options.as_ref().and_then(|o|o.context_window),threads:state.options.as_ref().and_then(|o|o.threads),plan:state.plan.clone(),controls:state.process.as_ref().map(|p|p.plan().controls.clone()).unwrap_or_default(),limitations:vec!["GPU availability is not proven; auto uses CPU".into(),"Brokered runtime has a killable process tree and cleared environment; filesystem and network are not OS-confined".into(),"The runtime binds IPv4 loopback only; local applications can access its credential-free API".into()]}
     }
 }
 impl Drop for InferenceService {

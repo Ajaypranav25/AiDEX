@@ -18,6 +18,7 @@ pub const INFERENCE_STOP: &str = "inference.stop";
 pub const INFERENCE_STATUS: &str = "inference.status";
 pub const INFERENCE_MODEL_REMOVE: &str = "inference.model.remove";
 pub const INFERENCE_CANCEL: &str = "inference.cancel";
+pub const INFERENCE_HOST: &str = "inference.host";
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -36,6 +37,14 @@ pub struct RuntimeInstallParams {
 #[serde(deny_unknown_fields)]
 pub struct RemoveParams {
     pub id: String,
+}
+/// `inference.host`: `probe_gpu` runs the opt-in GPU probe (it may execute
+/// `nvidia-smi`); the result is used by later `inference.start` plans.
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct HostParams {
+    #[serde(default)]
+    pub probe_gpu: bool,
 }
 
 fn error(error: InferenceError) -> RpcError {
@@ -131,6 +140,11 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
         to_result(&serde_json::json!({"removed":true}))
     })?;
     let s = services.clone();
+    router.register(INFERENCE_HOST, move |_, params| {
+        let p: HostParams = parse_params(params)?;
+        to_result(&s.inference().host(p.probe_gpu))
+    })?;
+    let s = services.clone();
     router.register(INFERENCE_CANCEL, move |_, params| {
         expect_no_params(&params)?;
         s.inference().cancel_operations();
@@ -163,6 +177,31 @@ mod tests {
         });
         stopper.join().unwrap();
         assert!(cancelled);
+    }
+    #[test]
+    fn host_reports_memory_cores_and_an_unprobed_gpu_by_default() {
+        let root = crate::services::testing::temp_drive();
+        let shutdown = ShutdownSignal::new();
+        let services = Arc::new(Services::open(root.path(), shutdown.clone()).unwrap());
+        let mut router = Router::new();
+        register(&mut router, &services).unwrap();
+        let context = CallContext::detached(ClientInfo::new("test", "1"), shutdown);
+        let host = router
+            .call(&context, INFERENCE_HOST, serde_json::json!({}))
+            .unwrap();
+        assert!(host["resources"]["total_ram_bytes"].as_u64().unwrap() > 0);
+        assert_eq!(host["gpu"]["state"], "not_probed");
+        assert_eq!(
+            router
+                .call(&context, INFERENCE_HOST, serde_json::json!({"probe": true}))
+                .unwrap_err()
+                .kind(),
+            Some(ErrorCode::InvalidParams)
+        );
+        let status = router
+            .call(&context, INFERENCE_STATUS, serde_json::json!({}))
+            .unwrap();
+        assert!(status["plan"].is_null(), "no plan before a start");
     }
     #[test]
     fn rpc_rejects_unknown_fields_and_exposes_real_catalog() {
