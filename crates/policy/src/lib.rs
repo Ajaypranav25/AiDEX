@@ -1,7 +1,13 @@
 //! Layered, deterministic policy evaluation for brokered agent actions.
 //!
-//! This stage adds closed-schema TOML policy documents, workspace project rules,
-//! and the policy set that holds them.
+//! This crate decides; it does not enforce. The execution broker submits a
+//! normalized [`Intent`] (with facts it computed: resolved paths, a classified
+//! command, a classified destination) and receives a [`Decision`]: allow, deny,
+//! sandbox, rate-limit, or require approval, with the deciding rule and a
+//! human-readable effect summary. Immutable hard safety rules, deny-wins layer
+//! precedence, built-in profiles, privacy modes, host trust, network modes, and
+//! tightening-only project rules are combined by [`evaluate`]; see the crate
+//! README for the precedence table.
 
 mod action;
 mod classify;
@@ -9,6 +15,7 @@ mod context;
 mod decision;
 mod document;
 mod error;
+mod evaluate;
 mod facts;
 mod fingerprint;
 mod hard;
@@ -33,6 +40,7 @@ pub use document::{
     SCHEMA_VERSION,
 };
 pub use error::PolicyError;
+pub use evaluate::evaluate;
 pub use hard::{HARD_RULES, HardRule, HardVerdict};
 pub use intent::{
     Intent, IntentAttributes, ModelLocality, PathClass, PathScope, SecretUse, ShellCommand,
