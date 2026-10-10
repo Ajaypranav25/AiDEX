@@ -46,7 +46,34 @@ pub fn is_sha256_hex(value: &str) -> bool {
             .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
 }
 
-fn to_hex(bytes: &[u8]) -> String {
+/// Decode lowercase or uppercase hex; `None` for odd lengths or non-hex digits.
+pub(crate) fn from_hex(text: &str) -> Option<Vec<u8>> {
+    if !text.len().is_multiple_of(2) {
+        return None;
+    }
+    let digit = |byte: u8| match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    };
+    text.as_bytes()
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&[high, low]| Some(digit(high)? << 4 | digit(low)?))
+        .collect()
+}
+
+/// Whether `value` is exactly `bytes` bytes of lowercase hex.
+pub(crate) fn is_lower_hex(value: &str, bytes: usize) -> bool {
+    value.len() == bytes * 2
+        && value
+            .bytes()
+            .all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+pub(crate) fn to_hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut text = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
@@ -71,5 +98,9 @@ mod tests {
         assert!(is_sha256_hex(&sha256_hex(b"")));
         assert!(!is_sha256_hex(&sha256_hex(b"").to_uppercase()));
         assert!(!is_sha256_hex("abc"));
+        assert_eq!(from_hex("00ffA0").unwrap(), [0x00, 0xff, 0xa0]);
+        assert_eq!(to_hex(&from_hex("0a1b").unwrap()), "0a1b");
+        assert!(from_hex("abc").is_none() && from_hex("zz").is_none());
+        assert!(is_lower_hex("0a1b", 2) && !is_lower_hex("0A1B", 2) && !is_lower_hex("0a", 2));
     }
 }

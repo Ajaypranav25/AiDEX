@@ -24,6 +24,7 @@ aidex-policy = { path = "../policy" }
 aidex-providers = { path = "../providers" }
 aidex-router = { path = "../router" }
 aidex-tools = { path = "../tools" }
+aidex-updater = { path = "../updater" }
 aidex-vault = { path = "../vault" }
 aidex-workspace = { path = "../workspace" }
 getrandom = "0.3"
@@ -31,6 +32,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [dev-dependencies]
+# Signed test bundles (keys generated at run time).
+aidex-bundle = { path = "../bundle", features = ["archive", "dev-trust"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 tempfile = "3"
 

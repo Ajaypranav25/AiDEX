@@ -17,12 +17,13 @@ use aidex_core::ServiceErrorCode;
 use aidex_drive::DrivePaths;
 use aidex_events::{EventLog, EventSink, RetentionPolicy};
 use aidex_sessions::{RecoveryReport, SessionStore};
+use aidex_updater::{RecoveryReport as UpdateRecovery, Updater, UpdaterConfig};
 use aidex_vault::{VaultService, VaultServiceConfig};
 use aidex_workspace::WorkspaceRegistry;
 use std::{
     fmt,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -65,6 +66,8 @@ pub struct Services {
     context: Arc<ContextService>,
     native: Arc<aidex_harness::NativeEngine>,
     inference: Arc<aidex_inference::InferenceService>,
+    updates: Result<Arc<Updater>, String>,
+    update_recovery: Mutex<Option<Result<UpdateRecovery, String>>>,
 }
 
 impl Services {
@@ -74,6 +77,17 @@ impl Services {
     /// `ServicesError::new("<domain>", error.code(), error.to_string())`, and
     /// store it in a field with an accessor.
     pub fn open(drive_root: &Path, shutdown: ShutdownSignal) -> Result<Self, ServicesError> {
+        Self::open_with(drive_root, shutdown, None)
+    }
+
+    /// [`open`](Self::open) with an explicit updater configuration (tests inject a
+    /// trust store and self-test); `None` uses the binary's built-in trust store and
+    /// the process self-test.
+    pub fn open_with(
+        drive_root: &Path,
+        shutdown: ShutdownSignal,
+        updater: Option<UpdaterConfig>,
+    ) -> Result<Self, ServicesError> {
         if !drive_root.is_dir() {
             return Err(ServicesError::new(
                 "daemon",
@@ -128,6 +142,7 @@ impl Services {
             runtime.join("native-processes"),
         );
         let inference = inference::open_inference(&paths, &models)?;
+        let updates = open_updates(&paths, &events, updater);
         Ok(Self {
             drive_root: drive_root.to_path_buf(),
             paths,
@@ -144,6 +159,8 @@ impl Services {
             context: Arc::new(context),
             native,
             inference,
+            updates,
+            update_recovery: Mutex::new(None),
         })
     }
 
@@ -218,6 +235,48 @@ impl Services {
     pub fn inference(&self) -> &Arc<aidex_inference::InferenceService> {
         &self.inference
     }
+    /// The drive's updater (`aidex-updater`), or why it is unavailable (a host without
+    /// a bundle target, or an invalid built-in trust configuration).
+    pub fn updates(&self) -> Result<&Arc<Updater>, &str> {
+        self.updates.as_ref().map_err(String::as_str)
+    }
+
+    /// Recover an interrupted update or rollback. The daemon calls this once it owns
+    /// the drive's endpoint and before it serves requests (the daemon is the drive's
+    /// only updater, so no other process can be mid-update).
+    pub fn recover_updates(&self) {
+        let outcome = match &self.updates {
+            Ok(updater) => updater.recover().map_err(|error| error.to_string()),
+            Err(reason) => Err(reason.clone()),
+        };
+        if let Ok(mut slot) = self.update_recovery.lock() {
+            *slot = Some(outcome);
+        }
+    }
+
+    /// What update recovery found at startup (`None` before it ran).
+    pub fn update_recovery(&self) -> Option<Result<UpdateRecovery, String>> {
+        self.update_recovery
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone())
+    }
+}
+
+/// The updater for this host's bundle target, emitting `update.*` into the drive log.
+fn open_updates(
+    paths: &DrivePaths,
+    events: &EventLog,
+    config: Option<UpdaterConfig>,
+) -> Result<Arc<Updater>, String> {
+    let config = match config {
+        Some(config) => config,
+        None => UpdaterConfig::builtin().map_err(|error| error.to_string())?,
+    };
+    let sink: Arc<dyn EventSink> = Arc::new(events.clone());
+    Updater::for_host(paths.clone(), config)
+        .map(|updater| Arc::new(updater.with_events(sink)))
+        .map_err(|error| error.to_string())
 }
 
 /// How often pending approvals are checked for expiry.

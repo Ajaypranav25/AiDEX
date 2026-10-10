@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+aidex-bundle = { path = "../bundle" }
 aidex-context = { path = "../context" }
 aidex-core = { path = "../core" }
 aidex-drive = { path = "../drive" }
@@ -14,6 +15,7 @@ aidex-host = { path = "../host" }
 aidex-providers = { path = "../providers" }
 aidex-router = { path = "../router" }
 aidex-sessions = { path = "../sessions" }
+aidex-updater = { path = "../updater" }
 aidex-workspace = { path = "../workspace" }
 aidexd = { path = "../aidexd" }
 clap.workspace = true
@@ -23,6 +25,8 @@ serde_json = "1"
 zeroize = "1.7"
 
 [dev-dependencies]
+# Test builds trust keys from AIDEX_DEV_TRUSTED_KEYS (generated at run time).
+aidex-bundle = { path = "../bundle", features = ["archive", "dev-trust"] }
 aidex-vault = { path = "../vault" }
 tempfile = "3"
 

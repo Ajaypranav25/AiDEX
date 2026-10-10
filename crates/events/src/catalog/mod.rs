@@ -343,6 +343,50 @@ pub enum EventKind {
         kind: ExtensionKind,
     },
 
+    // --- update.* (scope: global; `aidex-updater`) ---
+    /// An update package was extracted into `app/staging/<update_id>/`.
+    #[serde(rename = "update.staged")]
+    UpdateStaged {
+        update_id: EntityId,
+        version: String,
+        target: String,
+    },
+    /// The staged bundle passed signature, integrity, target, version, and schema
+    /// checks. `signer_key_id` is `null` only for an unsigned bundle accepted through
+    /// the explicit development opt-in (`unsigned_allowed: true`).
+    #[serde(rename = "update.verified")]
+    UpdateVerified {
+        update_id: EntityId,
+        version: String,
+        signer_key_id: Option<String>,
+        unsigned_allowed: bool,
+    },
+    /// `app/current.json` now selects `to_version` (takes effect on next launch).
+    #[serde(rename = "update.switched")]
+    UpdateSwitched {
+        update_id: EntityId,
+        operation: String,
+        from_version: Option<String>,
+        to_version: String,
+    },
+    /// The active bundle was switched back (`aidex update rollback`) or an interrupted
+    /// operation was rolled back during recovery.
+    #[serde(rename = "update.rolled_back")]
+    UpdateRolledBack {
+        update_id: EntityId,
+        from_version: Option<String>,
+        to_version: Option<String>,
+        reason: String,
+    },
+    /// An update, rollback, or recovery step failed; the active bundle is unchanged.
+    #[serde(rename = "update.failed")]
+    UpdateFailed {
+        update_id: Option<EntityId>,
+        stage: String,
+        code: String,
+        message: String,
+    },
+
     // --- legacy.* ---
     /// A PR #40 (event log v1) record imported without a faithful equivalent above.
     /// Never emitted by new code.
@@ -429,6 +473,11 @@ pub const EVENT_NAMES: &[&str] = &[
     "emergency.resumed",
     "extension.enabled",
     "extension.disabled",
+    "update.staged",
+    "update.verified",
+    "update.switched",
+    "update.rolled_back",
+    "update.failed",
     "legacy.v1",
 ];
 
@@ -507,6 +556,11 @@ impl EventKind {
             Self::EmergencyResumed {} => "emergency.resumed",
             Self::ExtensionEnabled { .. } => "extension.enabled",
             Self::ExtensionDisabled { .. } => "extension.disabled",
+            Self::UpdateStaged { .. } => "update.staged",
+            Self::UpdateVerified { .. } => "update.verified",
+            Self::UpdateSwitched { .. } => "update.switched",
+            Self::UpdateRolledBack { .. } => "update.rolled_back",
+            Self::UpdateFailed { .. } => "update.failed",
             Self::LegacyV1 { .. } => "legacy.v1",
         }
     }

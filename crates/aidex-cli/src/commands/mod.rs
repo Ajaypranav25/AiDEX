@@ -20,6 +20,7 @@ pub mod policy;
 pub mod provider;
 pub mod session;
 pub mod tools;
+pub mod update;
 pub mod vault;
 pub mod workspace;
 
@@ -58,5 +59,6 @@ pub fn dispatch(command: Option<Commands>, output: Output) -> Result<Exit, CliEr
         Some(Commands::Context(args)) => context::pack::run(args, output),
         Some(Commands::Memory(args)) => context::memory::run(args, output),
         Some(Commands::Rules(args)) => context::rules::run(args, output),
+        Some(Commands::Update(args)) => update::run(args, output),
     }
 }

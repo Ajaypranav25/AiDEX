@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     BundleError, DocumentError, Target,
     digest::is_sha256_hex,
-    fsutil::write_atomic,
+    fsutil::write_atomic_with,
     manifest::parse_versioned,
     path::{parse_pointer_dir, validate_version},
 };
@@ -59,7 +59,8 @@ impl VersionRef {
         parse_pointer_dir(&self.dir).map_err(DocumentError::Invalid)
     }
 
-    fn validate(&self) -> Result<(), DocumentError> {
+    /// Check the version, the `versions/<name>` directory, and the digest.
+    pub fn validate(&self) -> Result<(), DocumentError> {
         validate_version(&self.version).map_err(DocumentError::Invalid)?;
         self.dir_name()?;
         if !is_sha256_hex(&self.manifest_sha256) {
@@ -228,11 +229,21 @@ impl CurrentPointer {
 
     /// Atomically replace the pointer file at `path` (temporary file, fsync, rename).
     pub fn store(&self, path: &Path) -> Result<(), BundleError> {
+        self.store_with(path, &mut |_| Ok(()))
+    }
+
+    /// [`store`](Self::store) with a hook called after the temporary file is written
+    /// and synced, just before the rename (fault injection; see `write_atomic_with`).
+    pub fn store_with(
+        &self,
+        path: &Path,
+        before_rename: &mut dyn FnMut(&Path) -> Result<(), BundleError>,
+    ) -> Result<(), BundleError> {
         let bytes = self.to_json().map_err(|error| BundleError::Pointer {
             path: path.to_path_buf(),
             error,
         })?;
-        write_atomic(path, &bytes)
+        write_atomic_with(path, &bytes, before_rename)
     }
 }
 

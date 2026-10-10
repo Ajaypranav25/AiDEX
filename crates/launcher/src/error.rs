@@ -6,14 +6,14 @@ use aidex_bundle::{BundleError, BundleErrorKind};
 use aidex_drive::DriveError;
 
 /// Exit codes. They match the `aidex` CLI where the meaning overlaps (2 usage, 4 drive,
-/// 8 not found, 10 incompatible); 11 is launcher-specific.
+/// 8 not found, 10 incompatible, 11 integrity).
 pub mod exit {
     pub const FAILURE: i32 = 1;
     pub const USAGE: i32 = 2;
     pub const DRIVE: i32 = 4;
     pub const NOT_INSTALLED: i32 = 8;
     pub const INCOMPATIBLE: i32 = 10;
-    /// The installed bundle failed integrity verification; nothing was run.
+    /// The installed bundle failed integrity or signature verification; nothing was run.
     pub const INTEGRITY: i32 = 11;
     /// The CLI could not be executed (for example a `noexec` mount).
     pub const NOT_EXECUTABLE: i32 = 126;
@@ -71,6 +71,17 @@ impl LaunchError {
         }
     }
 
+    /// The trust store or the drive's revocation list could not be read: fail closed.
+    pub fn trust(error: BundleError) -> Self {
+        Self {
+            code: exit::INTEGRITY,
+            message: error.to_string(),
+            hint: Some(
+                "nothing was run; fix or remove manifests/revoked-keys.json only if you know why it is invalid".into(),
+            ),
+        }
+    }
+
     /// The CLI could not be started.
     pub fn spawn(program: &Path, error: io::Error) -> Self {
         if error.kind() == io::ErrorKind::PermissionDenied {
@@ -111,6 +122,12 @@ impl From<BundleError> for LaunchError {
                 exit::INTEGRITY,
                 Some(format!(
                     "nothing was run; the installed bundle may be corrupted or modified, so reinstall it with {INSTALL_COMMAND}"
+                )),
+            ),
+            BundleErrorKind::Untrusted => (
+                exit::INTEGRITY,
+                Some(format!(
+                    "nothing was run; install a bundle signed by a key this launcher trusts (`aidex update apply <archive>` or {INSTALL_COMMAND}); for an unsigned development bundle only, set AIDEX_ALLOW_UNSIGNED=1"
                 )),
             ),
             BundleErrorKind::Occupied

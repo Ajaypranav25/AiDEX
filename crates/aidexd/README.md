@@ -42,7 +42,8 @@ while let Some(notification) = events.next_timeout(Duration::from_secs(1))? { ..
 Rpc { code, message, data } | Io | Protocol`; `rpc_kind()` maps `Rpc` codes back
 to `ErrorCode`. Every error type has a stable `code() -> aidex_core::ServiceErrorCode`.
 
-Embedding and tests: `Daemon::with_options(root, DaemonOptions { transport, poll_interval, drive_present })`,
+Embedding and tests: `Daemon::with_options(root, DaemonOptions { transport, poll_interval, drive_present, updater })`
+(`updater: Option<aidex_updater::UpdaterConfig>` injects a trust store and self-test; `None` uses the built-in trust store),
 `daemon.router_mut()` for extra methods, `daemon.start()` → `DaemonHandle`
 (`endpoint()`, `stop()`, `wait()`; dropping it stops the daemon), and
 `Client::connect_endpoint(handle.endpoint(), ClientInfo::new(..))` to skip the
@@ -91,11 +92,18 @@ handlers without sockets.
   Slow consumers are disconnected instead of buffering without limit.
 - The daemon stops (closing connections and removing its endpoint) on
   `daemon.stop` or when the drive disappears.
+- Updates: right after publishing its endpoint (so this daemon owns the drive)
+  and before serving, the daemon runs `Updater::recover`, finishing or rolling
+  back an interrupted update; `update.apply`/`update.rollback` switch
+  `app/current.json` but never replace the running binaries (the new version
+  starts on the next launch). `aidexd --version` prints the version (used by the
+  update self-test).
 
 ## Limitations
 
 - Methods: `daemon.status|ping|stop`, `events.replay|latest|subscribe`, `workspace.*`,
-  `vault.*`, `model.*`, `provider.*`, and `network.*` exist, plus the broker's
+  `vault.*`, `model.*`, `provider.*`, `network.*`, and `update.status|check|apply|rollback`
+  exist, plus the broker's
   `tool.list|invoke|continue`, `broker.approval.list|show|resolve|revoke`,
   `policy.show|profile.set|reload|explain`, and `emergency.stop|resume`; additional
   domains are future work.

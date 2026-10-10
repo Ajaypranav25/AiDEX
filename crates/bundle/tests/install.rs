@@ -59,7 +59,7 @@ fn fresh_install_commits_the_bundle_places_the_launcher_and_switches_the_pointer
     }
 
     for scope in [VerifyScope::Critical, VerifyScope::All] {
-        let active = resolve_active(&paths, target, scope).unwrap();
+        let active = resolve_active(&paths, target, scope, &common::unsigned()).unwrap();
         assert_eq!(active.bundle.manifest.version, "0.1.0");
         assert_eq!(active.bundle.scope, scope);
     }
@@ -111,7 +111,7 @@ fn a_different_build_of_the_same_version_gets_its_own_directory() {
     assert_eq!(common::version_dirs(drive.path()).len(), 2);
 
     let paths = DrivePaths::open(drive.path()).unwrap();
-    let active = resolve_active(&paths, target, VerifyScope::All).unwrap();
+    let active = resolve_active(&paths, target, VerifyScope::All, &common::unsigned()).unwrap();
     assert_eq!(active.bundle.manifest_sha256, two.manifest_sha256);
     let pointer = CurrentPointer::load(&layout::pointer_path(&paths))
         .unwrap()
@@ -154,7 +154,7 @@ fn an_interruption_before_the_pointer_switch_keeps_the_previous_bundle_active() 
         assert_eq!(common::staging_leftovers(drive.path()), 0, "{step}");
 
         let paths = DrivePaths::open(drive.path()).unwrap();
-        let active = resolve_active(&paths, target, VerifyScope::All).unwrap();
+        let active = resolve_active(&paths, target, VerifyScope::All, &common::unsigned()).unwrap();
         if step == InstallStep::Cleanup {
             // The switch already happened; only cleanup was skipped.
             assert_eq!(active.bundle.manifest.version, "0.2.0");
@@ -168,7 +168,7 @@ fn an_interruption_before_the_pointer_switch_keeps_the_previous_bundle_active() 
         }
         // Retrying after the interruption completes the update.
         install_dir(&second, drive.path()).unwrap();
-        let active = resolve_active(&paths, target, VerifyScope::All).unwrap();
+        let active = resolve_active(&paths, target, VerifyScope::All, &common::unsigned()).unwrap();
         assert_eq!(active.bundle.manifest.version, "0.2.0", "{step}");
     }
 }
@@ -268,7 +268,7 @@ fn bundles_for_several_targets_share_one_drive() {
             .is_file()
     );
     for target in [Target::WindowsX64, Target::LinuxX64, Target::MacosArm64] {
-        let active = resolve_active(&paths, target, VerifyScope::All).unwrap();
+        let active = resolve_active(&paths, target, VerifyScope::All, &common::unsigned()).unwrap();
         assert_eq!(active.bundle.manifest.target, target);
     }
 }
@@ -309,5 +309,5 @@ fn a_damaged_installed_copy_is_not_reused() {
     assert!(!repaired.reused_existing);
     assert_ne!(repaired.dir, first.dir);
     let paths = DrivePaths::open(drive.path()).unwrap();
-    resolve_active(&paths, target, VerifyScope::All).unwrap();
+    resolve_active(&paths, target, VerifyScope::All, &common::unsigned()).unwrap();
 }
