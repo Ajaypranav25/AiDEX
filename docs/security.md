@@ -12,3 +12,9 @@ AiDEX mediates agent actions rather than trusting model output. The policy and e
 - Describe cleanup limits honestly: AiDEX controls only residue it created, not privileged host telemetry.
 
 These properties are requirements from the product specification, not current implementation claims. No vault, sandbox, broker, or remote security boundary is production-ready in this foundation.
+
+## Policy evaluation (implemented) and enforcement (not yet)
+
+`crates/policy` (`aidex-policy`) implements deterministic policy evaluation: agents' requests are normalized into intents carrying broker-computed facts, and evaluation returns allow, deny, sandbox, rate-limit, or approval with the deciding rule and a human-readable effect summary. Hard safety rules (disk formatting, raw drive writes, credential export, secret dumping, deleting root/home/system directories, vault modification, broker disabling, AiDEX-protected paths) deny unconditionally, including when a shell command implies them; policy changes and destructive commands always need one-time approval. Any layer deny wins; otherwise the most specific layer, then the active profile, then deny-by-default decides. Privacy mode, network mode, host trust, and repository project rules can only tighten a decision. Policy files are closed-schema TOML and fail closed when malformed. Intent fingerprints let approvals bind to the exact intent.
+
+This is a decision engine only. No execution broker routes or enforces agent actions yet, approvals are not persisted or exposed through the CLI, and decisions are not yet audit events; those land with the broker work for issue #17. The shell classifier is a conservative heuristic, and network destinations are classified before DNS resolution, so enforcement must still re-check resolved addresses and rely on the sandbox.
