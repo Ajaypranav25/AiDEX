@@ -59,7 +59,7 @@ Every component accepts its root element's props (including `ref` and `className
 | `SectionHeader` | `title`, `level` 2 · 3, `meta`, `actions` |
 | `Brand` | `name`, `size` md · lg · xl, `layout` inline · stacked |
 | `Composer` | `value`, `onValueChange`, `onSubmit`, `onAttach`, `label`, `placeholder`, `attachments`, `toolbarStart`, `toolbarEnd`, `size` default · compact |
-| `Notice` | `tone` info · success · warning · danger, `variant` plain · banner (pass `role="alert"` for errors) |
+| `Notice` | `tone` info · success · warning · danger, `variant` plain · banner, `action` (trailing control such as "Try again"; pass `role="alert"` for errors) |
 | `MediaItem` | `media`, `title`, `description`, `trailing`, `titleLevel`, `size` md · lg |
 | `InfoCard` | `icon`, `status`, `label`, `value`, `detail` |
 | `ToastRegion` | `toasts: { id, message, tone? }[]`, `onDismiss` |
@@ -67,6 +67,7 @@ Every component accepts its root element's props (including `ref` and `className
 | `KeyValueList` | `items: { label, value }[]` |
 | `SettingRow` | `title`, `description`, `control`, `controlId` |
 | `EmptyState` | `icon`, `title`, `description`, `actions`, `titleLevel` |
+| `LoadingState` | `label` (announced as a polite status); a spinner sized like `Notice`, still under reduced motion |
 | `StatTile` | `label`, `value`, `hint`, `icon`, `tone` |
 | `Meter` | `label`, `value`, `max`, `valueText`, `tone`, `warnAt`, `dangerAt` |
 | `SegmentedMeter` | `label`, `segments: { label, value, color? }[]`, `max`, `valueText`, `remainderLabel` |

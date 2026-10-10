@@ -1,0 +1,34 @@
+.loading {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--aidex-space-3);
+  color: var(--aidex-color-text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.spinner {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  color: var(--aidex-color-text-muted);
+  animation: spin 900ms linear infinite;
+}
+
+/* The global reduced-motion rules only shorten animations, which would make an endless spin flicker. */
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation: none;
+  }
+}
+
+:global(html[data-reduce-motion="true"]) .spinner {
+  animation: none;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

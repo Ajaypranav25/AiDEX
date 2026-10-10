@@ -18,6 +18,12 @@
   min-width: 0;
 }
 
+.action {
+  flex: none;
+  align-self: center;
+  margin-inline-start: auto;
+}
+
 .info .icon {
   color: var(--aidex-color-text-muted);
 }

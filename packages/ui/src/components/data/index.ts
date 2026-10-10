@@ -5,6 +5,7 @@ export { EmptyState, type EmptyStateProps } from "./EmptyState";
 export { EntityCard, type EntityCardProps } from "./EntityCard";
 export { KeyValueList, type KeyValueItem, type KeyValueListProps } from "./KeyValueList";
 export { List, type ListProps } from "./List";
+export { LoadingState, type LoadingStateProps } from "./LoadingState";
 export { ListRow, type ListRowProps } from "./ListRow";
 export { Meter, type MeterProps, type MeterTone } from "./Meter";
 export { SegmentedMeter, type MeterSegment, type SegmentedMeterProps } from "./SegmentedMeter";
