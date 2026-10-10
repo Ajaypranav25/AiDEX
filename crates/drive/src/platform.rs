@@ -155,7 +155,7 @@ fn windows_drive_letter(path: &Path) -> Option<char> {
 
 /// The drive letter of any path on a lettered volume (`C:\x`, `\\?\C:\x`).
 #[cfg(windows)]
-fn volume_letter(path: &Path) -> Option<char> {
+pub(crate) fn volume_letter(path: &Path) -> Option<char> {
     use std::path::{Component, Prefix};
     match path.components().next()? {
         Component::Prefix(prefix) => match prefix.kind() {
