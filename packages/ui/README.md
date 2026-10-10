@@ -74,7 +74,6 @@ Every component accepts its root element's props (including `ref` and `className
 | `StepList` | `steps: { title, description?, status: done · active · pending · failed }[]` |
 | `ActivityLog` | `entries: { time, text, tone? }[]`, `live` |
 | `TaskGraph` | `root`, `nodes: { id, label, icon?, status?, detail? }[]` |
-| `DiffView` | `fileName`, `additions`, `deletions`, `lines: { kind: context · add · del, oldLine?, newLine?, text }[]`, `actions` |
 | `CodeDiff` | `fileName`, `language?`, either `oldCode` + `newCode` or a unified `patch`, `layout` unified · split (or `defaultLayout` + `onLayoutChange`), `showLayoutToggle`, `actions`. See [Code diffs](#code-diffs). `getDiffStats(fileName, source)` returns the same `{ additions, deletions }` the header shows |
 | `CodeBlock`, `Terminal`, `InlineCode` | `CodeBlock`: `code`, `title`, `language`, `actions`. `Terminal`: `lines: { kind: command · output · error, text }[]`, `title` |
 | `ChatMessage` | `role` user · assistant, `meta`, `actions` |

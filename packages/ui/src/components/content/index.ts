@@ -9,7 +9,6 @@ export {
   type CodeDiffSource,
   type DiffStats,
 } from "./CodeDiff";
-export { DiffView, type DiffLine, type DiffLineKind, type DiffViewProps } from "./DiffView";
 export { FileTree, type FileTreeProps, type TreeNode } from "./FileTree";
 export { InlineCode, type InlineCodeProps } from "./InlineCode";
 export { QrCodePattern, type QrCodePatternProps } from "./QrCodePattern";
