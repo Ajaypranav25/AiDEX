@@ -174,8 +174,21 @@ Vault errors carry `data.reason`, the stable `aidex_vault::VaultErrorKind` name 
 | `workspace.ephemeral.review` | `{id}` | `{workspace_id, source_id, changes, conflicts, unsupported, digest, total_changes, total_conflicts, truncated}` |
 | `workspace.ephemeral.apply` | `{id, paths?, review_digest?}` | `{applied, skipped_conflicts, failed}` |
 | `workspace.ephemeral.discard` | `{id}` | `{workspace}` |
+| `session.create` | `{workspace_id, agent_id?, title}` (exact registered workspace id; `agent_id` defaults to `aidex`) | `Session` (state `created`; nothing is started) |
+| `session.list` | `{workspace_id?, state?, limit?}` (`limit` 1-500, default 50) | `{sessions: [Session...]}`, newest first |
+| `session.show` | `{id}` | `{session, messages, tool_calls, open_tool_calls, artifacts, checkpoints, approvals, latest_checkpoint, event_gaps}` |
+| `session.messages` | `{id, after?, limit?}` (`limit` 1-500, default 100) | `{messages: [Message...], next_after, has_more}`; pages are cut to fit one message |
+| `session.checkpoints` | `{id}` | `{checkpoints: [CheckpointMeta...], total}` (newest 500, oldest first) |
+| `session.resume_plan` | `{id}` | `ResumePlanView` (read-only) |
+| `session.resume` | `{id}` | `ResumePlanView` with `adopted: true`; the session is adopted on this host and left `paused` |
+| `session.cancel` | `{id}` | `Session` (state `cancelled`) |
+| `session.branch` | `{id, checkpoint_id}` | `Session` (the new child) |
 
 `Workspace` is `{id, name, kind: {type: host|drive|ephemeral, source?}, root: {type: host|drive, path}, created_at, last_opened_at, path, availability: {state: available|unavailable, reason?}, repository: {vcs, root, is_workspace_root}|null}`. Workspace errors carry `data.reason` (`invalid_path`, `escapes_root`, `symlink_leaf`, `root_unavailable`, `workspace_not_found`, `path_not_found`, `forbidden_location`, `conflict`, `review_changed`, `not_a_change`, `wrong_kind`, `ownership_marker`, `too_large`, ...). A review lists at most 1000 changes and is shrunk to fit one message (`truncated`); `digest` always covers every change, and passing it to `workspace.ephemeral.apply` makes the apply fail with `conflict`/`review_changed` if anything changed since.
+
+`Session` is `{id, workspace_id, agent_id, title, state: {kind: created|running|waiting_approval|paused|completed|failed|cancelled|interrupted, code?, message?, reason?, recoverable?}, parent_session_id, branched_from, model, created_at, updated_at, host_fingerprint: {id, os, arch}, last_event_cursor, budget: {input_tokens, output_tokens, tool_calls, wall_ms}, resumed_at}`. `ResumePlanView` is `{session, checkpoint: CheckpointMeta|null, checkpoint_host, recovered_from_corruption, corrupt_checkpoints, messages_since_checkpoint, messages_after, unrecoverable: [{kind: process|tool_call|approval|model_state, subject, detail}], unrecoverable_total, different_host, host_changes, event_gaps, event_gaps_total, resumable, blocked_reason, adopted, continuation_available, continuation}`; `continuation_available` is `false` until the native harness is wired, and nothing is started on its behalf. Session errors carry `data.reason` (`session_not_found`, `checkpoint_not_found`, `invalid_transition`, `session_closed`, `checkpoint_corrupt`, `no_valid_checkpoint`, `invalid_argument`, ...); `session.resume` of a session that is not interrupted or paused is `conflict` with `data.reason = "not_resumable"` and `blocked_reason`. The daemon runs session recovery before it serves: sessions found `running`/`waiting_approval` become `interrupted`, running tool calls `lost`, and unprovable events explicit gaps.
+
+Workspace and vault methods record their events in the drive log after the change commits: `workspace.added` (add, create_drive), `workspace.selected`, `workspace.removed`, `workspace.ephemeral_created|ephemeral_applied|ephemeral_discarded` (each scoped to the workspace named in the event), and drive-wide `vault.unlocked` (init, unlock) / `vault.locked` (lock of an unlocked vault). If that append fails the change is not undone and the method returns `internal_error` with `data: {reason: "event_not_recorded", committed: true}`.
 
 Event envelopes, filters, and the catalog are specified in
 `protocol/events/README.md`. `events.subscribe` delivers persisted history after

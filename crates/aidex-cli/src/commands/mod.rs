@@ -14,6 +14,7 @@ pub mod model;
 pub mod offline;
 pub mod omp;
 pub mod provider;
+pub mod session;
 pub mod vault;
 pub mod workspace;
 
@@ -39,5 +40,6 @@ pub fn dispatch(command: Option<Commands>, output: Output) -> Result<Exit, CliEr
         Some(Commands::Model(args)) => model::run(args, output),
         Some(Commands::Provider(args)) => provider::run(args, output),
         Some(Commands::Offline(args)) => offline::run(args, output),
+        Some(Commands::Session(args)) => session::run(args, output),
     }
 }

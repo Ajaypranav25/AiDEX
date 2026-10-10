@@ -12,6 +12,7 @@ aidex-events = { path = "../events" }
 aidex-host = { path = "../host" }
 aidex-providers = { path = "../providers" }
 aidex-router = { path = "../router" }
+aidex-sessions = { path = "../sessions" }
 aidex-vault = { path = "../vault" }
 aidex-workspace = { path = "../workspace" }
 getrandom = "0.3"

@@ -16,6 +16,7 @@ members = [
     "crates/sandbox",
     "crates/sessions",
     "crates/storage",
+    "crates/tools",
     "crates/vault",
     "crates/workspace",
 ]
