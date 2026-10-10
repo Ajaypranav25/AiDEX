@@ -148,6 +148,18 @@ Domain errors carrying an `aidex_core::ServiceErrorCode` map to -32001..-32006
 | `vault.secret.list` | none | `{secrets: [SecretMeta...]}` sorted by name |
 | `vault.secret.delete` | `{name}` | `{deleted: SecretMeta}` |
 | `vault.passphrase.change` | `{old_passphrase?, new_passphrase}` (`old_passphrase` may be omitted only after a recovery-key unlock) | `{changed: true}` |
+| `model.list` | none | `{models: [ModelDescriptor...], failures: [{provider_id, kind, message}], default_model: ModelRef\|null, network: "online"\|"offline"}` |
+| `model.providers` | none | `{providers: [{descriptor: {id, kind, base_url, locality, auth: {type: "none"\|"vault_secret", secret_name?}}, origin: "configured"\|"runtime"}]}` |
+| `model.route` | `{task, privacy?, required_context?, needs_tools?, needs_json_schema?, secret_heavy?, model?: "provider/model"}` | `{decision: {task, privacy, primary, fallbacks, allow_remote, preferred_role, reasons, rejected: [{model, reason, ..., explanation}]}, model: ModelDescriptor, network, failures}` |
+| `model.use` | `{provider_id, model_id}` | `{default_model, model: ModelDescriptor}` (persisted; the provider must list the model) |
+| `model.default` | none | `{default_model: ModelRef\|null}` |
+| `provider.add` | `{id, kind?: "openai-compatible", base_url, secret_name?, locality?: "remote", discover_models?, models?: [ModelConfig...]}` | `{descriptor, origin: "configured"}` |
+| `provider.remove` | `{id}` | `{removed: id}` (clears the default model if it pointed there) |
+| `provider.health` | `{id}` | `{provider_id, status: "ready"\|"unavailable"\|"refused", error?, message?, latency_ms?, checked_at}` |
+| `network.offline` | `{enabled}` | `{offline, network}` (persisted on the drive) |
+| `network.status` | none | `{offline, network}` |
+
+`ModelDescriptor` is `{model: {provider_id, model_id}, display_name, locality: "local"|"remote", context_window, max_output_tokens, capabilities: {chat, streaming, tool_calls: "native"|"structured"|"none", json_schema_output, vision, embeddings}, roles, cost, min_ram_bytes, source: "configured"|"discovered"|"assumed"}`. No model method accepts or returns a credential value: `provider.add` takes a vault secret *name* (unknown fields such as `api_key` are invalid params). Provider failures carry `data.kind` (`ProviderErrorKind`: `offline_refused` and `policy_denied` → -32021 `policy_denied`; `unauthorized` and `credential_unavailable` → -32020 `vault_locked`; `cancelled` → -32023; `invalid_request` and `context_overflow` → -32001; `model_not_found` → -32002; `unavailable`, `rate_limited`, `timeout`, `protocol`, `http` → -32022 `model_unavailable`). A failed route is -32022 (or -32002 for an unknown override) with `data: {kind: "no_route", reasons, rejected, failures}`.
 
 Vault errors carry `data.reason`, the stable `aidex_vault::VaultErrorKind` name (e.g. `vault_not_found`, `vault_exists`, `locked`, `wrong_passphrase`, `corrupt`, `tampered`, `missing_header`, `unsupported_version`, `forbidden_consumer`, `secret_not_found`, `conflict`). Wrong credentials and a locked vault use `vault_locked`; other vault errors use their `ServiceErrorCode` mapping. Parameters of `vault.*` methods may contain passphrases or secret values: they are only accepted over this authenticated local connection and are never echoed in error messages (invalid-parameter errors name at most a missing field). Secret handles are issued and resolved inside the daemon for the broker; no IPC method returns a secret value.
 | `workspace.add` | `{path, name?}` (absolute host directory) | `Workspace` |
