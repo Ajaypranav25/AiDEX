@@ -20,8 +20,10 @@ use std::{
 use crate::profile::{Probe, locate_tool, path_entries};
 
 /// Largest `nvidia-smi` output read.
+#[cfg_attr(all(target_os = "macos", target_arch = "aarch64"), allow(dead_code))]
 const MAX_PROBE_OUTPUT: usize = 64 * 1024;
 /// Devices reported at most.
+#[cfg_attr(all(target_os = "macos", target_arch = "aarch64"), allow(dead_code))]
 const MAX_DEVICES: usize = 16;
 
 /// Settings for the opt-in GPU probe.
@@ -152,6 +154,7 @@ pub fn probe_gpus(options: &GpuProbeOptions) -> GpuStatus {
 }
 
 /// Run `nvidia-smi --query-gpu` and parse its CSV output.
+#[cfg_attr(all(target_os = "macos", target_arch = "aarch64"), allow(dead_code))]
 pub(crate) fn probe_nvidia(tool: &Path, timeout: Duration) -> GpuStatus {
     let source = "nvidia-smi".to_owned();
     let child = Command::new(tool)
@@ -220,6 +223,7 @@ pub(crate) fn probe_nvidia(tool: &Path, timeout: Duration) -> GpuStatus {
 }
 
 /// Parse `name, memory.total (MiB), driver_version` lines.
+#[cfg_attr(all(target_os = "macos", target_arch = "aarch64"), allow(dead_code))]
 pub(crate) fn parse_nvidia_csv(text: &str) -> Vec<GpuDevice> {
     text.lines()
         .filter_map(|line| {
