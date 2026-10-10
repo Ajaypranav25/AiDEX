@@ -138,6 +138,20 @@ Domain errors carrying an `aidex_core::ServiceErrorCode` map to -32001..-32006
 | `daemon.ping` | none | `{pong: true}` |
 | `daemon.stop` | none | `{state: "stopping"}`; then every connection is closed and the endpoint removed |
 | `events.replay` | `{workspace_id, after, limit?}` (`limit` 1-256, default 256) | `{events: [Event...]}` strictly after `after`, ascending |
+| `workspace.add` | `{path, name?}` (absolute host directory) | `Workspace` |
+| `workspace.create_drive` | `{name}` | `Workspace` (kind `drive`) |
+| `workspace.list` | none | `{workspaces: [Workspace...], selected: id\|null}` |
+| `workspace.get` | `{id}` (id or name) | `Workspace` |
+| `workspace.select` | `{id_or_name}` | `Workspace` (selection persisted on the drive) |
+| `workspace.selected` | none | `{workspace: Workspace\|null}` |
+| `workspace.remove` | `{id, delete_data?}` (exact id) | `{workspace, deleted_data}`; host data is never deleted |
+| `workspace.discover` | `{path}` | `{selected_root, enclosing_repository, nested_repositories, vcs, scan_truncated}` |
+| `workspace.ephemeral.create` | `{source}` (id or name) | `{workspace, files, bytes, skipped}` |
+| `workspace.ephemeral.review` | `{id}` | `{workspace_id, source_id, changes, conflicts, unsupported, digest, total_changes, total_conflicts, truncated}` |
+| `workspace.ephemeral.apply` | `{id, paths?, review_digest?}` | `{applied, skipped_conflicts, failed}` |
+| `workspace.ephemeral.discard` | `{id}` | `{workspace}` |
+
+`Workspace` is `{id, name, kind: {type: host|drive|ephemeral, source?}, root: {type: host|drive, path}, created_at, last_opened_at, path, availability: {state: available|unavailable, reason?}, repository: {vcs, root, is_workspace_root}|null}`. Workspace errors carry `data.reason` (`invalid_path`, `escapes_root`, `symlink_leaf`, `root_unavailable`, `workspace_not_found`, `path_not_found`, `forbidden_location`, `conflict`, `review_changed`, `not_a_change`, `wrong_kind`, `ownership_marker`, `too_large`, ...). A review lists at most 1000 changes and is shrunk to fit one message (`truncated`); `digest` always covers every change, and passing it to `workspace.ephemeral.apply` makes the apply fail with `conflict`/`review_changed` if anything changed since.
 
 `events.replay` ports the contract-v1 `events` request (PR #40). Event push
 streaming (`events.subscribe`) is not implemented yet.

@@ -9,6 +9,7 @@ use crate::{endpoint, lifecycle::ShutdownSignal, methods::events::event_error_co
 use aidex_core::ServiceErrorCode;
 use aidex_drive::DrivePaths;
 use aidex_events::EventLog;
+use aidex_workspace::WorkspaceRegistry;
 use std::{
     fmt,
     path::{Path, PathBuf},
@@ -27,6 +28,7 @@ pub struct Services {
     started_at: Instant,
     shutdown: ShutdownSignal,
     events: EventLog,
+    workspaces: WorkspaceRegistry,
 }
 
 impl Services {
@@ -56,6 +58,8 @@ impl Services {
         let events = EventLog::open(&event_path, EVENT_RETENTION).map_err(|error| {
             ServicesError::new("events", event_error_code(&error), error.to_string())
         })?;
+        let workspaces = WorkspaceRegistry::open(&paths)
+            .map_err(|error| ServicesError::new("workspace", error.code(), error.to_string()))?;
         Ok(Self {
             drive_root: drive_root.to_path_buf(),
             paths,
@@ -63,6 +67,7 @@ impl Services {
             started_at: Instant::now(),
             shutdown,
             events,
+            workspaces,
         })
     }
 
@@ -92,6 +97,11 @@ impl Services {
     /// Durable, workspace-scoped event log (`aidex-events`).
     pub fn events(&self) -> &EventLog {
         &self.events
+    }
+
+    /// Workspace registry and confinement (`aidex-workspace`).
+    pub fn workspaces(&self) -> &WorkspaceRegistry {
+        &self.workspaces
     }
 }
 
