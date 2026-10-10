@@ -18,6 +18,7 @@ use crate::{
     transport::{Server, TransportConfig},
 };
 use aidex_core::ServiceErrorCode;
+use aidex_events::{DaemonStopReason, EventKind, EventLog, EventScope};
 use serde_json::Value;
 use std::{
     fmt, io,
@@ -247,13 +248,31 @@ impl Daemon {
             token,
         };
         endpoint::publish(&self.root, &endpoint).map_err(DaemonError::Endpoint)?;
+        let events = self.services.events().clone();
+        let started = EventKind::DaemonStarted {
+            pid: self.services.pid(),
+            version: env!("CARGO_PKG_VERSION").into(),
+        };
+        if let Err(error) = events.append(EventScope::global(), started) {
+            let _ = endpoint::remove(&self.root);
+            return Err(DaemonError::Services(ServicesError::new(
+                "events",
+                error.code(),
+                error.to_string(),
+            )));
+        }
         drop(self.services);
         let root = self.root.clone();
         let options = self.options;
         let thread = thread::Builder::new()
             .name("aidexd-accept".into())
             .spawn(move || {
-                let outcome = server.run(&root, options.poll_interval, &options.drive_present);
+                let outcome = server.run(
+                    &root,
+                    options.poll_interval,
+                    &options.drive_present,
+                    |outcome| record_stopping(&events, outcome),
+                );
                 let cleanup = endpoint::remove(&root);
                 match (outcome, cleanup) {
                     (Ok(reason), Ok(())) => Ok(reason),
@@ -282,6 +301,16 @@ impl Daemon {
             }
         }
     }
+}
+
+/// Record `daemon.stopping` before connections close, so live subscribers may still
+/// see it. Best effort: a removed drive cannot record anything.
+fn record_stopping(events: &EventLog, outcome: &io::Result<StopReason>) {
+    let reason = match outcome {
+        Ok(StopReason::DriveRemoved) => DaemonStopReason::DriveRemoved,
+        Ok(StopReason::Requested) | Err(_) => DaemonStopReason::Requested,
+    };
+    let _ = events.append(EventScope::global(), EventKind::DaemonStopping { reason });
 }
 
 /// A running daemon. Dropping it requests shutdown and waits for it.
