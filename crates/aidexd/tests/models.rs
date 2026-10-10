@@ -266,6 +266,26 @@ fn routing_and_network_state_are_inspectable_over_ipc() {
         .call(MODEL_ROUTE, json!({"task": "code", "model": "cloud/x"}))
         .unwrap_err();
     assert_eq!(rpc_error(error).0, Some(ErrorCode::NotFound));
+
+    // Toggling offline mode is recorded as a typed, durable event.
+    client
+        .call(NETWORK_OFFLINE, json!({"enabled": true}))
+        .unwrap();
+    let page = client
+        .call(
+            aidexd::methods::events::REPLAY,
+            json!({"after": 0, "filter": {"kinds": ["policy.changed"]}}),
+        )
+        .unwrap();
+    let events = page["events"].as_array().unwrap();
+    assert_eq!(events.len(), 1, "{page}");
+    assert_eq!(events[0]["event"]["type"], "policy.changed");
+    assert!(
+        events[0]["event"]["data"]["summary"]
+            .as_str()
+            .unwrap()
+            .contains("offline mode on")
+    );
     drop(client);
     daemon.stop();
     daemon.wait().unwrap();

@@ -2,10 +2,12 @@
 //! router, and the vault-backed credential resolver.
 
 use super::ServicesError;
+use aidex_core::EntityId;
 use aidex_drive::DrivePaths;
+use aidex_events::{EventKind, EventScope, EventSink};
 use aidex_providers::{
-    CredentialError, CredentialResolver, ModelObserver, OfflineMode, ProviderId, ProviderRegistry,
-    SecretBytes,
+    CredentialError, CredentialResolver, ModelEvent, ModelId, ModelObserver, ModelRef, OfflineMode,
+    ProviderId, ProviderRegistry, SecretBytes,
 };
 use aidex_router::{NetworkState, Router as ModelRouter};
 use aidex_vault::{ConsumerScope, SecretName, VaultError, VaultErrorKind, VaultService};
@@ -78,6 +80,103 @@ impl CredentialResolver for VaultCredentials {
     }
 }
 
+/// Longest `reason` text recorded in a model event.
+const MAX_EVENT_REASON: usize = 1024;
+
+/// Records model-domain notifications as typed events v2 (global scope).
+///
+/// `model.selected` and `model.fallback` map to their catalog kinds and an
+/// offline-switch change to `policy.changed`; provider registration and
+/// default-model changes have no catalog entry yet and are not recorded.
+/// Event identifiers are `EntityId`s, so characters an upstream model name may
+/// contain but an id may not (`/`, `@`, `+`) are written as `.`; a fallback
+/// endpoint is `<provider>:<model>`. Emission is best effort: a refused or
+/// failed event never fails the model operation that produced it.
+pub struct EventsModelObserver {
+    sink: Arc<dyn EventSink>,
+}
+
+impl EventsModelObserver {
+    pub fn new(sink: Arc<dyn EventSink>) -> Self {
+        Self { sink }
+    }
+}
+
+impl fmt::Debug for EventsModelObserver {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EventsModelObserver")
+            .finish_non_exhaustive()
+    }
+}
+
+/// An event identifier for a model name (see [`EventsModelObserver`]).
+fn model_entity(model: &ModelId) -> Option<EntityId> {
+    let text: String = model
+        .as_str()
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':') {
+                ch
+            } else {
+                '.'
+            }
+        })
+        .collect();
+    EntityId::new(text).ok()
+}
+
+fn reference_entity(model: &ModelRef) -> Option<EntityId> {
+    let model_id = model_entity(&model.model_id)?;
+    EntityId::new(format!("{}:{}", model.provider_id, model_id)).ok()
+}
+
+fn bounded(text: String) -> String {
+    if text.len() <= MAX_EVENT_REASON {
+        return text;
+    }
+    let mut end = MAX_EVENT_REASON;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    text[..end].to_owned()
+}
+
+/// The catalog event for a model notification, if the catalog has one.
+pub fn model_event_kind(event: &ModelEvent) -> Option<EventKind> {
+    match event {
+        ModelEvent::Selected { model, reasons, .. } => Some(EventKind::ModelSelected {
+            provider_id: model.provider_id.as_entity_id().clone(),
+            model_id: model_entity(&model.model_id)?,
+            reason: bounded(reasons.join("; ")),
+        }),
+        ModelEvent::Fallback(fallback) => Some(EventKind::ModelFallback {
+            from: reference_entity(&fallback.from)?,
+            to: reference_entity(&fallback.to)?,
+            reason: bounded(format!("{}: {}", fallback.reason, fallback.message)),
+        }),
+        ModelEvent::NetworkModeChanged { offline } => Some(EventKind::PolicyChanged {
+            profile: None,
+            summary: if *offline {
+                "offline mode on: remote model providers are refused".into()
+            } else {
+                "offline mode off: remote model providers are allowed".into()
+            },
+        }),
+        ModelEvent::DefaultChanged { .. }
+        | ModelEvent::ProviderAdded { .. }
+        | ModelEvent::ProviderRemoved { .. } => None,
+    }
+}
+
+impl ModelObserver for EventsModelObserver {
+    fn observe(&self, event: &ModelEvent) {
+        if let Some(kind) = model_event_kind(event) {
+            // Best effort by design: notifications never fail the model call.
+            let _ = self.sink.emit(EventScope::global(), kind);
+        }
+    }
+}
+
 /// The daemon's model services.
 pub struct ModelServices {
     registry: Arc<ProviderRegistry>,
@@ -145,5 +244,54 @@ impl fmt::Debug for ModelServices {
             .field("registry", &self.registry)
             .field("offline", &self.offline.is_offline())
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aidex_events::MemoryEventSink;
+    use aidex_providers::{FallbackEvent, ProviderErrorKind};
+
+    #[test]
+    fn model_notifications_become_typed_catalog_events() {
+        let sink = Arc::new(MemoryEventSink::new());
+        let observer = EventsModelObserver::new(sink.clone());
+        observer.observe(&ModelEvent::Selected {
+            model: ModelRef::parse("vllm/meta-llama/Llama-3.1-8B").unwrap(),
+            fallbacks: Vec::new(),
+            reasons: vec!["task code".into(), "selected".into()],
+        });
+        observer.observe(&ModelEvent::Fallback(FallbackEvent {
+            from: ModelRef::parse("local/qwen").unwrap(),
+            to: ModelRef::parse("openai/gpt-4o@latest").unwrap(),
+            reason: ProviderErrorKind::Unavailable,
+            message: "provider unavailable: connection refused".into(),
+        }));
+        observer.observe(&ModelEvent::NetworkModeChanged { offline: true });
+        observer.observe(&ModelEvent::DefaultChanged { model: None });
+        let events: Vec<EventKind> = sink.events().into_iter().map(|e| e.event).collect();
+        assert_eq!(events.len(), 3);
+        let EventKind::ModelSelected {
+            provider_id,
+            model_id,
+            reason,
+        } = &events[0]
+        else {
+            panic!("{:?}", events[0]);
+        };
+        assert_eq!(
+            (provider_id.as_str(), model_id.as_str(), reason.as_str()),
+            ("vllm", "meta-llama.Llama-3.1-8B", "task code; selected")
+        );
+        let EventKind::ModelFallback { from, to, reason } = &events[1] else {
+            panic!("{:?}", events[1]);
+        };
+        assert_eq!(
+            (from.as_str(), to.as_str()),
+            ("local:qwen", "openai:gpt-4o.latest")
+        );
+        assert!(reason.starts_with("unavailable: "));
+        assert_eq!(events[2].name(), "policy.changed");
     }
 }

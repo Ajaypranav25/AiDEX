@@ -7,7 +7,7 @@
 
 mod models;
 
-pub use models::{ModelServices, VaultCredentials};
+pub use models::{EventsModelObserver, ModelServices, VaultCredentials, model_event_kind};
 
 use crate::{endpoint, lifecycle::ShutdownSignal};
 use aidex_core::ServiceErrorCode;
@@ -88,12 +88,11 @@ impl Services {
         let workspaces = WorkspaceRegistry::open(&paths)
             .map_err(|error| ServicesError::new("workspace", error.code(), error.to_string()))?;
         let vault = Arc::new(vault);
-        // Typed `model.*` events need the events v2 catalog; until it is wired the
-        // observer discards notifications (they are still returned to callers).
+        // Model notifications are recorded as typed `model.*` events.
         let models = ModelServices::open(
             &paths,
             Arc::clone(&vault),
-            Arc::new(aidex_providers::NoopObserver),
+            Arc::new(EventsModelObserver::new(Arc::new(events.clone()))),
         )?;
         Ok(Self {
             drive_root: drive_root.to_path_buf(),
