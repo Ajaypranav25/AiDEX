@@ -1,0 +1,734 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Versioned_for_ContractPayload",
+  "type": "object",
+  "required": [
+    "payload",
+    "version"
+  ],
+  "properties": {
+    "payload": {
+      "$ref": "#/definitions/ContractPayload"
+    },
+    "version": {
+      "type": "integer",
+      "format": "uint16",
+      "minimum": 0.0
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "AgentRequest": {
+      "type": "object",
+      "required": [
+        "agent_id"
+      ],
+      "properties": {
+        "agent_id": {
+          "$ref": "#/definitions/EntityId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "AgentResponse": {
+      "type": "object",
+      "required": [
+        "agent_id",
+        "model"
+      ],
+      "properties": {
+        "agent_id": {
+          "$ref": "#/definitions/EntityId"
+        },
+        "model": {
+          "$ref": "#/definitions/ModelReference"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ApprovalDecision": {
+      "type": "string",
+      "enum": [
+        "approve",
+        "deny"
+      ]
+    },
+    "ApprovalRequest": {
+      "type": "object",
+      "required": [
+        "decided_at",
+        "decision",
+        "intent_id"
+      ],
+      "properties": {
+        "decided_at": {
+          "$ref": "#/definitions/Timestamp"
+        },
+        "decision": {
+          "$ref": "#/definitions/ApprovalDecision"
+        },
+        "intent_id": {
+          "$ref": "#/definitions/EntityId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ApprovalResponse": {
+      "type": "object",
+      "required": [
+        "approval_id",
+        "decision"
+      ],
+      "properties": {
+        "approval_id": {
+          "$ref": "#/definitions/EntityId"
+        },
+        "decision": {
+          "$ref": "#/definitions/ApprovalDecision"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ContractEvent": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "intent_id",
+            "kind",
+            "occurred_at",
+            "state"
+          ],
+          "properties": {
+            "intent_id": {
+              "$ref": "#/definitions/EntityId"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "tool_intent_changed"
+              ]
+            },
+            "occurred_at": {
+              "$ref": "#/definitions/Timestamp"
+            },
+            "state": {
+              "$ref": "#/definitions/ToolIntentState"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "approval_id",
+            "decision",
+            "intent_id",
+            "kind",
+            "occurred_at"
+          ],
+          "properties": {
+            "approval_id": {
+              "$ref": "#/definitions/EntityId"
+            },
+            "decision": {
+              "$ref": "#/definitions/ApprovalDecision"
+            },
+            "intent_id": {
+              "$ref": "#/definitions/EntityId"
+            },
+            "kind": {
+              "type": "string",
+              "enum": [
+                "approval_recorded"
+              ]
+            },
+            "occurred_at": {
+              "$ref": "#/definitions/Timestamp"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "occurred_at",
+            "path",
+            "workspace_id"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "workspace_changed"
+              ]
+            },
+            "occurred_at": {
+              "$ref": "#/definitions/Timestamp"
+            },
+            "path": {
+              "$ref": "#/definitions/WorkspacePath"
+            },
+            "workspace_id": {
+              "$ref": "#/definitions/EntityId"
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "ContractOffer": {
+      "type": "object",
+      "required": [
+        "maximum",
+        "minimum"
+      ],
+      "properties": {
+        "maximum": {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        },
+        "minimum": {
+          "type": "integer",
+          "format": "uint16",
+          "minimum": 0.0
+        }
+      },
+      "additionalProperties": false
+    },
+    "ContractPayload": {
+      "description": "All payload shapes exposed by the version-1 contract schema.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "contract_offer"
+              ]
+            },
+            "value": {
+              "$ref": "#/definitions/ContractOffer"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "workspace_request"
+              ]
+            },
+            "value": {
+              "$ref": "#/definitions/WorkspaceRequest"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "workspace_response"
+              ]
+            },
+            "value": {
+              "$ref": "#/definitions/WorkspaceResponse"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "session_request"
+              ]
+            },
+            "value": {
+              "$ref": "#/definitions/SessionRequest"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "session_response"
+              ]
+            },
+            "value": {
+              "$ref": "#/definitions/SessionResponse"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "agent_request"
+              ]
+            },
+            "value": {
+              "$ref": "#/definitions/AgentRequest"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "agent_response"
+              ]
+            },
+            "value": {
+              "$ref": "#/definitions/AgentResponse"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "model_reference"
+              ]
+            },
+            "value": {
+              "$ref": "#/definitions/ModelReference"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "tool_intent_request"
+              ]
+            },
+            "value": {
+              "$ref": "#/definitions/ToolIntentRequest"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "tool_intent_response"
+              ]
+            },
+            "value": {
+              "$ref": "#/definitions/ToolIntentResponse"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "approval_request"
+              ]
+            },
+            "value": {
+              "$ref": "#/definitions/ApprovalRequest"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "approval_response"
+              ]
+            },
+            "value": {
+              "$ref": "#/definitions/ApprovalResponse"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "host_reference"
+              ]
+            },
+            "value": {
+              "$ref": "#/definitions/HostReference"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "vault_reference"
+              ]
+            },
+            "value": {
+              "$ref": "#/definitions/VaultReference"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "secret_ref"
+              ]
+            },
+            "value": {
+              "$ref": "#/definitions/SecretRef"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "service_error"
+              ]
+            },
+            "value": {
+              "$ref": "#/definitions/ServiceError"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "kind",
+            "value"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string",
+              "enum": [
+                "event"
+              ]
+            },
+            "value": {
+              "$ref": "#/definitions/ContractEvent"
+            }
+          }
+        }
+      ]
+    },
+    "EntityId": {
+      "type": "string"
+    },
+    "HostReference": {
+      "type": "object",
+      "required": [
+        "host_id"
+      ],
+      "properties": {
+        "host_id": {
+          "$ref": "#/definitions/EntityId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ModelReference": {
+      "type": "object",
+      "required": [
+        "model_id",
+        "provider_id"
+      ],
+      "properties": {
+        "model_id": {
+          "$ref": "#/definitions/EntityId"
+        },
+        "provider_id": {
+          "$ref": "#/definitions/EntityId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SecretRef": {
+      "description": "Reference to a secret held by a host vault. Secret bytes/values are never serialized.",
+      "type": "object",
+      "required": [
+        "secret_id",
+        "vault_id"
+      ],
+      "properties": {
+        "secret_id": {
+          "$ref": "#/definitions/EntityId"
+        },
+        "vault_id": {
+          "$ref": "#/definitions/EntityId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ServiceError": {
+      "type": "object",
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "#/definitions/ServiceErrorCode"
+        },
+        "message": {
+          "type": "string"
+        },
+        "request_id": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EntityId"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ServiceErrorCode": {
+      "type": "string",
+      "enum": [
+        "invalid_argument",
+        "not_found",
+        "permission_denied",
+        "conflict",
+        "incompatible_version",
+        "unavailable",
+        "internal"
+      ]
+    },
+    "SessionRequest": {
+      "type": "object",
+      "required": [
+        "agent_id",
+        "workspace_id"
+      ],
+      "properties": {
+        "agent_id": {
+          "$ref": "#/definitions/EntityId"
+        },
+        "workspace_id": {
+          "$ref": "#/definitions/EntityId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "SessionResponse": {
+      "type": "object",
+      "required": [
+        "session_id",
+        "started_at"
+      ],
+      "properties": {
+        "session_id": {
+          "$ref": "#/definitions/EntityId"
+        },
+        "started_at": {
+          "$ref": "#/definitions/Timestamp"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Timestamp": {
+      "type": "string"
+    },
+    "ToolIntentRequest": {
+      "type": "object",
+      "required": [
+        "input",
+        "requested_at",
+        "session_id",
+        "tool_id"
+      ],
+      "properties": {
+        "input": true,
+        "requested_at": {
+          "$ref": "#/definitions/Timestamp"
+        },
+        "session_id": {
+          "$ref": "#/definitions/EntityId"
+        },
+        "tool_id": {
+          "$ref": "#/definitions/EntityId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ToolIntentResponse": {
+      "type": "object",
+      "required": [
+        "intent_id",
+        "state"
+      ],
+      "properties": {
+        "intent_id": {
+          "$ref": "#/definitions/EntityId"
+        },
+        "state": {
+          "$ref": "#/definitions/ToolIntentState"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ToolIntentState": {
+      "type": "string",
+      "enum": [
+        "pending_approval",
+        "approved",
+        "denied",
+        "running",
+        "completed",
+        "failed"
+      ]
+    },
+    "VaultReference": {
+      "type": "object",
+      "required": [
+        "host_id",
+        "vault_id"
+      ],
+      "properties": {
+        "host_id": {
+          "$ref": "#/definitions/EntityId"
+        },
+        "vault_id": {
+          "$ref": "#/definitions/EntityId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "WorkspacePath": {
+      "type": "string"
+    },
+    "WorkspaceRequest": {
+      "type": "object",
+      "required": [
+        "workspace_id"
+      ],
+      "properties": {
+        "workspace_id": {
+          "$ref": "#/definitions/EntityId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "WorkspaceResponse": {
+      "type": "object",
+      "required": [
+        "created_at",
+        "root",
+        "workspace_id"
+      ],
+      "properties": {
+        "created_at": {
+          "$ref": "#/definitions/Timestamp"
+        },
+        "root": {
+          "$ref": "#/definitions/WorkspacePath"
+        },
+        "workspace_id": {
+          "$ref": "#/definitions/EntityId"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
