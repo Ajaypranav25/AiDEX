@@ -15,6 +15,8 @@ coverage/
 **/.next/
 **/out/
 *.tsbuildinfo
+# Next.js regenerates it on every run, and dev and build write different imports.
+next-env.d.ts
 
 # Rust / Tauri build output
 target/
