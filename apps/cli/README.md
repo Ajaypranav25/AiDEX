@@ -56,6 +56,8 @@ bun run login:omp
 - `add <PATH> [--name N]` registers an existing host directory exactly as selected (relative paths resolve against the current directory). The drive root, a directory containing the drive, and AiDEX-managed directories are refused; an already registered root is a conflict (exit 1).
 - `create <NAME>` creates an empty drive workspace under the drive's `workspaces/`; `list` shows every workspace with its availability (a missing host root is reported, never recreated); `show [ID|NAME]` defaults to the selected workspace; `select <ID|NAME>` persists the selection on the drive, so it survives daemon restarts.
 - `remove <ID>` only unregisters; host files are never deleted. `--delete-data` also deletes an AiDEX-created (drive or ephemeral) workspace directory after verifying its ownership marker.
+  Choose `--delete-data` in the original remove command: after unregistering, that
+  id is gone and any retained directory must be removed manually.
 - `discover <PATH>` reports the enclosing Git repository and nested repositories (bounded scan, links not followed).
 - `ephemeral create <SOURCE>` copies a workspace (honouring `.gitignore`, skipping `.git/` and `.aidex/`, never following links); `ephemeral review <ID>` lists added/modified/deleted files with conflicts and unified diffs; `ephemeral apply <ID> [--path P ...]` re-reviews, shows the changes, asks for confirmation, and applies only the selected non-conflicting files, refusing if the workspace changed since that review (exit 1 when any selected change was skipped or failed); `ephemeral discard <ID>` deletes only the ephemeral directory.
   A selective `--path` must appear in the returned review, even when that review
