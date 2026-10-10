@@ -36,6 +36,13 @@ These properties are requirements from the product specification, not current im
 - The router never selects or falls back to a remote model when the privacy mode is local-only or air-gapped, the network is offline, or the task is secret-heavy; an explicit model choice that violates this is refused rather than swapped.
 - Not yet: the broker's policy-backed egress gate (DNS re-checks, allowlists) replacing `OfflineMode`, zeroization of HTTP client buffers, OAuth/device login, and audit events for credential release.
 
+## Local inference (`crates/inference`)
+
+- Model files are SHA-256 verified before their first load and again whenever their size or modification time changes (`aidex model verify --force` always rehashes); a mismatch refuses the model. Import never overwrites an existing model or registry entry, refuses unknown architectures, and records licence and source.
+- Only llama.cpp archives pinned by size and SHA-256 in `inference/runtimes.toml` can be installed. Extraction rejects path traversal, absolute and drive paths, alternate data streams, reserved device names, links, special files, and duplicates. Before every launch each runtime file is rehashed against its manifest, unexpected files (for example a planted DLL) are refused, and the extracted tree must match the catalog's pinned hash where one is recorded.
+- `llama-server` runs through `aidex-sandbox` (Brokered: process-tree kill, cleared environment), listens on `127.0.0.1` only with `--offline` (no downloads), and requires a per-launch 256-bit key passed in its environment (`LLAMA_API_KEY`), never on the command line; the key is not logged, emitted, serialized, or shown in `Debug`. Any local process can connect to the port but cannot use it without the key. On Windows the sandbox contains but does not confine the server (no filesystem or network restriction at level 1); model files and runtimes are untrusted inputs parsed by upstream code.
+- Prompts and model output never enter events; `model.loaded`/`model.unloaded`/`model.error` carry identifiers and sanitized messages only. Server logs are bounded and stored in `logs/inference/` on the drive.
+
 ## Process sandbox
 
 `aidex-sandbox` contains processes AiDEX launches. Callers request a level (0 direct, 1 brokered, 2 restricted, 3 ephemeral), mounts, network mode, and limits; negotiation returns an `EnforcementPlan` naming the mechanism for every requirement, or fails with the list of requirements this host cannot enforce. Nothing is silently downgraded, and level 0 requires an explicit `allow_direct` opt-in.

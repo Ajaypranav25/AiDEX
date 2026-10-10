@@ -17,7 +17,7 @@ uses. Wire format, handshake, error codes, and naming rules:
 | `stream` | `NotificationSink` for subscription methods |
 | `transport` (private) | listener, per-connection reader/writer threads, bounded outbox, shutdown |
 | `services` | `Services`, built once and shared with handlers as `Arc<Services>` |
-| `methods/<domain>` | JSON-RPC adapters: `daemon.*` (status/ping/stop), `events.*` (replay/latest/subscribe), `vault.*` (status/init/unlock/lock/secret.set/secret.list/secret.delete/passphrase.change), `workspace.*` (registry, discovery, ephemeral review/apply/discard over `aidex-workspace`) |
+| `methods/<domain>` | JSON-RPC adapters: `daemon.*` (status/ping/stop), `events.*` (replay/latest/subscribe), `vault.*` (status/init/unlock/lock/secret.set/secret.list/secret.delete/passphrase.change), `workspace.*` (registry, discovery, ephemeral review/apply/discard over `aidex-workspace`), `model.import|verify|remove|load|unload|loaded|benchmark|run` and `runtime.list|install|select` (local inference over `aidex-inference`) |
 | `lifecycle` | `Daemon`, `DaemonHandle`, `serve`, `launch`, `stop`, stale-endpoint recovery |
 | `client` | `Client`, `Subscription`, `ClientError` |
 
@@ -90,8 +90,8 @@ handlers without sockets.
 ## Limitations
 
 - Methods: `daemon.status|ping|stop`, `events.replay|latest|subscribe`, `workspace.*`,
-  `vault.*`, and `model.*`/`provider.*`/`network.*` exist; every other domain is
-  future work.
+  `vault.*`, `session.*`, `model.*`/`provider.*`/`network.*`, and the local inference
+  methods exist; every other domain is future work.
 - The event log is `DrivePaths::sessions()/events.sqlite3` (100 000 events, 90
   days). PR #40's `.aidex/runtime/events.sqlite` is superseded: it is imported once,
   read-only, into an empty new log and then left untouched (safe to delete).
@@ -107,6 +107,23 @@ handlers without sockets.
   `EventsModelObserver`: `model.selected` and `model.fallback` map to the events v2
   catalog (global scope); registry, default-model, and network-mode changes have no
   catalog entry yet and are not recorded.
+- `Services::inference()` returns `aidex_inference::LocalInference`, opened with
+  `Sandbox::locate()` (so `aidex-sandbox-exec` must ship next to `aidexd`) and the drive
+  event log as its sink; its `LocalLlamaProvider` is registered in the provider registry
+  as `local` (a configured provider that already uses `local` keeps it, and
+  `provider.add` refuses the id). Methods: `model.import` (stream: `model.import.progress
+  {phase, done_bytes, total_bytes}`, then `model.import.done {entry}` or
+  `model.import.failed {error}`), `model.verify {id, force?}`, `model.remove {id,
+  confirm: true}`, `model.load {id, context?, mmap?, cpu_only?, probe_gpu?}` →
+  `LoadReport`, `model.unload {id}`, `model.loaded`, `model.benchmark {id, force?}`,
+  `model.run {id, prompt, system?, max_tokens?, temperature?}` (stream:
+  `model.run.delta {text}`, then `model.run.done {content, finish_reason, usage,
+  elapsed_ms}` or `model.run.failed {error}`), `runtime.list`, `runtime.install
+  {archive}`, and `runtime.select {model, context?, mmap?, cpu_only?, probe_gpu?}` →
+  `PlanReport`. Blocking calls are cancelled when the client disconnects; streams when
+  it unsubscribes. Errors carry `data {kind, advice}`; integrity, runtime, memory, and
+  server failures use `model_unavailable` (-32022). Managed servers stop with the
+  daemon. `model.route` now passes the host's total RAM to the router.
 - `Services::vault()` returns the drive's `Arc<aidex_vault::VaultService>` (vault in
   `DrivePaths::vault()`, default 30 min idle auto-lock). A damaged vault does not stop
   the daemon; `vault.status` reports it as `unavailable`. Secret handles are issued and
