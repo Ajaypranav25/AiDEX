@@ -1,3 +1,3 @@
 # Protocol
 
-This area holds language-neutral wire contracts and schemas. `schemas/json-rpc-2.0.schema.json` defines the JSON-RPC 2.0 envelope only; method names, authorization, transport, and method-specific payloads remain undefined until the owning services establish them. It is an envelope schema, not a complete AiDEX service API; method-specific contracts should be added here when defined.
+Rust service DTOs in `aidex-core` define the canonical AiDEX contract; all payloads are explicitly versioned. `schemas/contract-v1.schema.json` is mechanically derived from those Serde types as the client boundary and checked for drift by the core crate tests. The JSON-RPC schema defines only the transport envelope. See `versioning/README.md` for compatibility and migration policy.
