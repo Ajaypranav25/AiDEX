@@ -58,6 +58,8 @@ bun run login:omp
 - `remove <ID>` only unregisters; host files are never deleted. `--delete-data` also deletes an AiDEX-created (drive or ephemeral) workspace directory after verifying its ownership marker.
 - `discover <PATH>` reports the enclosing Git repository and nested repositories (bounded scan, links not followed).
 - `ephemeral create <SOURCE>` copies a workspace (honouring `.gitignore`, skipping `.git/` and `.aidex/`, never following links); `ephemeral review <ID>` lists added/modified/deleted files with conflicts and unified diffs; `ephemeral apply <ID> [--path P ...]` re-reviews, shows the changes, asks for confirmation, and applies only the selected non-conflicting files, refusing if the workspace changed since that review (exit 1 when any selected change was skipped or failed); `ephemeral discard <ID>` deletes only the ephemeral directory.
+  A selective `--path` must appear in the returned review, even when that review
+  is truncated; omitted paths are refused with exit 2 before confirmation or apply.
 - `remove --delete-data`, `ephemeral apply`, and `ephemeral discard` need `--yes` or an interactive confirmation; without a terminal (or with `--json`) and without `--yes` they refuse with exit 2 and change nothing. Declining the prompt exits 9.
 
 `aidex` and `aidex chat` open Oh My Pi's interactive terminal UI. AiDEX passes `--approval-mode always-ask`, disables OMP extensions, MCP, LSP, skills, session persistence, and automatic title generation, and requests a limited tool set. OMP still owns its CLI tool lifecycle and approval implementation; this is not an AiDEX sandbox or policy boundary.

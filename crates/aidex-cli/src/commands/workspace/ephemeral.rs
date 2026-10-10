@@ -165,15 +165,20 @@ fn apply(
     let review: EphemeralReview = client.call_as(EPHEMERAL_REVIEW, json!({ "id": id }))?;
     let listed = |path: &WorkspacePath| review.changes.iter().any(|change| change.path == *path);
     if let Some(missing) = selected.iter().find(|path| !listed(path)) {
-        if !review.truncated {
-            return Err(CliError::new(
-                Exit::Usage,
+        return Err(CliError::new(
+            Exit::Usage,
+            if review.truncated {
+                format!(
+                    "`{}` is absent from the truncated review; refusing to apply an unreviewed path",
+                    missing.as_str()
+                )
+            } else {
                 format!(
                     "`{}` is not a change in this ephemeral workspace",
                     missing.as_str()
-                ),
-            ));
-        }
+                )
+            },
+        ));
     }
     let source: Workspace = client.call_as(GET, json!({ "id": review.source_id.as_str() }))?;
     let to_apply: Vec<_> = review
