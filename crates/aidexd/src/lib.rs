@@ -5,6 +5,7 @@
 //! also match contract version 1. Event batches are read from the durable,
 //! workspace-scoped SQLite log using a bounded acknowledged cursor. See
 //! `src/server/README.md` for the wire contract.
+pub mod endpoint;
 pub mod errors;
 pub mod rpc;
 pub mod server;
