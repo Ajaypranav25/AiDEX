@@ -24,7 +24,9 @@ pub mod exclude;
 mod fsio;
 mod index;
 pub mod memory;
+mod pack;
 mod rules;
+mod service;
 mod tokens;
 
 pub use error::ContextError;
@@ -38,8 +40,17 @@ pub use memory::{
     FileMemoryStore, MemoryEdit, MemoryEntry, MemoryError, MemoryScope, MemoryScopeKind,
     MemorySource, MemoryStore, NewMemory,
 };
+pub use pack::{
+    ContextItem, ContextPack, ContextSource, DELIMITER_PREFIX, DropReason, DroppedItem,
+    MAX_EXPLICIT_PATHS, MAX_PACK_BUDGET, MAX_SUMMARIES, MAX_SUMMARY_BYTES, MAX_TASK_BYTES,
+    PackInclude, PackRequest, PackSources, Trust, assemble,
+};
 pub use rules::{
     INSTRUCTION_FILES, MAX_INSTRUCTION_BYTES, ProjectCommands, ProjectInstructions, ProjectRules,
     RulesView,
+};
+pub use service::{
+    ContextService, INDEX_JOB_PREFIX, INDEX_TASK_ROLE, IndexJobStarted, IndexJobStatus,
+    IndexStatus, JobState,
 };
 pub use tokens::{CharEstimator, TokenEstimator};
