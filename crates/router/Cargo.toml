@@ -1,0 +1,17 @@
+[package]
+name = "aidex-router"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+aidex-core = { path = "../core" }
+aidex-providers = { path = "../providers" }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
+
+[lints]
+workspace = true

@@ -5,6 +5,7 @@ use crate::commands::{
     agent::AgentCommand, daemon::DaemonCommand, events::EventsCommand, omp::SessionOptions,
     session::SessionArgs, vault::VaultCommand, workspace::WorkspaceArgs,
 };
+use crate::commands::{model::ModelArgs, offline::OfflineArgs, provider::ProviderArgs};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -74,6 +75,12 @@ pub enum Commands {
     /// Manage host, drive, and ephemeral workspaces.
     #[command(alias = "project")]
     Workspace(WorkspaceArgs),
+    /// Inspect models, choose the default, and explain routing.
+    Model(ModelArgs),
+    /// Configure model providers (credentials come from the vault).
+    Provider(ProviderArgs),
+    /// Refuse or allow remote provider traffic.
+    Offline(OfflineArgs),
     /// Inspect durable sessions, checkpoints, and resume plans.
     #[command(alias = "sessions")]
     Session(SessionArgs),
@@ -97,6 +104,9 @@ impl Commands {
             Some(Self::Doctor) => "aidex doctor",
             Some(Self::Vault { command }) => command.label(),
             Some(Self::Workspace(args)) => args.command.label(),
+            Some(Self::Model(args)) => args.command.label(),
+            Some(Self::Provider(args)) => args.command.label(),
+            Some(Self::Offline(args)) => args.command.label(),
             Some(Self::Session(args)) => args.command.label(),
         }
     }
