@@ -123,10 +123,10 @@ pub(crate) fn write_atomic(destination: &Path, bytes: &[u8]) -> io::Result<()> {
 /// Best-effort directory fsync so a completed rename survives power loss (Unix).
 pub(crate) fn sync_parent(path: &Path) {
     #[cfg(unix)]
-    if let Some(parent) = path.parent() {
-        if let Ok(directory) = File::open(parent) {
-            let _ = directory.sync_all();
-        }
+    if let Some(parent) = path.parent()
+        && let Ok(directory) = File::open(parent)
+    {
+        let _ = directory.sync_all();
     }
     #[cfg(not(unix))]
     let _ = path;
