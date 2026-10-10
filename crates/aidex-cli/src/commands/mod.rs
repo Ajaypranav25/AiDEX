@@ -27,7 +27,7 @@ pub fn dispatch(command: Option<Commands>, output: Output) -> Result<Exit, CliEr
         Some(Commands::Init { drive }) => drive::init(&drive, output),
         Some(Commands::Status { drive }) => drive::status(drive.as_deref(), output),
         Some(Commands::Daemon { command }) => daemon::run(command, output),
-        Some(Commands::Events(args)) => events::run(args, output),
+        Some(Commands::Events { command }) => events::run(command, output),
         Some(Commands::Doctor) => doctor::run(output),
     }
 }
