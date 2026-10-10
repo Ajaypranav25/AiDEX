@@ -24,6 +24,7 @@ aidex-core = { path = "../core" }
 aidex-drive = { path = "../drive" }
 aidex-events = { path = "../events" }
 aidex-policy = { path = "../policy" }
+aidex-providers = { path = "../providers" }
 aidex-sandbox = { path = "../sandbox" }
 aidex-tools = { path = "../tools" }
 aidex-vault = { path = "../vault" }

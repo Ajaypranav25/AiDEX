@@ -15,6 +15,7 @@ pub mod approvals;
 mod audit;
 mod broker;
 mod digest;
+mod egress;
 mod emergency;
 mod error;
 mod git_remote;
@@ -31,6 +32,7 @@ pub use broker::{
     Broker, BrokerBuilder, BrokerConfig, DEFAULT_SESSION_GRANT_TTL, HardRuleInfo, PolicyStatus,
     SessionCancelReport,
 };
+pub use egress::ModelEgress;
 pub use emergency::EmergencyReport;
 pub use error::{ApprovalRefusal, BrokerError};
 pub use intent::{CombinedDecision, IntentDecision};

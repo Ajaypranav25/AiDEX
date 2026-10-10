@@ -48,6 +48,7 @@ dependencies = [
  "aidex-drive",
  "aidex-events",
  "aidex-policy",
+ "aidex-providers",
  "aidex-sandbox",
  "aidex-tools",
  "aidex-vault",

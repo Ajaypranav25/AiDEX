@@ -22,7 +22,10 @@ use std::{
 use aidex_core::EntityId;
 use aidex_drive::DrivePaths;
 use aidex_events::{EventKind, EventScope, EventSink};
-use aidex_policy::{HARD_RULES, HardVerdict, PolicySet};
+use aidex_policy::{
+    Decision, HARD_RULES, HardVerdict, Intent, PolicySet, RuleOrigin, RuleRef, SandboxLevel,
+    Verdict,
+};
 use aidex_sandbox::Sandbox;
 use aidex_tools::{CancelToken, ToolDescriptor, ToolLimits, ToolRegistry};
 use aidex_vault::VaultService;
@@ -382,6 +385,46 @@ impl Broker {
                 .collect(),
             emergency_stop: self.emergency.reason(),
         }
+    }
+
+    /// Evaluate one standalone intent (no tool plan) under the current settings and
+    /// documents; a document load failure denies.
+    pub(crate) fn evaluate_intent(&self, intent: &Intent) -> Decision {
+        let state = self.policy_state();
+        match &state.documents {
+            Ok(set) => aidex_policy::evaluate(set, &state.settings.context(), intent),
+            Err(error) => Decision {
+                verdict: Verdict::Deny,
+                reason: format!(
+                    "policy documents failed to load, so every call is denied: {error}"
+                ),
+                rule: RuleRef {
+                    origin: RuleOrigin::Default,
+                    scope: "broker".into(),
+                    id: "broker.policy-documents".into(),
+                    source: None,
+                },
+                effect_summary: intent.summary.clone(),
+                sandbox: SandboxLevel::Brokered,
+                rate_limit: None,
+            },
+        }
+    }
+
+    pub(crate) fn audit(&self) -> &Audit {
+        &self.audit
+    }
+
+    pub(crate) fn emergency(&self) -> &EmergencyState {
+        &self.emergency
+    }
+
+    pub(crate) fn secrets(&self) -> &Secrets {
+        &self.secrets
+    }
+
+    pub(crate) fn rate(&self) -> &RateLimiter {
+        &self.rate
     }
 
     fn policy_state(&self) -> RwLockReadGuard<'_, PolicyState> {

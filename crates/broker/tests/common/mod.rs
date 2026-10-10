@@ -37,7 +37,7 @@ pub struct Fixture {
     pub events: Arc<MemoryEventSink>,
     pub clock: Arc<ManualClock>,
     pub workspaces: Arc<StaticWorkspaces>,
-    pub broker: Broker,
+    pub broker: Arc<Broker>,
 }
 
 pub struct Options {
@@ -117,7 +117,7 @@ impl Fixture {
         if let Some(vault) = options.vault {
             builder = builder.vault(vault);
         }
-        let broker = builder.open().unwrap();
+        let broker = Arc::new(builder.open().unwrap());
         Self {
             state,
             workspace,
