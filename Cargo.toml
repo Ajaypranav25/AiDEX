@@ -7,6 +7,7 @@ members = [
     "crates/drive",
     "crates/events",
     "crates/host",
+    "crates/sandbox",
     "crates/sessions",
     "crates/storage",
 ]
