@@ -79,6 +79,34 @@ mod tests {
         assert_eq!(granted, expected);
     }
 
+    /// The sources a CSP grants for one directive, e.g. `connect-src`.
+    fn csp_sources<'a>(csp: &'a str, directive: &str) -> Vec<&'a str> {
+        csp.split(';')
+            .map(|entry| entry.split_whitespace().collect::<Vec<_>>())
+            .find(|words| words.first() == Some(&directive))
+            .map(|words| words[1..].to_vec())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn the_dev_url_is_the_address_the_next_dev_server_binds() {
+        let config: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        // `bun run dev` binds Next.js to 127.0.0.1 only; `localhost` may resolve to ::1 first.
+        assert_eq!(config["build"]["devUrl"], "http://127.0.0.1:3311");
+    }
+
+    #[test]
+    fn the_csp_lets_the_page_reach_ipc_and_nothing_else() {
+        let config: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let csp = config["app"]["security"]["csp"].as_str().unwrap();
+        // Tauri applies the CSP only to the assets it serves, never to the dev server's pages,
+        // so the dev server's hot-reload socket does not belong in it.
+        assert_eq!(
+            csp_sources(csp, "connect-src"),
+            ["ipc:", "http://ipc.localhost"]
+        );
+    }
+
     #[test]
     fn the_build_manifest_and_handler_list_name_every_command() {
         let build = include_str!("../build.rs");
