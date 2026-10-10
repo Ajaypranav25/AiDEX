@@ -1,13 +1,18 @@
 import { DataTable, SectionHeader, type DataTableColumn } from "@aidex/ui/components";
 import { Kbd, Stack, StatusIndicator, Text } from "@aidex/ui/primitives";
+import { useApplePlatform } from "../../hooks/useApplePlatform";
 import { useModifierKeyLabel } from "../../hooks/useModifierKeyLabel";
 import { sampleShortcuts, type Shortcut } from "./sample";
 
 /** Keyboard shortcuts, marking which ones this build already handles. */
 export function ShortcutsPanel() {
+  const apple = useApplePlatform();
   const modifierKey = useModifierKeyLabel();
 
-  const keysFor = (shortcut: Shortcut) => [modifierKey, ...(shortcut.shift ? ["Shift"] : []), shortcut.key];
+  const keysFor = (shortcut: Shortcut) =>
+    !apple && shortcut.otherKeys
+      ? shortcut.otherKeys
+      : [modifierKey, ...(shortcut.shift ? ["Shift"] : []), shortcut.key];
 
   const columns: readonly DataTableColumn<Shortcut>[] = [
     { key: "action", header: "Action", rowHeader: true },

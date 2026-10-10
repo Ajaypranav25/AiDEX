@@ -8,12 +8,16 @@ export type Shortcut = {
   /** Key pressed together with the platform's command modifier. */
   key: string;
   shift?: boolean;
+  /** Keys outside Apple platforms, for shortcuts that use another modifier there (Alt+← rather than Ctrl+[). */
+  otherKeys?: readonly string[];
   /** Whether the shortcut already works in this build. */
   wired: boolean;
 };
 
 export const sampleShortcuts: readonly Shortcut[] = [
   { id: "new-session", action: "New session", key: "K", wired: true },
+  { id: "go-back", action: "Go back", key: "[", otherKeys: ["Alt", "←"], wired: true },
+  { id: "go-forward", action: "Go forward", key: "]", otherKeys: ["Alt", "→"], wired: true },
   { id: "search", action: "Search", key: "F", wired: false },
   { id: "toggle-sidebar", action: "Toggle sidebar", key: "B", wired: false },
   { id: "switch-mode", action: "Switch Chat/Agent", key: "M", shift: true, wired: false },

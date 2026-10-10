@@ -13,11 +13,15 @@ import {
   BoxIcon,
   UsersIcon,
   LockIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
 } from "@aidex/ui/icons";
 import { Badge, Button, IconButton, Stack, Text } from "@aidex/ui/primitives";
 import { Dialog, Notice } from "@aidex/ui/components";
 import { useNavigation } from "../app/providers/navigation";
 import { useAidexStatus } from "../hooks/useAidexStatus";
+import { useApplePlatform } from "../hooks/useApplePlatform";
+import { historyShortcutLabels } from "../hooks/useHistoryShortcuts";
 import { railIdFor, railItems, type RailId } from "../lib/navigation";
 import { call } from "@aidex/client/rpc";
 import { pageTitles, samplePages, screenKeyOf } from "../lib/routes";
@@ -101,6 +105,7 @@ export function MainLayout({ Sidebar, onNewSession, children }: Props) {
               onClick={() => toggleSidebar(true)}
             />
           )}
+          <HistoryButtons />
           {route.page === "home" ? null : (
             <Text as="span" variant="label" tone="secondary">
               {pageTitles[route.page]}
@@ -201,6 +206,34 @@ export function MainLayout({ Sidebar, onNewSession, children }: Props) {
         </Button>
       </Dialog>
     </ShellContext.Provider>
+  );
+}
+
+/** Back and forward through the screens visited in this session. */
+function HistoryButtons() {
+  const { back, forward, canGoBack, canGoForward } = useNavigation();
+  const shortcuts = historyShortcutLabels[useApplePlatform() ? "apple" : "other"];
+  return (
+    <>
+      <IconButton
+        size="sm"
+        label="Back"
+        title={`Back (${shortcuts.back.label})`}
+        aria-keyshortcuts={shortcuts.back.aria}
+        icon={<ChevronLeftIcon />}
+        disabled={!canGoBack}
+        onClick={back}
+      />
+      <IconButton
+        size="sm"
+        label="Forward"
+        title={`Forward (${shortcuts.forward.label})`}
+        aria-keyshortcuts={shortcuts.forward.aria}
+        icon={<ChevronRightIcon />}
+        disabled={!canGoForward}
+        onClick={forward}
+      />
+    </>
   );
 }
 
