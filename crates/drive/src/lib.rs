@@ -23,7 +23,7 @@ pub use manifest::{
     StoredManifest, V1_SCHEMA_VERSION,
 };
 pub use migration::V1_BACKUP_FILE_NAME;
-pub use ops::{DriveStatus, init, resolve_root, status};
+pub use ops::{DriveStatus, InitOptions, init, init_with, resolve_root, status};
 pub use path::{PathError, RelativePath};
 pub use paths::{DrivePaths, platform_runtime_name};
 pub use platform::is_windows_drive_root;

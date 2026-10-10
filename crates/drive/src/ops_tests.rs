@@ -1,5 +1,5 @@
 use super::*;
-use crate::V1_BACKUP_FILE_NAME;
+use crate::{DrivePaths, V1_BACKUP_FILE_NAME};
 
 fn temp_root(label: &str) -> PathBuf {
     let path = std::env::temp_dir().join(format!(
@@ -134,4 +134,50 @@ fn writes_only_the_canonical_root_manifest() {
             .is_ok()
     );
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn init_options_default_to_requiring_removable_media() {
+    assert!(InitOptions::default().require_removable);
+
+    let root = tempfile::tempdir().unwrap();
+    assert!(
+        init(root.path()).is_err(),
+        "a temporary directory is not a removable drive root"
+    );
+    assert!(!root.path().join(MANIFEST_FILE_NAME).exists());
+    assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+}
+
+#[test]
+fn init_with_developer_folder_initializes_a_v2_drive_that_services_can_open() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(root.path().join(MANIFEST_FILE_NAME), V1_MANIFEST).unwrap();
+    let options = InitOptions {
+        require_removable: false,
+    };
+
+    let status = init_with(root.path(), options).unwrap();
+    assert_eq!(status.schema_version, Some(CURRENT_SCHEMA_VERSION));
+    assert!(status.writable);
+    assert!(status.free_bytes.is_some_and(|free| free >= MIN_FREE_BYTES));
+    assert_eq!(status.root, fs::canonicalize(root.path()).unwrap());
+    assert_eq!(
+        fs::read_to_string(root.path().join(V1_BACKUP_FILE_NAME)).unwrap(),
+        V1_MANIFEST
+    );
+
+    let paths = DrivePaths::open(root.path()).unwrap();
+    for (name, relative) in paths.layout().entries() {
+        assert!(
+            relative.resolve_under(paths.root()).is_dir(),
+            "missing {name}"
+        );
+    }
+    let again = init_with(root.path(), options).unwrap();
+    assert_eq!(again.schema_version, Some(CURRENT_SCHEMA_VERSION));
+    assert_eq!(
+        fs::read_to_string(root.path().join(V1_BACKUP_FILE_NAME)).unwrap(),
+        V1_MANIFEST
+    );
 }

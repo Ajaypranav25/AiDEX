@@ -48,6 +48,25 @@ impl DriveStatus {
     }
 }
 
+/// Options for [`init_with`].
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct InitOptions {
+    /// Require the root to be a recognized removable volume (default `true`).
+    ///
+    /// `false` is intended only for tests and explicitly chosen developer folders;
+    /// AiDEX never disables the check implicitly. Manifest validation, migration,
+    /// directory creation, and the free-space check still apply.
+    pub require_removable: bool,
+}
+
+impl Default for InitOptions {
+    fn default() -> Self {
+        Self {
+            require_removable: true,
+        }
+    }
+}
+
 /// Resolve an explicit drive root or `AIDEX_DRIVE_ROOT` from a portable launcher.
 pub fn resolve_root(explicit: Option<&Path>) -> Result<PathBuf, DriveError> {
     let root = match explicit {
@@ -83,8 +102,15 @@ pub fn resolve_root(explicit: Option<&Path>) -> Result<PathBuf, DriveError> {
 /// existing content. A valid schema-v1 manifest is explicitly migrated to v2 first.
 /// Safe to retry after interruption; malformed or unsupported manifests are never changed.
 pub fn init(root: impl AsRef<Path>) -> Result<DriveStatus, DriveError> {
+    init_with(root, InitOptions::default())
+}
+
+/// [`init`] with explicit options; see [`InitOptions::require_removable`].
+pub fn init_with(root: impl AsRef<Path>, options: InitOptions) -> Result<DriveStatus, DriveError> {
     let root = resolve_root(Some(root.as_ref()))?;
-    require_removable(&root)?;
+    if options.require_removable {
+        require_removable(&root)?;
+    }
     let free = available_bytes(&root)?;
     if free < MIN_FREE_BYTES {
         return Err(DriveError::LowSpace {

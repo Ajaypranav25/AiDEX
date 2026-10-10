@@ -9,10 +9,16 @@ use std::fs;
 
 use crate::DriveError;
 
+/// Free bytes on the volume holding `root` (any directory on a lettered volume on Windows).
 pub(crate) fn available_bytes(root: &Path) -> Result<u64, DriveError> {
     #[cfg(windows)]
     let output = {
-        let letter = windows_drive_letter(root).unwrap_or_default().to_string();
+        let letter = volume_letter(root).ok_or_else(|| {
+            DriveError::Discovery(format!(
+                "cannot determine the drive letter of `{}`",
+                root.display()
+            ))
+        })?;
         Command::new("powershell")
             .args([
                 "-NoProfile",
@@ -20,7 +26,7 @@ pub(crate) fn available_bytes(root: &Path) -> Result<u64, DriveError> {
                 "-Command",
                 "(Get-Volume -DriveLetter $env:AIDEX_DRIVE_LETTER -ErrorAction Stop).SizeRemaining",
             ])
-            .env("AIDEX_DRIVE_LETTER", letter)
+            .env("AIDEX_DRIVE_LETTER", letter.to_string())
             .output()
     };
     #[cfg(not(windows))]
@@ -144,5 +150,18 @@ fn windows_drive_letter(path: &Path) -> Option<char> {
         && bytes[0].is_ascii_alphabetic()
         && bytes[1] == b':'
         && matches!(bytes[2], b'\\' | b'/'))
-    .then(|| value.chars().next().expect("three-byte drive root"))
+    .then(|| char::from(bytes[0]))
+}
+
+/// The drive letter of any path on a lettered volume (`C:\x`, `\\?\C:\x`).
+#[cfg(windows)]
+fn volume_letter(path: &Path) -> Option<char> {
+    use std::path::{Component, Prefix};
+    match path.components().next()? {
+        Component::Prefix(prefix) => match prefix.kind() {
+            Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => Some(char::from(letter)),
+            _ => None,
+        },
+        _ => None,
+    }
 }
