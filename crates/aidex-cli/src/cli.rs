@@ -5,7 +5,9 @@ use crate::commands::{
     agent::AgentCommand, daemon::DaemonCommand, events::EventsCommand, omp::SessionOptions,
     session::SessionArgs, vault::VaultCommand, workspace::WorkspaceArgs,
 };
-use crate::commands::{model::ModelArgs, offline::OfflineArgs, provider::ProviderArgs};
+use crate::commands::{
+    model::ModelArgs, offline::OfflineArgs, provider::ProviderArgs, runtime::RuntimeArgs,
+};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -79,6 +81,8 @@ pub enum Commands {
     Model(ModelArgs),
     /// Configure model providers (credentials come from the vault).
     Provider(ProviderArgs),
+    /// Install and inspect pinned llama.cpp runtimes for local models.
+    Runtime(RuntimeArgs),
     /// Refuse or allow remote provider traffic.
     Offline(OfflineArgs),
     /// Inspect durable sessions, checkpoints, and resume plans.
@@ -106,6 +110,7 @@ impl Commands {
             Some(Self::Workspace(args)) => args.command.label(),
             Some(Self::Model(args)) => args.command.label(),
             Some(Self::Provider(args)) => args.command.label(),
+            Some(Self::Runtime(args)) => args.command.label(),
             Some(Self::Offline(args)) => args.command.label(),
             Some(Self::Session(args)) => args.command.label(),
         }

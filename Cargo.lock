@@ -62,6 +62,7 @@ dependencies = [
  "aidex-drive",
  "aidex-events",
  "aidex-host",
+ "aidex-inference",
  "aidex-providers",
  "aidex-router",
  "aidex-sessions",
