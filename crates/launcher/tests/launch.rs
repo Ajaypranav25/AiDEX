@@ -9,8 +9,11 @@ use std::{
 };
 
 use aidex_bundle::{
-    BundleFile, BundleManifest, FileRole, InstallSource, LAUNCHER_MARKER, MANIFEST_FILE_NAME,
-    MANIFEST_SCHEMA_VERSION, PRODUCT_NAME, StatePaths, Target, install, layout,
+    BundleFile, BundleManifest, CurrentPointer, DEV_TRUSTED_KEYS_ENV, FileRole, InstallSource,
+    JournalOperation, JournalState, KeyPair, LAUNCHER_MARKER, MANIFEST_FILE_NAME,
+    MANIFEST_SCHEMA_VERSION, PRODUCT_NAME, Revocation, RevocationList, StatePaths, Target,
+    UPDATE_ID_PREFIX, UpdateJournal, install, journal_path, layout, read_manifest_bytes,
+    revocations_path, sign_manifest, write_signature,
 };
 use serde_json::Value;
 
@@ -25,6 +28,18 @@ struct Drive {
     root: tempfile::TempDir,
     target: Target,
     bundle_dir: PathBuf,
+    /// The key the installed bundle is signed with; trusted through
+    /// `AIDEX_DEV_TRUSTED_KEYS` (honoured because test builds enable `dev-trust`).
+    key: KeyPair,
+}
+
+fn sign(dir: &Path, key: &KeyPair) {
+    let bytes = read_manifest_bytes(dir).unwrap();
+    write_signature(dir, &sign_manifest(&bytes, key)).unwrap();
+}
+
+fn trusted_keys_env(key: &KeyPair) -> String {
+    format!("launcher-tests={}", key.public_key_hex())
 }
 
 /// Write a bundle for `target` whose CLI is the test stand-in (real launcher binary,
@@ -76,6 +91,10 @@ fn write_bundle(dir: &Path, target: Target, version: &str) {
 
 impl Drive {
     fn new() -> Self {
+        Self::with_bundle(true)
+    }
+
+    fn with_bundle(signed: bool) -> Self {
         let root = tempfile::tempdir().unwrap();
         aidex_drive::init_with(
             root.path(),
@@ -88,13 +107,22 @@ impl Drive {
         let source = tempfile::tempdir().unwrap();
         let dir = source.path().join("bundle");
         write_bundle(&dir, target, "0.1.0");
+        let key = KeyPair::generate("launcher-tests").unwrap();
+        if signed {
+            sign(&dir, &key);
+        }
         let report = install(&InstallSource::Directory(dir), root.path()).unwrap();
         let bundle_dir = root.path().join("app").join(&report.dir);
         Self {
             root,
             target,
             bundle_dir,
+            key,
         }
+    }
+
+    fn paths(&self) -> aidex_drive::DrivePaths {
+        aidex_drive::DrivePaths::open(self.path()).unwrap()
     }
 
     fn path(&self) -> &Path {
@@ -108,13 +136,28 @@ impl Drive {
     }
 
     fn run(&self, args: &[&str]) -> Output {
+        self.run_with(args, &[])
+    }
+
+    /// Run the launcher trusting the drive's signing key, plus `env` overrides (an
+    /// empty value removes a variable).
+    fn run_with(&self, args: &[&str], env: &[(&str, &str)]) -> Output {
         let cwd = tempfile::tempdir().unwrap();
-        Command::new(self.launcher())
+        let mut command = Command::new(self.launcher());
+        command
             .args(args)
             .current_dir(cwd.path())
             .env("AIDEX_DRIVE_ROOT", "/caller/supplied/value/is/ignored")
-            .output()
-            .unwrap()
+            .env(DEV_TRUSTED_KEYS_ENV, trusted_keys_env(&self.key))
+            .env_remove("AIDEX_ALLOW_UNSIGNED");
+        for (name, value) in env {
+            if value.is_empty() {
+                command.env_remove(name);
+            } else {
+                command.env(name, value);
+            }
+        }
+        command.output().unwrap()
     }
 
     fn pointer(&self) -> PathBuf {
@@ -180,6 +223,7 @@ fn the_unix_entry_script_selects_the_host_launcher() {
     let output = Command::new("sh")
         .arg(drive.path().join("aidex"))
         .args(["exit", "3"])
+        .env(DEV_TRUSTED_KEYS_ENV, trusted_keys_env(&drive.key))
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(3), "{}", stderr(&output));
@@ -275,6 +319,7 @@ fn a_bundle_for_another_target_is_refused() {
     };
     let source = tempfile::tempdir().unwrap();
     write_bundle(source.path(), other, "0.1.0");
+    sign(source.path(), &drive.key);
     let report = install(
         &InstallSource::Directory(source.path().to_path_buf()),
         drive.path(),
@@ -330,6 +375,11 @@ fn launcher_info_reports_the_verified_bundle_without_running_it() {
     assert_eq!(report["bundle"]["version"], "0.1.0");
     assert_eq!(report["bundle"]["scope"], "critical");
     assert_eq!(report["bundle"]["verified_files"], 4);
+    assert_eq!(report["bundle"]["signature"]["status"], "verified");
+    assert_eq!(report["bundle"]["signature"]["key_id"], drive.key.key_id());
+    assert_eq!(report["bundle"]["signature"]["key_source"], "development");
+    assert_eq!(report["dev_trust"], true);
+    assert_eq!(report["pending_update"], Value::Null);
     same_dir(&report["drive_root"], drive.path());
 
     let output = drive.run(&["--launcher-verify"]);
@@ -340,6 +390,104 @@ fn launcher_info_reports_the_verified_bundle_without_running_it() {
         let output = drive.run(bad);
         assert_eq!(output.status.code(), Some(2), "{bad:?}");
     }
+}
+
+#[test]
+fn an_unsigned_bundle_is_refused_unless_the_host_opts_in() {
+    let drive = Drive::with_bundle(false);
+    let output = drive.run(&["exit", "0"]);
+    assert_eq!(output.status.code(), Some(11), "{}", stderr(&output));
+    assert!(output.stdout.is_empty(), "the CLI must not run");
+    let message = stderr(&output);
+    assert!(message.contains("not signed"), "{message}");
+    assert!(message.contains("AIDEX_ALLOW_UNSIGNED"), "{message}");
+
+    let output = drive.run_with(&["exit", "5"], &[("AIDEX_ALLOW_UNSIGNED", "1")]);
+    assert_eq!(output.status.code(), Some(5), "{}", stderr(&output));
+    assert!(stderr(&output).contains("UNSIGNED"), "{}", stderr(&output));
+    let output = drive.run_with(&["--launcher-info"], &[("AIDEX_ALLOW_UNSIGNED", "1")]);
+    assert_eq!(
+        stdout_json(&output)["bundle"]["signature"]["status"],
+        "unsigned_allowed"
+    );
+    // Any other value is not an opt-in.
+    let output = drive.run_with(&["exit", "0"], &[("AIDEX_ALLOW_UNSIGNED", "yes")]);
+    assert_eq!(output.status.code(), Some(11), "{}", stderr(&output));
+}
+
+#[test]
+fn an_untrusted_or_revoked_signing_key_is_refused() {
+    let drive = Drive::new();
+    let output = drive.run_with(&["exit", "0"], &[(DEV_TRUSTED_KEYS_ENV, "")]);
+    assert_eq!(output.status.code(), Some(11), "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("does not trust"),
+        "{}",
+        stderr(&output)
+    );
+    // The host opt-in for unsigned bundles never accepts an untrusted signature.
+    let output = drive.run_with(
+        &["exit", "0"],
+        &[(DEV_TRUSTED_KEYS_ENV, ""), ("AIDEX_ALLOW_UNSIGNED", "1")],
+    );
+    assert_eq!(output.status.code(), Some(11), "{}", stderr(&output));
+
+    let mut list = RevocationList::default();
+    list.add(Revocation {
+        key_id: drive.key.key_id().into(),
+        revoked_at: None,
+        reason: Some("compromised".into()),
+    });
+    list.store(&revocations_path(&drive.paths())).unwrap();
+    let output = drive.run(&["exit", "0"]);
+    assert_eq!(output.status.code(), Some(11), "{}", stderr(&output));
+    assert!(stderr(&output).contains("revoked"), "{}", stderr(&output));
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn a_re_pinned_tampered_manifest_fails_the_signature() {
+    let drive = Drive::new();
+    let manifest_path = drive.bundle_dir.join(MANIFEST_FILE_NAME);
+    let mut manifest: Value = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    manifest["rustc"] = "rustc (attacker)".into();
+    let bytes = serde_json::to_vec_pretty(&manifest).unwrap();
+    fs::write(&manifest_path, &bytes).unwrap();
+    drive.edit_pointer(|entry| {
+        entry["manifest_sha256"] = aidex_bundle::sha256_hex(&bytes).into();
+    });
+    let output = drive.run(&["exit", "0"]);
+    assert_eq!(output.status.code(), Some(11), "{}", stderr(&output));
+    assert!(stderr(&output).contains("signature"), "{}", stderr(&output));
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn an_interrupted_update_is_reported_and_the_launcher_still_writes_nothing() {
+    let drive = Drive::new();
+    let paths = drive.paths();
+    let before = CurrentPointer::load(&layout::pointer_path(&paths)).unwrap();
+    let mut journal = UpdateJournal::new(
+        aidex_core::EntityId::generate(UPDATE_ID_PREFIX).unwrap(),
+        JournalOperation::Apply,
+        drive.target,
+        JournalState::SelfTest,
+        before,
+    );
+    journal.advance(JournalState::Switching);
+    journal.store(&journal_path(&paths)).unwrap();
+    let snapshot_before = snapshot(drive.path());
+    let output = drive.run(&["--launcher-info"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(stdout_json(&output)["pending_update"], "switching");
+    assert!(
+        stderr(&output).contains("interrupted"),
+        "{}",
+        stderr(&output)
+    );
+    let output = drive.run(&["exit", "4"]);
+    assert_eq!(output.status.code(), Some(4), "{}", stderr(&output));
+    assert_eq!(snapshot(drive.path()), snapshot_before);
 }
 
 /// Every path under `root`, with size and modification time for files. (Directory

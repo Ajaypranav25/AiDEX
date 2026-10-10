@@ -32,6 +32,8 @@ ctrlc = "3.5"
 
 [dev-dependencies]
 aidex-core = { path = "../core" }
+# Test builds trust keys from AIDEX_DEV_TRUSTED_KEYS (generated at run time by the tests).
+aidex-bundle = { path = "../bundle", features = ["dev-trust"] }
 tempfile = "3"
 
 [lints]

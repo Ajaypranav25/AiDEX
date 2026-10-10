@@ -7,7 +7,10 @@ use std::{
     process::Command,
 };
 
-use aidex_bundle::{ActiveBundle, FileRole, Target, VerifyScope, resolve_active};
+use aidex_bundle::{
+    ActiveBundle, FileRole, SignaturePolicy, SignatureState, Target, TrustStore, UpdateJournal,
+    VerifyScope, journal_path, resolve_active,
+};
 use aidex_drive::DrivePaths;
 
 use crate::{
@@ -46,10 +49,16 @@ impl Mode {
     }
 }
 
+/// Host-side opt-in to run a bundle that carries no `bundle.sig` (development only).
+/// It never accepts a bundle whose signature is present but invalid or untrusted.
+pub const ALLOW_UNSIGNED_ENV: &str = "AIDEX_ALLOW_UNSIGNED";
+
 /// The verified state a launch is based on.
 pub struct Resolved {
     pub paths: DrivePaths,
     pub active: ActiveBundle,
+    /// State of an update that did not finish (recovered when the daemon starts).
+    pub pending_update: Option<String>,
 }
 
 impl Resolved {
@@ -63,13 +72,49 @@ impl Resolved {
 }
 
 /// Locate the drive from the launcher's location and verify the active bundle for
-/// this host with `scope`, before anything from the bundle runs.
+/// this host with `scope` — including its signature against the keys compiled into
+/// this launcher and the drive's revocation list — before anything from it runs.
 pub fn resolve(scope: VerifyScope) -> Result<Resolved, LaunchError> {
     let target = Target::host().ok_or(aidex_bundle::BundleError::UnsupportedHost)?;
     let exe = current_exe()?;
     let paths = drive_for(&exe, target)?;
-    let active = resolve_active(&paths, target, scope)?;
-    Ok(Resolved { paths, active })
+    let trust = TrustStore::builtin()
+        .and_then(|trust| trust.with_drive_revocations(&paths))
+        .map_err(LaunchError::trust)?;
+    let policy = SignaturePolicy {
+        trust,
+        allow_unsigned: env::var(ALLOW_UNSIGNED_ENV).is_ok_and(|value| value == "1"),
+    };
+    let active = resolve_active(&paths, target, scope, &policy)?;
+    if active.signature == SignatureState::UnsignedAllowed {
+        eprintln!(
+            "AiDEX launcher: warning: running an UNSIGNED bundle because {ALLOW_UNSIGNED_ENV}=1; its origin is not verified (development only)"
+        );
+    }
+    let pending_update = pending_update(&paths);
+    if let Some(state) = &pending_update {
+        eprintln!(
+            "AiDEX launcher: note: an update was interrupted ({state}); running the version app/current.json selects, and the daemon recovers the rest when it starts"
+        );
+    }
+    Ok(Resolved {
+        paths,
+        active,
+        pending_update,
+    })
+}
+
+/// The state of an unfinished update journal, if any. The launcher never writes the
+/// journal (recovery is the daemon's job); the pointer it just verified is always a
+/// complete old or new version, because it is only ever replaced by an atomic rename.
+fn pending_update(paths: &DrivePaths) -> Option<String> {
+    match UpdateJournal::load(&journal_path(paths)) {
+        Ok(Some(journal)) if !journal.state.is_terminal() => {
+            Some(journal.state.as_str().to_owned())
+        }
+        Ok(_) => None,
+        Err(_) => Some("unreadable update journal".to_owned()),
+    }
 }
 
 /// Verify the critical files, then run the CLI. On Unix the launcher process is

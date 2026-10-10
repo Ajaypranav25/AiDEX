@@ -1,6 +1,6 @@
 //! `--launcher-info` / `--launcher-verify`: a JSON report of the verified bundle.
 
-use aidex_bundle::{LAUNCHER_MARKER, Target, VerifyScope, VersionRef};
+use aidex_bundle::{LAUNCHER_MARKER, SignatureState, Target, VerifyScope, VersionRef};
 use serde::Serialize;
 
 use crate::{error::LaunchError, launch::resolve};
@@ -14,6 +14,10 @@ struct LauncherReport {
     drive_root: String,
     target: Target,
     bundle: BundleReport,
+    /// Whether this launcher build trusts `AIDEX_DEV_TRUSTED_KEYS` (test builds only).
+    dev_trust: bool,
+    /// State of an interrupted update, if any.
+    pending_update: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -26,6 +30,7 @@ struct BundleReport {
     rust_target: String,
     scope: VerifyScope,
     verified_files: usize,
+    signature: SignatureState,
     previous: Option<VersionRef>,
 }
 
@@ -39,6 +44,8 @@ pub fn print(scope: VerifyScope) -> Result<(), LaunchError> {
         marker: LAUNCHER_MARKER,
         drive_root: resolved.drive_root().display().to_string(),
         target: resolved.active.target,
+        dev_trust: aidex_bundle::TrustStore::dev_trust_enabled(),
+        pending_update: resolved.pending_update.clone(),
         bundle: BundleReport {
             version: bundle.manifest.version.clone(),
             dir: resolved.active.pointer.dir.clone(),
@@ -48,6 +55,7 @@ pub fn print(scope: VerifyScope) -> Result<(), LaunchError> {
             rust_target: bundle.manifest.rust_target.clone(),
             scope: bundle.scope,
             verified_files: bundle.verified_files,
+            signature: resolved.active.signature.clone(),
             previous: resolved.active.pointer.previous.clone(),
         },
     };
