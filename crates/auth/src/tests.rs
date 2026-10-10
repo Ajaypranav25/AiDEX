@@ -610,6 +610,7 @@ fn offline_gate_denies_all_auth_sockets_and_browser_open_but_disconnects_locally
     let allowed = Arc::new(AtomicBool::new(false));
     let policy = allowed.clone();
     let mut service = AuthService::new(vault.clone()).unwrap();
+    service.host_key = Ok("fixture-host-one".into());
     service.discovery = format!("{}/discovery", fixture.base);
     service.network_allowed = Arc::new(move || policy.load(Ordering::SeqCst));
     let auth = Arc::new(service);
