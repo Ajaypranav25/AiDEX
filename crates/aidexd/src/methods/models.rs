@@ -273,11 +273,8 @@ fn route(services: &Services, params: RouteParams) -> Result<RouteResult, RpcErr
         .find(|model| model.model == decision.primary)
         .cloned()
         .ok_or_else(|| RpcError::internal("routed model is missing from the listing"))?;
-    models.observer().observe(&ModelEvent::Selected {
-        model: decision.primary.clone(),
-        fallbacks: decision.fallbacks.clone(),
-        reasons: decision.reasons.clone(),
-    });
+    // `model.route` only explains a decision; `model.selected` is emitted by
+    // whoever actually runs the model (the harness).
     Ok(RouteResult {
         decision,
         model,
