@@ -1,28 +1,74 @@
-import type { PageId } from "../../lib/navigation";
+import { useRef, useState } from "react";
+import { Composer } from "@aidex/ui/components";
+import { CodeIcon, FileTextIcon, LightbulbIcon, MessageSquareIcon } from "@aidex/ui/icons";
+import { Button, Container, Heading, SegmentedControl, Stack, Text } from "@aidex/ui/primitives";
 
-type Props = { activeLabel: string; onNavigate: (page: PageId) => void };
+type Mode = "chat" | "agent";
 
-const principles = [
-  { number: "01", title: "Portable by design", detail: "Keep your agent environment and durable state with the drive." },
-  { number: "02", title: "Local-first runtime", detail: "Bring local models and tools; use cloud providers when you choose." },
-  { number: "03", title: "Human-controlled", detail: "Mediate sensitive actions through explicit policy and approval." },
-];
+type Props = { autoFocus?: boolean };
 
-export function HomePage({ activeLabel, onNavigate }: Props) {
+const modeOptions = [
+  { value: "chat", label: "Chat" },
+  { value: "agent", label: "Agent" },
+] as const;
+
+const placeholderByMode: Record<Mode, string> = {
+  chat: "Ask anything, start a task, or work on your codebase...",
+  agent: "Describe a task for an agent to carry out...",
+};
+
+const suggestions = [
+  { label: "Summarize notes", Icon: FileTextIcon, prompt: "Summarize these notes: " },
+  { label: "Fix a bug", Icon: CodeIcon, prompt: "Help me fix a bug: " },
+  { label: "Plan feature", Icon: LightbulbIcon, prompt: "Help me plan a feature: " },
+  { label: "Review code", Icon: MessageSquareIcon, prompt: "Review this code: " },
+] as const;
+
+export function HomePage({ autoFocus = false }: Props) {
+  const [mode, setMode] = useState<Mode>("chat");
+  const [draft, setDraft] = useState("");
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+
+  // Frames whatever is already typed instead of discarding it.
+  const applySuggestion = (prompt: string) => {
+    setDraft((current) => (current.trim() ? prompt + current.trimStart() : prompt));
+    composerRef.current?.focus();
+  };
+
   return (
-    <section className="page-content" aria-labelledby="page-title">
-      <div className="eyebrow"><span className="eyebrow-line" /> YOUR ENVIRONMENT, READY TO GO</div>
-      <div className="hero">
-        <div className="hero-copy">
-          <h1 id="page-title">A workspace that<br /><span>travels with you.</span></h1>
-          <p>AiDEX brings your AI development environment, agents, tools, and projects together in one portable workspace.</p>
-          <button className="primary-button" onClick={() => onNavigate("workspace")}>Open workspace <span aria-hidden="true">↗</span></button>
-        </div>
-        <div className="hero-art" aria-hidden="true"><div className="orbit orbit-one" /><div className="orbit orbit-two" /><div className="orbit orbit-three" /><div className="core-mark">A<span>i</span></div><span className="orbit-node node-one" /><span className="orbit-node node-two" /><span className="orbit-node node-three" /></div>
-      </div>
-      <div className="section-heading"><div><span className="eyebrow">THE AiDEX APPROACH</span><h2>Built for work that moves.</h2></div><span className="page-context">{activeLabel}</span></div>
-      <div className="principle-grid">{principles.map(({ number, title, detail }) => <article className="principle-card" key={number}><span className="card-number">{number}</span><h3>{title}</h3><p>{detail}</p></article>)}</div>
-      <div className="connection-note"><span className="note-icon">i</span><p><strong>Desktop shell is ready.</strong> The AiDEX Core API is not connected yet. This interface does not run agents or simulate backend activity.</p></div>
-    </section>
+    <Container size="md" verticallyCentered>
+      <Stack gap={11}>
+        <Stack direction="row" justify="center">
+          <SegmentedControl label="Conversation mode" options={modeOptions} value={mode} onValueChange={setMode} />
+        </Stack>
+        <Stack gap={10}>
+          <Stack gap={3}>
+            <Heading level={1} size="display" align="center">
+              Welcome to AiDEX
+            </Heading>
+            <Text variant="lead" tone="secondary" align="center">
+              Your AI workspace for deeper thinking, faster building, and greater outcomes.
+            </Text>
+          </Stack>
+          <Stack gap={7}>
+            <Composer
+              label="Message"
+              placeholder={placeholderByMode[mode]}
+              value={draft}
+              onValueChange={setDraft}
+              textareaRef={composerRef}
+              autoFocus={autoFocus}
+            />
+            <Stack direction="row" gap={4} justify="center" wrap role="group" aria-label="Suggestions">
+              {suggestions.map(({ label, Icon, prompt }) => (
+                <Button key={label} variant="outline" size="lg" icon={<Icon />} onClick={() => applySuggestion(prompt)}>
+                  {label}
+                </Button>
+              ))}
+            </Stack>
+          </Stack>
+        </Stack>
+      </Stack>
+    </Container>
   );
 }

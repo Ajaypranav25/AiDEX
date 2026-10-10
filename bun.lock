@@ -16,6 +16,7 @@
       "name": "@aidex/desktop",
       "version": "0.1.0",
       "dependencies": {
+        "@aidex/ui": "workspace:*",
         "@tauri-apps/api": "^2.8.0",
         "next": "^16.0.0",
         "react": "^19.1.0",

@@ -1,3 +1,3 @@
 # Shared packages
 
-`packages/` is reserved for shared code with a concrete cross-application consumer. No shared runtime package is added yet: the protocol schema is maintained in `protocol/`, and application-specific dependencies remain owned by their respective apps.
+`packages/` holds shared code with a concrete cross-application consumer. `ui` (`@aidex/ui`) is the first workspace package: the design tokens and components the desktop screens are built from. The remaining directories are reserved; the protocol schema is maintained in `protocol/`, and application-specific dependencies remain owned by their respective apps.
