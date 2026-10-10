@@ -142,9 +142,33 @@ pub(crate) struct ReviewInput<'a> {
 pub(crate) fn review(input: &ReviewInput<'_>) -> Result<EphemeralDiff, WorkspaceError> {
     let mut walked: BTreeMap<String, (WorkspacePath, PathBuf)> = BTreeMap::new();
     let mut unsupported: Vec<SkippedEntry> = Vec::new();
+    let mut files = 0u64;
+    let mut bytes = 0u64;
+    let mut account_file = |len: u64| {
+        files = files.saturating_add(1);
+        bytes = bytes.saturating_add(len);
+        if files > input.limits.max_files {
+            return Err(WorkspaceError::TooLarge(format!(
+                "the ephemeral tree has more than {} files",
+                input.limits.max_files
+            )));
+        }
+        if bytes > input.limits.max_bytes {
+            return Err(WorkspaceError::TooLarge(format!(
+                "the ephemeral tree exceeds {} bytes",
+                input.limits.max_bytes
+            )));
+        }
+        Ok(())
+    };
     walk::walk(input.tree.root(), Vec::new(), |item| {
         match item {
-            Item::File { path, absolute, .. } => {
+            Item::File {
+                path,
+                absolute,
+                len,
+            } => {
+                account_file(len)?;
                 walked.insert(path.as_str().to_owned(), (path, absolute));
             }
             Item::Skipped(skipped) => unsupported.push(skipped),
@@ -168,7 +192,7 @@ pub(crate) fn review(input: &ReviewInput<'_>) -> Result<EphemeralDiff, Workspace
     for (key, base) in &input.baseline.files {
         let path = WorkspacePath::new(key.as_str())
             .map_err(|_| WorkspaceError::Corrupt(format!("baseline path `{key}`")))?;
-        walked.remove(key);
+        let was_walked = walked.remove(key).is_some();
         match entry(input.tree, &path)? {
             Entry::Missing => pending.push(Pending {
                 path,
@@ -180,6 +204,14 @@ pub(crate) fn review(input: &ReviewInput<'_>) -> Result<EphemeralDiff, Workspace
             Entry::Link => flag(&path, SkipReason::Link, &mut unsupported),
             Entry::Other => flag(&path, SkipReason::NotAFile, &mut unsupported),
             Entry::File(absolute) => {
+                // Baseline files remain reviewable even when newly ignored;
+                // they must still count toward the review's resource limits.
+                if !was_walked {
+                    let metadata = fs::symlink_metadata(&absolute).map_err(|error| {
+                        WorkspaceError::io(format!("cannot inspect `{key}`"), error)
+                    })?;
+                    account_file(metadata.len())?;
+                }
                 let state = hash(&absolute, &path)?;
                 if state != *base {
                     pending.push(Pending {
