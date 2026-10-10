@@ -15,6 +15,32 @@ use std::{
 };
 use url::Url;
 
+#[test]
+fn unavailable_host_identity_leaves_service_usable_and_denies_signin_before_network() {
+    let root = tempfile::tempdir().unwrap();
+    let vault = Arc::new(
+        VaultService::open(root.path().join("vault"), VaultServiceConfig::default()).unwrap(),
+    );
+    let admissions = Arc::new(AtomicUsize::new(0));
+    let observed = admissions.clone();
+    let mut service = AuthService::with_network_gate(
+        vault,
+        Arc::new(move || {
+            observed.fetch_add(1, Ordering::SeqCst);
+            true
+        }),
+    )
+    .unwrap();
+    service.host_key = Err(AuthError::Unavailable);
+    let service = Arc::new(service);
+    assert!(matches!(
+        service.start("openai", |_, _| Ok(())),
+        Err(AuthError::Unavailable)
+    ));
+    assert_eq!(admissions.load(Ordering::SeqCst), 0);
+    assert!(service.flows.lock().unwrap().is_empty());
+}
+
 struct Fixture {
     base: String,
     nonce: Arc<Mutex<String>>,
@@ -192,7 +218,7 @@ impl Fixture {
         *self.vault_probe.lock().unwrap() = Some(vault.clone());
         let mut service = AuthService::new(vault).unwrap();
         service.discovery = format!("{}/discovery", self.base);
-        service.host_key = "fixture-host-one".into();
+        service.host_key = Ok("fixture-host-one".into());
         service.network_allowed = Arc::new(|| true);
         Arc::new(service)
     }

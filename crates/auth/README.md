@@ -1,6 +1,6 @@
 # Native ChatGPT OAuth
 
-`aidex-auth` owns supported Sign in with ChatGPT for AiDEX. It does not read
+`aidex-auth` owns supported Sign in with ChatGPT for AiDEX. A host without a supported identity source can start Core normally; sign-in returns unavailable before network discovery rather than preventing daemon startup. It does not read
 existing Codex, ChatGPT, or browser credentials and does not create `auth.json`.
 The daemon constructs one `Arc<AuthService>` and shares it between RPC and its
 provider credential resolver. `AuthService::new(Arc<VaultService>)` denies network

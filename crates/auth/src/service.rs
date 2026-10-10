@@ -131,7 +131,7 @@ pub struct AuthService {
     network_allowed: Arc<dyn Fn() -> bool + Send + Sync>,
     vault: Arc<VaultService>,
     discovery: String,
-    host_key: String,
+    host_key: Result<String, AuthError>,
     ttl: Duration,
     http: reqwest::blocking::Client,
     flows: Mutex<HashMap<String, Arc<Mutex<Flow>>>>,
@@ -151,7 +151,7 @@ impl AuthService {
             network_allowed: Arc::new(|| false),
             vault,
             discovery: oauth::DISCOVERY.into(),
-            host_key: storage::native_host_key()?,
+            host_key: storage::native_host_key(),
             ttl: Duration::from_secs(600),
             http: reqwest::blocking::Client::builder()
                 .timeout(Duration::from_secs(20))
@@ -198,6 +198,9 @@ impl AuthService {
         connected: impl Fn(&str, &str) -> Result<(), AuthError> + Send + Sync + 'static,
     ) -> Result<StartResult, AuthError> {
         storage::validate_provider(provider)?;
+        // Unsupported host identity disables sign-in, not the rest of Core.
+        // Resolve it before discovery so a denied attempt has no network effects.
+        let host_key = self.host_key.as_ref().map_err(|error| *error)?;
         let lock = self.provider_lock(provider);
         let _guard = lock.lock().unwrap_or_else(|e| e.into_inner());
         let profile = self.profile(provider)?;
@@ -221,7 +224,7 @@ impl AuthService {
         let endpoints = oauth::discover(&self.http, &self.discovery, &*self.network_allowed)?;
         let host_id = {
             let _host = self.host_lock.lock().unwrap_or_else(|e| e.into_inner());
-            storage::host_id(&self.vault, &self.host_key)?
+            storage::host_id(&self.vault, host_key)?
         };
         let listener = TcpListener::bind("127.0.0.1:0").map_err(|_| AuthError::Unavailable)?;
         listener
