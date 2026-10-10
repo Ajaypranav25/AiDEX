@@ -9,9 +9,11 @@ use crate::{endpoint, lifecycle::ShutdownSignal, methods::events::event_error_co
 use aidex_core::ServiceErrorCode;
 use aidex_drive::DrivePaths;
 use aidex_events::EventLog;
+use aidex_vault::{VaultService, VaultServiceConfig};
 use std::{
     fmt,
     path::{Path, PathBuf},
+    sync::Arc,
     time::{Duration, Instant},
 };
 
@@ -27,6 +29,7 @@ pub struct Services {
     started_at: Instant,
     shutdown: ShutdownSignal,
     events: EventLog,
+    vault: Arc<VaultService>,
 }
 
 impl Services {
@@ -56,6 +59,11 @@ impl Services {
         let events = EventLog::open(&event_path, EVENT_RETENTION).map_err(|error| {
             ServicesError::new("events", event_error_code(&error), error.to_string())
         })?;
+        let vault_dir = paths
+            .ensure_dir(&paths.vault())
+            .map_err(|error| ServicesError::new("vault", error.code(), error.to_string()))?;
+        let vault = VaultService::open(vault_dir, VaultServiceConfig::default())
+            .map_err(|error| ServicesError::new("vault", error.code(), error.to_string()))?;
         Ok(Self {
             drive_root: drive_root.to_path_buf(),
             paths,
@@ -63,6 +71,7 @@ impl Services {
             started_at: Instant::now(),
             shutdown,
             events,
+            vault: Arc::new(vault),
         })
     }
 
@@ -92,6 +101,12 @@ impl Services {
     /// Durable, workspace-scoped event log (`aidex-events`).
     pub fn events(&self) -> &EventLog {
         &self.events
+    }
+
+    /// The drive's encrypted vault (`aidex-vault`). Handle issuance/resolution for the
+    /// broker are Rust methods on [`VaultService`]; they are not RPC methods.
+    pub fn vault(&self) -> &Arc<VaultService> {
+        &self.vault
     }
 }
 
