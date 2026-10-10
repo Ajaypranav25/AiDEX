@@ -8,9 +8,9 @@
 | --- | --- |
 | `@aidex/ui/styles.css` | Design tokens and base element styles. Import once in the app root layout. |
 | `@aidex/ui/icons` | Project-owned SVG icons and the AiDEX logo mark. |
-| `@aidex/ui/primitives` | Controls and layout: `Button`, `IconButton`, `Kbd`, `Avatar`, `SearchField`, `SegmentedControl`, `Stack`, `Container`, `Heading`, `Text`. |
-| `@aidex/ui/components` | Cross-device product components: `Brand`, `Composer`. |
-| `@aidex/ui/desktop` | Desktop shell: `AppShell`, `NavRail`, `Sidebar`, `SidebarSection`, `SidebarItem`, `TopBar`. |
+| `@aidex/ui/primitives` | Controls: `Button`, `IconButton`, `TextField`, `SearchField`, `PasswordField`, `SegmentedControl`, `Kbd`. Display: `Avatar`, `Badge`, `StatusIndicator`, `IconBadge`, `ProgressBar`, `Divider`, `Card`. Layout and type: `Stack`, `Grid`, `Container`, `Heading`, `Text`. |
+| `@aidex/ui/components` | Cross-device product components: `Brand`, `Composer`, `MediaItem`, `InfoCard`. |
+| `@aidex/ui/desktop` | Desktop frames: `AppShell`, `FocusLayout`, `NavRail`, `Sidebar`, `SidebarSection`, `SidebarItem`, `TopBar`. |
 
 The package ships TypeScript source and CSS Modules; consuming Next.js apps list it in `transpilePackages`. Styles reference the `--aidex-*` custom properties in `src/tokens/tokens.css` instead of literal values.
 

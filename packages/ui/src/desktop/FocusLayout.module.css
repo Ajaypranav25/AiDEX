@@ -1,0 +1,9 @@
+.layout {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow-y: auto;
+  background: var(--aidex-color-bg);
+  scrollbar-color: var(--aidex-color-border) transparent;
+  scrollbar-width: thin;
+}
