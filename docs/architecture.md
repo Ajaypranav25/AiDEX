@@ -19,6 +19,12 @@ crates/aidexd (`aidexd`)
 crates/policy (`aidex-policy`)
    └── pure policy evaluation; not yet wired into the daemon (broker work, #17)
 
+crates/launcher (`AiDEX.exe` / `./aidex` on the drive)
+   └── crates/bundle: verify app/current.json → bundle.json → binaries, then run `aidex`
+
+crates/packager (`aidex-packager`, developer/CI only)
+   └── crates/bundle: build, archive, install, smoke-test portable bundles
+
 apps/desktop, apps/installer
    └── future clients of the same daemon API
 ```
@@ -31,7 +37,7 @@ The Rust workspace remains the primary implementation focus. Its first layer is 
 
 ## Portable-drive data is not repository source
 
-`portable/` describes an installable drive distribution. It is distinct from this source repository and must never contain user secrets, model weights, or generated binaries in source control. Per-drive state is runtime data (including vault, identity, sessions, and memory); bundled public assets are versioned or verified through manifests. The installer must not claim that a drive is ready until provisioning, integrity checks, and recovery semantics exist.
+`portable/` describes an installable drive distribution. Application binaries reach a drive only as verified bundles installed by `aidex-bundle` into `app/versions/`, selected by `app/current.json`, and started through the drive-root launcher (`portable/packaging/README.md`). It is distinct from this source repository and must never contain user secrets, model weights, or generated binaries in source control. Per-drive state is runtime data (including vault, identity, sessions, and memory); bundled public assets are versioned or verified through manifests. The installer must not claim that a drive is ready until provisioning, integrity checks, and recovery semantics exist.
 
 ## Security invariants
 
