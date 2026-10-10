@@ -40,15 +40,6 @@ mod tests {
         assert_eq!(granted, expected);
     }
 
-    /// The sources a CSP grants for one directive, e.g. `connect-src`.
-    fn csp_sources<'a>(csp: &'a str, directive: &str) -> Vec<&'a str> {
-        csp.split(';')
-            .map(|entry| entry.split_whitespace().collect::<Vec<_>>())
-            .find(|words| words.first() == Some(&directive))
-            .map(|words| words[1..].to_vec())
-            .unwrap_or_default()
-    }
-
     #[test]
     fn the_dev_url_is_the_address_the_next_dev_server_binds() {
         let config: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
@@ -57,15 +48,35 @@ mod tests {
     }
 
     #[test]
-    fn the_csp_lets_the_page_reach_ipc_and_nothing_else() {
+    fn dev_scripts_and_hot_reload_come_from_the_dev_url_address() {
         let config: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
-        let csp = config["app"]["security"]["csp"].as_str().unwrap();
-        // Without `ipc:` every command first fails a blocked fetch, then falls back to the
-        // slower postMessage transport. Tauri never applies the CSP to the dev server's pages,
-        // so the dev server's hot-reload socket does not belong in it.
+        let dev_url = config["build"]["devUrl"].as_str().unwrap();
+        let (host, port) = dev_url
+            .trim_start_matches("http://")
+            .split_once(':')
+            .unwrap();
+        // In development `assetPrefix` serves every script and the hot-reload socket.
+        let next_config = include_str!("../../next.config.ts");
+        assert!(
+            next_config.contains(&format!("TAURI_DEV_HOST ?? \"{host}\"")),
+            "next.config.ts must default devHost to {host}"
+        );
+        assert!(
+            next_config.contains(&format!("`http://${{devHost}}:{port}`")),
+            "next.config.ts must serve assets on port {port}"
+        );
+    }
+
+    #[test]
+    fn the_csp_allows_bundled_assets_and_ipc_only() {
+        let config: Value = serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        // Without `ipc:` the first command's fetch is blocked and every command then falls back to
+        // the slower postMessage transport. Tauri applies the CSP only to the assets it serves, never
+        // to the dev server's pages, so neither tests nor `tauri dev` exercise it. Widening it is a
+        // security change: do it here.
         assert_eq!(
-            csp_sources(csp, "connect-src"),
-            ["ipc:", "http://ipc.localhost"]
+            config["app"]["security"]["csp"],
+            "default-src 'self'; connect-src ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
         );
     }
 
