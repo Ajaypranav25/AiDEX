@@ -17,7 +17,7 @@ uses. Wire format, handshake, error codes, and naming rules:
 | `stream` | `NotificationSink` for subscription methods |
 | `transport` (private) | listener, per-connection reader/writer threads, bounded outbox, shutdown |
 | `services` | `Services`, built once and shared with handlers as `Arc<Services>` |
-| `methods/<domain>` | JSON-RPC adapters: `daemon.*` (status/ping/stop), `events.*` (replay) |
+| `methods/<domain>` | JSON-RPC adapters: `daemon.*` (status/ping/stop), `events.*` (replay/latest/subscribe) |
 | `lifecycle` | `Daemon`, `DaemonHandle`, `serve`, `launch`, `stop`, stale-endpoint recovery |
 | `client` | `Client`, `Subscription`, `ClientError` |
 
@@ -89,10 +89,14 @@ handlers without sockets.
 
 ## Limitations
 
-- Methods: only `daemon.status|ping|stop` and `events.replay` exist. Event push
-  streaming (`events.subscribe`) and every other domain are future work.
-- The event database stays at `.aidex/runtime/events.sqlite` (PR #40); moving it
-  under `DrivePaths` is left to the events owner.
+- Methods: only `daemon.status|ping|stop` and `events.replay|latest|subscribe`
+  exist; every other domain is future work.
+- The event log is `DrivePaths::sessions()/events.sqlite3` (100 000 events, 90
+  days). PR #40's `.aidex/runtime/events.sqlite` is superseded: it is imported once,
+  read-only, into an empty new log and then left untouched (safe to delete).
+  The daemon records `daemon.started` once its endpoint is published and
+  `daemon.stopping` before it closes connections (best effort; live subscribers
+  may only see it on replay). Each `events.subscribe` stream uses one thread.
 - DTOs for daemon methods live in this crate (`methods::*`), not in the
   generated `aidex-core` contract schema yet.
 - No per-client authorization beyond the bearer capability; any process of the

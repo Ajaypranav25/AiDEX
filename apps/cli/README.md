@@ -28,7 +28,8 @@ bun run dev:cli -- doctor
 bun run dev:cli -- agent list
 bun run dev:cli -- daemon start --drive /path/to/drive
 bun run dev:cli -- daemon status --drive /path/to/drive --json
-bun run dev:cli -- events --workspace WORKSPACE_ID --drive /path/to/drive --follow
+bun run dev:cli -- events tail --drive /path/to/drive --follow
+bun run dev:cli -- events show --drive /path/to/drive --after 0 --limit 20
 bun run dev:cli -- daemon stop --drive /path/to/drive
 bun run dev:cli -- chat
 bun run dev:cli -- run "Explain this repository"
@@ -41,7 +42,7 @@ bun run login:omp
 
 `aidex daemon start|status|stop [--drive PATH]` manage the `aidexd` daemon for a drive (default `AIDEX_DRIVE_ROOT`). `start` launches the `aidexd` executable next to `aidex` (falling back to `aidexd` on `PATH`), recovering a stale endpoint first, and waits until the daemon answers; `stop` waits until the daemon has closed its connections and removed its endpoint. The daemon requires an initialized schema-v2 drive (`aidex init`); it refuses other folders without changing them. Every daemon-backed command connects through IPC contract v2 (`protocol/commands/README.md`); when no daemon is running it exits 3 with a hint to run `aidex daemon start --drive <path>`.
 
-`aidex events --workspace ID [--after N] [--follow] [--drive PATH]` prints the workspace's durable events as newline-delimited JSON using `events.replay`, strictly after cursor `N`. With `--follow` it keeps polling from the last flushed event and reconnects after daemon restarts; an expired cursor is a permanent error (exit 8) rather than a silent gap.
+`aidex events tail [--after N] [--workspace ID] [--session ID] [--kind PREFIX]... [--follow] [--drive PATH]` prints the drive's events strictly after cursor `N` (default 0) and exits; `--kind` takes dotted name prefixes such as `tool` or `approval.created` (see `protocol/events/README.md`). With `--follow` it streams `events.subscribe`; after a daemon restart, a dropped connection, or a slow-consumer disconnect it reconnects with backoff (0.25 s doubling to 5 s) and resumes strictly after the last printed cursor, so no event is printed twice or skipped. A cursor is acknowledged only after its line was flushed. `aidex events show [--after N] [--limit M] [filters]` prints one replay page (`events.replay`, `M` 1-256, default 50) and the cursor to continue from. An expired cursor is a permanent error (exit 8, with a hint naming the oldest retained cursor) rather than a silent gap; an unknown kind prefix or invalid id is exit 2. Human output is one line per event (`cursor  time  name  scope  data`; live-only events show `~cursor`).
 
 `aidex` and `aidex chat` open Oh My Pi's interactive terminal UI. AiDEX passes `--approval-mode always-ask`, disables OMP extensions, MCP, LSP, skills, session persistence, and automatic title generation, and requests a limited tool set. OMP still owns its CLI tool lifecycle and approval implementation; this is not an AiDEX sandbox or policy boundary.
 
@@ -52,13 +53,13 @@ Interactive chat uses the user's existing OMP provider credentials. Configure th
 The source-tree `aidex run` adapter is `apps/cli/src/run.ts`. Packaged binaries must ship that script and set `AIDEX_RUNNER`; `AIDEX_BUN` can select a non-default Bun executable.
 ## Machine-readable output
 
-The global `--json` flag makes `init`, `status`, `daemon start|status|stop`, `doctor`, and `agent list` print exactly one compact JSON document on stdout. Failures never write to stdout: with `--json` the error is a single JSON line on stderr,
+The global `--json` flag makes `init`, `status`, `daemon start|status|stop`, `events show`, `doctor`, and `agent list` print exactly one compact JSON document on stdout. Failures never write to stdout: with `--json` the error is a single JSON line on stderr,
 
 ```json
 {"error":{"code":"daemon_unavailable","exit_code":3,"message":"daemon not running on /media/aidex: ...","hint":"start it with `aidex daemon start --drive /media/aidex`"}}
 ```
 
-and without it a `aidex <command>: <message>` line plus an optional `hint:` line. `aidex events` always emits NDJSON events; `chat` and `run` are interactive/delegated and ignore `--json`. Clap usage errors keep clap's text format.
+and without it a `aidex <command>: <message>` line plus an optional `hint:` line. `aidex events tail` prints one JSON envelope per line with `--json` (`events show --json` prints the page as one document); `chat` and `run` are interactive/delegated and ignore `--json`. Clap usage errors keep clap's text format.
 
 ## Exit codes
 
