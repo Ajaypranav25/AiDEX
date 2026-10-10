@@ -1,0 +1,89 @@
+.item {
+  position: relative;
+  border-radius: var(--aidex-radius-md);
+}
+
+.button {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  border: 1px solid transparent;
+  border-radius: inherit;
+  background: transparent;
+  color: var(--aidex-color-text);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--aidex-duration-fast) var(--aidex-ease),
+    border-color var(--aidex-duration-fast) var(--aidex-ease);
+}
+
+.button:hover {
+  background: var(--aidex-color-surface-hover);
+}
+
+.md .button {
+  min-height: 44px;
+  padding: 0 var(--aidex-space-3);
+  font-size: var(--aidex-text-lg);
+}
+
+.sm .button {
+  min-height: 32px;
+  padding: 0 var(--aidex-space-3);
+  font-size: var(--aidex-text-md);
+}
+
+.active .button,
+.active .button:hover {
+  border-color: var(--aidex-color-accent-border);
+  background: var(--aidex-color-surface-raised);
+}
+
+.icon {
+  display: inline-flex;
+  flex: none;
+}
+
+.icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.active .icon,
+.icon.accent {
+  color: var(--aidex-color-accent);
+}
+
+.icon.success {
+  color: var(--aidex-color-success);
+}
+
+.label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hasActions .label {
+  padding-right: var(--aidex-space-8);
+}
+
+.actions {
+  position: absolute;
+  top: 50%;
+  right: var(--aidex-space-2);
+  display: flex;
+  opacity: 0;
+  transform: translateY(-50%);
+  transition: opacity var(--aidex-duration-fast) var(--aidex-ease);
+}
+
+.item:hover .actions,
+.item:focus-within .actions,
+.active .actions {
+  opacity: 1;
+}

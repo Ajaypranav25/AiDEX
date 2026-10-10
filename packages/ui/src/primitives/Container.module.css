@@ -1,0 +1,23 @@
+.container {
+  width: 100%;
+  margin-inline: auto;
+  padding-inline: var(--aidex-space-6);
+}
+
+.sm {
+  max-width: 688px;
+}
+
+.md {
+  max-width: 928px;
+}
+
+.lg {
+  max-width: 1168px;
+}
+
+/* Auto block margins absorb free space in a flex column, centering without clipping on overflow. */
+.verticallyCentered {
+  margin-block: auto;
+  padding-block: var(--aidex-space-8);
+}

@@ -1,17 +1,26 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { MainLayout } from "../layouts/MainLayout";
 import { HomePage } from "../features/home/HomePage";
-import { navigationItems, type PageId } from "../lib/navigation";
+import { useCommandShortcut } from "../hooks/useCommandShortcut";
+import type { PageId } from "../lib/navigation";
 
 export function App() {
   const [activePage, setActivePage] = useState<PageId>("home");
-  const activeLabel = navigationItems.find((item) => item.id === activePage)?.label ?? "Home";
+  // Remounting the home page gives each new session an empty, focused composer.
+  const [sessionKey, setSessionKey] = useState(0);
+
+  const startNewSession = useCallback(() => {
+    setActivePage("home");
+    setSessionKey((key) => key + 1);
+  }, []);
+
+  useCommandShortcut("k", startNewSession);
 
   return (
-    <MainLayout activePage={activePage} onNavigate={setActivePage}>
-      <HomePage activeLabel={activeLabel} onNavigate={setActivePage} />
+    <MainLayout activePage={activePage} onNavigate={setActivePage} onNewSession={startNewSession}>
+      <HomePage key={sessionKey} autoFocus={sessionKey > 0} />
     </MainLayout>
   );
 }

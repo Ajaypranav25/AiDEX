@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import "../styles/global.css";
+import "@aidex/ui/styles.css";
 
 export const metadata: Metadata = {
   title: "AiDEX",

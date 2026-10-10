@@ -1,0 +1,25 @@
+{
+  "name": "@aidex/ui",
+  "private": true,
+  "version": "0.1.0",
+  "sideEffects": [
+    "**/*.css"
+  ],
+  "exports": {
+    "./components": "./src/components/index.ts",
+    "./desktop": "./src/desktop/index.ts",
+    "./icons": "./src/icons/index.ts",
+    "./primitives": "./src/primitives/index.ts",
+    "./styles.css": "./src/styles.css"
+  },
+  "scripts": {
+    "check": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "react": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.8",
+    "typescript": "~5.8.3"
+  }
+}

@@ -1,0 +1,68 @@
+.heading {
+  margin: 0;
+  color: var(--aidex-color-text);
+  font-family: var(--aidex-font-display);
+  text-wrap: balance;
+}
+
+.display {
+  font-size: clamp(36px, 3.4vw, var(--aidex-text-display));
+  font-weight: 700;
+  line-height: 1.12;
+  letter-spacing: -0.025em;
+}
+
+.title {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+
+.text {
+  margin: 0;
+}
+
+.body {
+  font-size: var(--aidex-text-md);
+  line-height: 1.6;
+}
+
+/* Introductory copy keeps a readable measure. */
+.lead {
+  max-width: 25em;
+  font-size: var(--aidex-text-xl);
+  line-height: 1.65;
+  text-wrap: pretty;
+}
+
+.label {
+  font-size: var(--aidex-text-sm);
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.default {
+  color: var(--aidex-color-text);
+}
+
+.secondary {
+  color: var(--aidex-color-text-secondary);
+}
+
+.muted {
+  color: var(--aidex-color-text-muted);
+}
+
+.accent {
+  color: var(--aidex-color-accent);
+}
+
+.start {
+  text-align: start;
+}
+
+.center {
+  margin-inline: auto;
+  text-align: center;
+}

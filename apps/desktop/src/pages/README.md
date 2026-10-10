@@ -1,6 +1,6 @@
 # Desktop pages
 
-`HomePage.tsx` is the implemented shell landing screen. The remaining routes are navigation destinations only; no session, workspace, model, or runtime data is fabricated.
+The home dashboard (`../features/home/HomePage.tsx`) is the implemented landing screen. Its sidebar shows static placeholder pinned items, workspaces, and recents from `../lib/placeholders.ts`; nothing is read from or written to a drive, and the composer does not send messages until a Core API exists. The remaining rail destinations are navigation targets only.
 
 Planned page boundaries:
 - `workspace`: project selection and workspace overview.

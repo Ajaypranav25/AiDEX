@@ -1,3 +1,3 @@
 # Desktop hooks
 
-Add reusable React hooks here when backed by concrete UI or Core API requirements. The current shell has no runtime data fetching or polling hooks.
+Reusable React hooks for the desktop app. `useCommandShortcut` binds Ctrl/⌘ shortcuts and `useModifierKeyLabel` labels the platform's command key. The shell has no runtime data fetching or polling hooks yet.

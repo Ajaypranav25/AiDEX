@@ -1,0 +1,26 @@
+.shell {
+  display: flex;
+  gap: var(--aidex-space-3);
+  height: 100vh;
+  height: 100dvh;
+  padding: var(--aidex-space-3);
+  overflow: hidden;
+  background: var(--aidex-color-bg);
+}
+
+.main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.content {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-color: var(--aidex-color-border) transparent;
+  scrollbar-width: thin;
+}
