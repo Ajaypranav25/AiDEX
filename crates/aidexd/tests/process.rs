@@ -63,6 +63,13 @@ impl Drop for StopOnDrop<'_> {
 #[test]
 fn detached_daemon_lifecycle_through_the_executable() {
     let root = tempfile::tempdir().unwrap();
+    aidex_drive::init_with(
+        root.path(),
+        aidex_drive::InitOptions {
+            require_removable: false,
+        },
+    )
+    .unwrap();
     let root = root.path();
     let _cleanup = StopOnDrop(root);
 

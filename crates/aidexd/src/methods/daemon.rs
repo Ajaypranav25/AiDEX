@@ -87,7 +87,7 @@ mod tests {
 
     #[test]
     fn status_ping_and_stop_report_and_request_shutdown() {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::services::testing::temp_drive();
         let shutdown = ShutdownSignal::new();
         let services = Arc::new(Services::open(root.path(), shutdown.clone()).unwrap());
         let mut router = Router::new();

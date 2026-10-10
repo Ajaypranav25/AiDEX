@@ -7,6 +7,7 @@
 
 use crate::{endpoint, lifecycle::ShutdownSignal, methods::events::event_error_code};
 use aidex_core::ServiceErrorCode;
+use aidex_drive::DrivePaths;
 use aidex_events::EventLog;
 use std::{
     fmt,
@@ -21,6 +22,7 @@ pub const EVENT_RETENTION: u64 = 10_000;
 
 pub struct Services {
     drive_root: PathBuf,
+    paths: DrivePaths,
     pid: u32,
     started_at: Instant,
     shutdown: ShutdownSignal,
@@ -41,6 +43,10 @@ impl Services {
                 format!("selected drive is unavailable: {}", drive_root.display()),
             ));
         }
+        // Services run only on an initialized schema-v2 AiDEX drive; their state lives in the
+        // directories its manifest declares. Opening never creates or repairs the manifest.
+        let paths = DrivePaths::open(drive_root)
+            .map_err(|error| ServicesError::new("drive", error.code(), error.to_string()))?;
         let state_error = |error: endpoint::EndpointError| {
             ServicesError::new("daemon", error.code(), error.to_string())
         };
@@ -52,6 +58,7 @@ impl Services {
         })?;
         Ok(Self {
             drive_root: drive_root.to_path_buf(),
+            paths,
             pid: std::process::id(),
             started_at: Instant::now(),
             shutdown,
@@ -61,6 +68,12 @@ impl Services {
 
     pub fn drive_root(&self) -> &Path {
         &self.drive_root
+    }
+
+    /// Absolute service directories declared by the drive manifest (`aidex-drive`).
+    /// Build service paths from these accessors and create them with `ensure_dir`.
+    pub fn paths(&self) -> &DrivePaths {
+        &self.paths
     }
 
     pub fn pid(&self) -> u32 {
@@ -129,3 +142,20 @@ impl fmt::Display for ServicesError {
 }
 
 impl std::error::Error for ServicesError {}
+
+/// Unit-test fixtures for daemon modules.
+#[cfg(test)]
+pub(crate) mod testing {
+    /// A temporary, initialized schema-v2 AiDEX drive (no removable-media check).
+    pub(crate) fn temp_drive() -> tempfile::TempDir {
+        let root = tempfile::tempdir().expect("temp dir");
+        aidex_drive::init_with(
+            root.path(),
+            aidex_drive::InitOptions {
+                require_removable: false,
+            },
+        )
+        .expect("initialize test drive");
+        root
+    }
+}

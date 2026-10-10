@@ -91,7 +91,7 @@ mod tests {
     use aidex_events::EventKind;
 
     fn fixture(published: &[&str]) -> (tempfile::TempDir, Router, CallContext) {
-        let root = tempfile::tempdir().unwrap();
+        let root = crate::services::testing::temp_drive();
         let shutdown = ShutdownSignal::new();
         let services = Arc::new(Services::open(root.path(), shutdown.clone()).unwrap());
         for task_id in published {

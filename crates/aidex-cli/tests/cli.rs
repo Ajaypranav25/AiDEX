@@ -1,6 +1,6 @@
 //! End-to-end checks of the `aidex` binary: `--json`, stable exit codes, and
-//! daemon commands against an in-process daemon on a temporary directory
-//! (the daemon does not require an initialized drive).
+//! daemon commands against an in-process daemon on a temporary, initialized
+//! developer drive (`init_with` without the removable-media check).
 
 use aidex_events::{EventKind, EventLog};
 use aidexd::{Daemon, StopReason, endpoint, services::EVENT_FILE};
@@ -18,6 +18,18 @@ fn aidex(args: &[&str]) -> Output {
         .env("AIDEX_OMP", "aidex-test-missing-omp-executable")
         .output()
         .expect("run aidex")
+}
+
+fn temp_drive() -> tempfile::TempDir {
+    let root = tempfile::tempdir().unwrap();
+    aidex_drive::init_with(
+        root.path(),
+        aidex_drive::InitOptions {
+            require_removable: false,
+        },
+    )
+    .unwrap();
+    root
 }
 
 fn drive_args<'a>(args: &[&'a str], root: &'a Path) -> Vec<&'a str> {
@@ -50,7 +62,7 @@ fn code(output: &Output) -> i32 {
 
 #[test]
 fn daemon_commands_report_status_and_stop_over_ipc() {
-    let root = tempfile::tempdir().unwrap();
+    let root = temp_drive();
     let daemon = Daemon::new(root.path()).unwrap().start().unwrap();
 
     let status = aidex(&drive_args(&["--json", "daemon", "status"], root.path()));
@@ -166,7 +178,7 @@ fn agent_list_and_doctor_emit_json_reports() {
 
 #[test]
 fn events_command_replays_over_ipc_from_the_cursor() {
-    let root = tempfile::tempdir().unwrap();
+    let root = temp_drive();
     {
         let runtime = endpoint::ensure_state_dir(root.path()).unwrap();
         let log = EventLog::open(runtime.join(EVENT_FILE), 20).unwrap();

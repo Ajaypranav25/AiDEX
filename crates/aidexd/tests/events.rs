@@ -32,7 +32,7 @@ fn replay(client: &mut Client, after: u64, limit: usize) -> Vec<u64> {
 
 #[test]
 fn authenticated_ipc_replays_from_last_acknowledged_cursor_across_restart() {
-    let root = tempfile::tempdir().unwrap();
+    let root = common::temp_drive();
     {
         let log = event_log(root.path(), 20);
         log.publish(
@@ -66,7 +66,7 @@ fn authenticated_ipc_replays_from_last_acknowledged_cursor_across_restart() {
 
 #[test]
 fn expired_event_cursor_is_a_permanent_not_found_error() {
-    let root = tempfile::tempdir().unwrap();
+    let root = common::temp_drive();
     {
         let log = event_log(root.path(), 1);
         for task_id in ["first", "second"] {

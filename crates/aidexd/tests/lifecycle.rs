@@ -32,7 +32,7 @@ fn unused_port() -> u16 {
 
 #[test]
 fn daemon_stop_notifies_subscribers_closes_connections_and_removes_endpoint() {
-    let root = tempfile::tempdir().unwrap();
+    let root = common::temp_drive();
     let (closed_tx, closed_rx) = mpsc::channel::<SinkError>();
     let closed_tx = Mutex::new(closed_tx);
     let daemon = start(root.path(), options(), move |daemon| {
@@ -86,7 +86,7 @@ fn daemon_stop_notifies_subscribers_closes_connections_and_removes_endpoint() {
 
 #[test]
 fn removed_drive_stops_the_daemon_and_closes_connections() {
-    let root = tempfile::tempdir().unwrap();
+    let root = common::temp_drive();
     let sentinel = root.path().join("user-data.txt");
     fs::write(&sentinel, b"preserve").unwrap();
     let removed = Arc::new(AtomicBool::new(false));
@@ -118,6 +118,7 @@ fn daemon_exits_after_the_drive_directory_disappears() {
     let parent = tempfile::tempdir().unwrap();
     let root = parent.path().join("drive");
     fs::create_dir(&root).unwrap();
+    common::init_drive(&root);
     fs::write(root.join("user-data.txt"), b"preserve").unwrap();
     let daemon = start(&root, options(), |_| {});
     client(daemon.endpoint())
@@ -127,6 +128,25 @@ fn daemon_exits_after_the_drive_directory_disappears() {
     fs::rename(&root, &moved).unwrap();
     assert_eq!(daemon.wait().unwrap(), StopReason::DriveRemoved);
     assert_eq!(fs::read(moved.join("user-data.txt")).unwrap(), b"preserve");
+}
+
+#[test]
+fn uninitialized_folders_are_refused_without_changes() {
+    let root = tempfile::tempdir().unwrap();
+    fs::write(root.path().join("user-data.txt"), b"preserve").unwrap();
+    let Err(error) = Daemon::new(root.path()) else {
+        panic!("an uninitialized folder must be refused");
+    };
+    assert!(matches!(&error, DaemonError::Services(_)), "{error}");
+    assert!(
+        error.to_string().contains("drive service failed to start"),
+        "{error}"
+    );
+    let entries: Vec<_> = fs::read_dir(root.path())
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+    assert_eq!(entries, vec![std::ffi::OsString::from("user-data.txt")]);
 }
 
 #[test]
@@ -142,7 +162,7 @@ fn unavailable_drive_is_not_recreated() {
 
 #[test]
 fn a_second_daemon_cannot_replace_a_live_endpoint() {
-    let root = tempfile::tempdir().unwrap();
+    let root = common::temp_drive();
     let first = start(root.path(), options(), |_| {});
     let second = Daemon::with_options(root.path(), options())
         .unwrap()
@@ -175,7 +195,7 @@ fn a_second_daemon_cannot_replace_a_live_endpoint() {
 
 #[test]
 fn stale_endpoint_recovery_removes_only_unreachable_daemon_metadata() {
-    let root = tempfile::tempdir().unwrap();
+    let root = common::temp_drive();
     let sentinel = root.path().join("user-data.txt");
     fs::write(&sentinel, b"preserve").unwrap();
     assert_eq!(
@@ -217,7 +237,7 @@ fn stale_endpoint_recovery_removes_only_unreachable_daemon_metadata() {
 
 #[test]
 fn reachable_or_unreadable_endpoints_are_never_removed() {
-    let root = tempfile::tempdir().unwrap();
+    let root = common::temp_drive();
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();
     write_endpoint(
@@ -245,7 +265,7 @@ fn reachable_or_unreadable_endpoints_are_never_removed() {
 #[cfg(unix)]
 #[test]
 fn symlinked_runtime_directories_are_refused() {
-    let root = tempfile::tempdir().unwrap();
+    let root = common::temp_drive();
     let elsewhere = tempfile::tempdir().unwrap();
     std::os::unix::fs::symlink(elsewhere.path(), root.path().join(".aidex")).unwrap();
     assert!(matches!(

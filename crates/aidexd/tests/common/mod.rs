@@ -13,6 +13,24 @@ use std::{
 /// Generous bound for anything that should happen "promptly".
 pub const PATIENCE: Duration = Duration::from_secs(30);
 
+/// A temporary, initialized schema-v2 AiDEX drive (developer folder; no removable check).
+pub fn temp_drive() -> tempfile::TempDir {
+    let root = tempfile::tempdir().expect("temp dir");
+    init_drive(root.path());
+    root
+}
+
+/// Initialize `root` as an AiDEX drive without requiring removable media.
+pub fn init_drive(root: &Path) {
+    aidex_drive::init_with(
+        root,
+        aidex_drive::InitOptions {
+            require_removable: false,
+        },
+    )
+    .expect("initialize test drive");
+}
+
 pub fn options() -> DaemonOptions {
     DaemonOptions {
         poll_interval: Duration::from_millis(10),

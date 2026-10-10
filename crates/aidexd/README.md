@@ -55,7 +55,8 @@ handlers without sockets.
    open it in `Services::open` mapping failures with
    `ServicesError::new("sessions", error.code(), error.to_string())`, and add an
    accessor `pub fn sessions(&self) -> &SessionStore`. Locate drive files through
-   `aidex_drive::DrivePaths` (the daemon itself does not require a manifest yet).
+   `services.paths()` (`aidex_drive::DrivePaths`; the daemon only runs on an initialized
+   schema-v2 drive) and create directories with `paths().ensure_dir(..)`.
 2. **Methods** — create `methods/sessions.rs` with typed `#[serde(deny_unknown_fields)]`
    params/results, `pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<(), RouterError>`
    that clones the `Arc` into each handler, decodes params with `rpc::parse_params`,

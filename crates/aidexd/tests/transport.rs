@@ -20,7 +20,7 @@ fn error_code(reply: &Value) -> i32 {
 
 #[test]
 fn first_message_must_be_the_handshake() {
-    let root = tempfile::tempdir().unwrap();
+    let root = common::temp_drive();
     let daemon = start(root.path(), options(), |_| {});
     let mut raw = Raw::connect(daemon.endpoint());
     raw.send(&request(1, "daemon.status", Value::Null));
@@ -41,7 +41,7 @@ fn first_message_must_be_the_handshake() {
 
 #[test]
 fn wrong_capability_is_unauthorized_and_closed() {
-    let root = tempfile::tempdir().unwrap();
+    let root = common::temp_drive();
     let daemon = start(root.path(), options(), |_| {});
     let mut message = handshake(daemon.endpoint());
     let wrong = if daemon.endpoint().token.expose().starts_with('0') {
@@ -60,7 +60,7 @@ fn wrong_capability_is_unauthorized_and_closed() {
 
 #[test]
 fn incompatible_contract_version_lists_supported_versions_and_closes() {
-    let root = tempfile::tempdir().unwrap();
+    let root = common::temp_drive();
     let daemon = start(root.path(), options(), |_| {});
     let mut message = handshake(daemon.endpoint());
     message["params"]["contract_version"] = json!(1);
@@ -74,7 +74,7 @@ fn incompatible_contract_version_lists_supported_versions_and_closes() {
 
 #[test]
 fn silent_connections_are_closed_after_the_handshake_timeout() {
-    let root = tempfile::tempdir().unwrap();
+    let root = common::temp_drive();
     let mut options = options();
     options.transport.handshake_timeout = Duration::from_millis(200);
     let daemon = start(root.path(), options, |_| {});
@@ -86,7 +86,7 @@ fn silent_connections_are_closed_after_the_handshake_timeout() {
 
 #[test]
 fn oversized_lines_are_rejected_and_the_connection_closed() {
-    let root = tempfile::tempdir().unwrap();
+    let root = common::temp_drive();
     let mut options = options();
     options.transport.max_message_bytes = 64 * 1024;
     let daemon = start(root.path(), options, |_| {});
@@ -113,7 +113,7 @@ fn oversized_lines_are_rejected_and_the_connection_closed() {
 
 #[test]
 fn malformed_and_invalid_messages_get_errors_on_an_open_connection() {
-    let root = tempfile::tempdir().unwrap();
+    let root = common::temp_drive();
     let daemon = start(root.path(), options(), |_| {});
     let mut raw = Raw::authenticated(daemon.endpoint());
 
@@ -151,7 +151,7 @@ fn malformed_and_invalid_messages_get_errors_on_an_open_connection() {
 
 #[test]
 fn client_maps_unknown_methods_and_keeps_the_connection() {
-    let root = tempfile::tempdir().unwrap();
+    let root = common::temp_drive();
     let daemon = start(root.path(), options(), |_| {});
     let mut client = client(daemon.endpoint());
     let error = client.call("nope.missing", Value::Null).unwrap_err();
@@ -165,7 +165,7 @@ fn client_maps_unknown_methods_and_keeps_the_connection() {
 
 #[test]
 fn concurrent_clients_are_served_in_parallel() {
-    let root = tempfile::tempdir().unwrap();
+    let root = common::temp_drive();
     let (entered_tx, entered_rx) = mpsc::channel::<()>();
     let (release_tx, release_rx) = mpsc::channel::<()>();
     let entered_tx = Mutex::new(entered_tx);
@@ -204,7 +204,7 @@ fn concurrent_clients_are_served_in_parallel() {
 
 #[test]
 fn connection_limit_rejects_extra_connections_cleanly() {
-    let root = tempfile::tempdir().unwrap();
+    let root = common::temp_drive();
     let mut options = options();
     options.transport.max_connections = 2;
     let daemon = start(root.path(), options, |_| {});
@@ -251,7 +251,7 @@ fn register_count_stream(daemon: &mut aidexd::Daemon) {
 
 #[test]
 fn stream_notifications_follow_the_response_in_order_and_end_cleanly() {
-    let root = tempfile::tempdir().unwrap();
+    let root = common::temp_drive();
     let daemon = start(root.path(), options(), register_count_stream);
 
     let mut raw = Raw::authenticated(daemon.endpoint());
@@ -298,7 +298,7 @@ fn stream_notifications_follow_the_response_in_order_and_end_cleanly() {
 
 #[test]
 fn unsubscribe_closes_the_sink_and_keeps_the_connection() {
-    let root = tempfile::tempdir().unwrap();
+    let root = common::temp_drive();
     let (closed_tx, closed_rx) = mpsc::channel::<SinkError>();
     let closed_tx = Mutex::new(closed_tx);
     let daemon = start(root.path(), options(), move |daemon| {
@@ -344,7 +344,7 @@ fn unsubscribe_closes_the_sink_and_keeps_the_connection() {
 
 #[test]
 fn slow_consumer_is_dropped_without_blocking_other_clients() {
-    let root = tempfile::tempdir().unwrap();
+    let root = common::temp_drive();
     let mut options = options();
     options.transport = TransportConfig {
         max_queued_messages: 16,
@@ -399,7 +399,7 @@ fn slow_consumer_is_dropped_without_blocking_other_clients() {
 
 #[test]
 fn client_reports_slow_consumer_closure() {
-    let root = tempfile::tempdir().unwrap();
+    let root = common::temp_drive();
     let mut options = options();
     options.transport.max_queued_messages = 4;
     let daemon = start(root.path(), options, |daemon| {
