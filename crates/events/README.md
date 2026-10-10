@@ -114,6 +114,8 @@ time as `occurred_at` (v1 had no timestamps).
   `password`, `token`, `secret`, `key`). It errs toward redacting but cannot
   recognise arbitrary secrets; producers must still keep secret values out of
   events and reference secrets by handle.
+  Authorization-header redaction accepts horizontal spaces/tabs and HTTP-token
+  authentication schemes, including schemes such as `Api-Key`.
 - The log is not encrypted at rest (spec §94 asks for encrypted audit history; that
   needs the vault and drive encryption).
 - `occurred_at` is wall-clock time; ordering is defined by cursor only.
