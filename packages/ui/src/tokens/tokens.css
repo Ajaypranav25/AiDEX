@@ -29,6 +29,15 @@
   --aidex-color-focus: color-mix(in srgb, var(--aidex-color-accent) 75%, white);
   --aidex-color-accent-ring: color-mix(in srgb, var(--aidex-color-accent) 20%, transparent);
 
+  /* Code diffs: line tints derive from the status colors so +/- rows stay consistent with badges. */
+  --aidex-color-diff-bg: var(--aidex-color-surface);
+  --aidex-color-diff-addition: var(--aidex-color-success);
+  --aidex-color-diff-deletion: var(--aidex-color-danger);
+  --aidex-color-diff-addition-bg: color-mix(in srgb, var(--aidex-color-diff-addition) 12%, var(--aidex-color-diff-bg));
+  --aidex-color-diff-deletion-bg: color-mix(in srgb, var(--aidex-color-diff-deletion) 12%, var(--aidex-color-diff-bg));
+  --aidex-color-diff-addition-emphasis: color-mix(in srgb, var(--aidex-color-diff-addition) 30%, transparent);
+  --aidex-color-diff-deletion-emphasis: color-mix(in srgb, var(--aidex-color-diff-deletion) 30%, transparent);
+
   /* Typography */
   --aidex-font-sans: "Inter", "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   --aidex-font-display: "Inter Display", "Inter", "Segoe UI Variable Display", "Segoe UI", -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
