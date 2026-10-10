@@ -1,0 +1,11 @@
+.code {
+  padding: 0.125em 0.4em;
+  border-radius: calc(var(--aidex-radius-sm) * 0.75);
+  background: var(--aidex-color-surface-strong);
+  color: var(--aidex-color-text);
+  font-family: var(--aidex-font-mono);
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}

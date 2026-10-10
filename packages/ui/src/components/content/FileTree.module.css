@@ -1,0 +1,89 @@
+.tree,
+.group {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--aidex-space-2);
+  width: 100%;
+  min-height: 36px;
+  padding: var(--aidex-space-1) var(--aidex-space-2);
+  padding-left: calc(var(--aidex-space-2) + var(--file-tree-depth, 0) * var(--aidex-space-5));
+  border: 0;
+  border-radius: var(--aidex-radius-sm);
+  background: transparent;
+  color: var(--aidex-color-text-secondary);
+  font-size: var(--aidex-text-sm);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--aidex-duration-fast) var(--aidex-ease),
+    color var(--aidex-duration-fast) var(--aidex-ease);
+}
+
+.row:hover {
+  background: var(--aidex-color-surface-hover);
+  color: var(--aidex-color-text);
+}
+
+.static,
+.static:hover {
+  background: transparent;
+  color: var(--aidex-color-text-secondary);
+  cursor: default;
+}
+
+.selected,
+.selected:hover {
+  background: var(--aidex-color-accent-soft);
+  color: var(--aidex-color-text);
+}
+
+.chevron,
+.icon {
+  display: inline-flex;
+  flex: none;
+  color: var(--aidex-color-text-muted);
+}
+
+.chevron {
+  width: 14px;
+  transition: transform var(--aidex-duration-fast) var(--aidex-ease);
+}
+
+.chevron svg {
+  width: 14px;
+  height: 14px;
+}
+
+[aria-expanded="true"] > .chevron {
+  transform: rotate(90deg);
+}
+
+.icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.selected .icon {
+  color: var(--aidex-color-accent);
+}
+
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.meta {
+  flex: none;
+  color: var(--aidex-color-text-muted);
+  font-family: var(--aidex-font-mono);
+  font-size: var(--aidex-text-xs);
+}

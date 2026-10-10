@@ -1,0 +1,66 @@
+.message {
+  display: flex;
+  flex-direction: column;
+  gap: var(--aidex-space-2);
+  min-width: 0;
+}
+
+.user {
+  align-items: flex-end;
+}
+
+/* The tighter bottom-right corner points the bubble at its sender. */
+.bubble {
+  max-width: 75%;
+  padding: var(--aidex-space-3) var(--aidex-space-4);
+  border-radius: var(--aidex-radius-xl) var(--aidex-radius-xl) calc(var(--aidex-radius-sm) / 2) var(--aidex-radius-xl);
+  background: var(--aidex-color-surface-strong);
+  color: var(--aidex-color-text);
+  font-size: var(--aidex-text-md);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.body {
+  min-width: 0;
+  color: var(--aidex-color-text);
+  font-size: var(--aidex-text-md);
+  line-height: 1.75;
+  overflow-wrap: break-word;
+}
+
+.body :where(p, ul, ol, pre, figure) {
+  margin: 0 0 var(--aidex-space-4);
+}
+
+.body > :first-child {
+  margin-top: 0;
+}
+
+.body > :last-child {
+  margin-bottom: 0;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: var(--aidex-space-3);
+  min-height: 32px;
+  color: var(--aidex-color-text-muted);
+  font-size: var(--aidex-text-xs);
+}
+
+.meta {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.actions {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--aidex-space-1);
+}
