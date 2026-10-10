@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import { useHistoryShortcuts } from "../../hooks/useHistoryShortcuts";
-import type { Route } from "../../lib/routes";
+import { pageTabs, tabOf, type Route, type TabbedPage } from "../../lib/routes";
 
 /** Entries the history keeps; opening more drops the oldest. */
 export const HISTORY_LIMIT = 50;
@@ -20,7 +20,11 @@ type Navigation = {
 /** Visited routes, oldest first, and the position of the one on screen. */
 type History = { entries: readonly Route[]; index: number };
 
-const sameRoute = (a: Route, b: Route) => a.page === b.page && a.tab === b.tab && a.id === b.id;
+/** The tab a route shows: a tabbed page without a valid `tab` shows its first one. */
+const shownTab = (route: Route) => (route.page in pageTabs ? tabOf(route, route.page as TabbedPage) : route.tab);
+
+/** Whether two routes show the same screen. */
+const sameRoute = (a: Route, b: Route) => a.page === b.page && a.id === b.id && shownTab(a) === shownTab(b);
 
 function opened(history: History, route: Route): History {
   if (sameRoute(history.entries[history.index], route)) return history;
@@ -29,8 +33,13 @@ function opened(history: History, route: Route): History {
 }
 
 function replaced(history: History, route: Route): History {
-  if (sameRoute(history.entries[history.index], route)) return history;
-  return { ...history, entries: history.entries.map((entry, index) => (index === history.index ? route : entry)) };
+  const { entries, index } = history;
+  if (sameRoute(entries[index], route)) return history;
+  const without = [...entries.slice(0, index), ...entries.slice(index + 1)];
+  // Matching a neighbour would leave two identical entries and a Back or Forward that does nothing.
+  if (index > 0 && sameRoute(entries[index - 1], route)) return { entries: without, index: index - 1 };
+  if (index < entries.length - 1 && sameRoute(entries[index + 1], route)) return { entries: without, index };
+  return { entries: entries.map((entry, position) => (position === index ? route : entry)), index };
 }
 
 function movedBy(history: History, step: -1 | 1): History {

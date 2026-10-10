@@ -5,8 +5,8 @@ import { isApplePlatform } from "../lib/platform";
 const MOUSE_BACK = 3;
 const MOUSE_FORWARD = 4;
 
-/** Text entry keeps Alt+← and ⌘[ to itself, so a shortcut never discards a draft. */
-const EDITABLE = "input, textarea, select, [contenteditable='true'], [contenteditable='']";
+/** Input types whose value is text someone typed. */
+const TEXT_INPUT_TYPES = new Set(["text", "search", "email", "url", "tel", "password", "number"]);
 
 type Step = "back" | "forward";
 
@@ -16,13 +16,28 @@ export const historyShortcutLabels = {
   other: { back: { label: "Alt+←", aria: "Alt+ArrowLeft" }, forward: { label: "Alt+→", aria: "Alt+ArrowRight" } },
 } as const satisfies Record<"apple" | "other", Record<Step, { label: string; aria: string }>>;
 
+/**
+ * Whether the focused field holds typed text. A history step remounts the page and drops such a
+ * draft, so shortcuts, keys, and side buttons wait until the field is empty or loses focus.
+ */
+function focusHoldsDraft(): boolean {
+  const focused = document.activeElement;
+  if (focused instanceof HTMLTextAreaElement) return focused.value !== "";
+  if (focused instanceof HTMLInputElement) return TEXT_INPUT_TYPES.has(focused.type) && focused.value !== "";
+  const editable = focused?.closest("[contenteditable='true'], [contenteditable='']");
+  return Boolean(editable?.textContent?.trim());
+}
+
+/** A modal dialog makes the page behind it inert, so its history must not change underneath. */
+const modalOpen = () => document.querySelector("dialog[open]") !== null;
+
 function stepForKey(event: KeyboardEvent, apple: boolean): Step | null {
+  if (event.repeat || event.shiftKey) return null;
   if (event.key === "BrowserBack") return "back";
   if (event.key === "BrowserForward") return "forward";
-  if (event.shiftKey || event.repeat) return null;
-  if (event.target instanceof Element && event.target.closest(EDITABLE)) return null;
   if (apple) {
-    if (!event.metaKey || event.ctrlKey || event.altKey) return null;
+    // Option stays allowed: some layouts need it to type a bracket at all.
+    if (!event.metaKey || event.ctrlKey) return null;
     return event.key === "[" ? "back" : event.key === "]" ? "forward" : null;
   }
   if (!event.altKey || event.ctrlKey || event.metaKey) return null;
@@ -36,17 +51,19 @@ function stepForButton(button: number): Step | null {
 /**
  * Walks the in-app history with the platform's back and forward keys (Alt+← and Alt+→, or ⌘[
  * and ⌘] on Apple platforms), the keyboard's dedicated back and forward keys, and the mouse's
- * side buttons. The webview's own history handling of those buttons is suppressed.
+ * side buttons. The webview's own handling of the side buttons is always suppressed. Pass stable
+ * callbacks.
  */
 export function useHistoryShortcuts(back: () => void, forward: () => void) {
   useEffect(() => {
     const apple = isApplePlatform();
     const go = (step: Step) => (step === "back" ? back() : forward());
+    const blocked = () => modalOpen() || focusHoldsDraft();
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
       const step = stepForKey(event, apple);
-      if (!step) return;
+      if (!step || blocked()) return;
       event.preventDefault();
       go(step);
     };
@@ -58,7 +75,7 @@ export function useHistoryShortcuts(back: () => void, forward: () => void) {
       const step = stepForButton(event.button);
       if (!step) return;
       event.preventDefault();
-      go(step);
+      if (!blocked()) go(step);
     };
 
     window.addEventListener("keydown", handleKeyDown);
