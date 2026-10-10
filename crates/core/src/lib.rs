@@ -325,7 +325,6 @@ impl fmt::Display for ContractNegotiationError {
 
 impl Error for ContractNegotiationError {}
 
-
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Versioned<T> {
@@ -378,10 +377,7 @@ pub struct ContractOffer {
 }
 
 impl ContractOffer {
-    pub fn negotiate(
-        &self,
-        peer: &Self,
-    ) -> Result<ContractVersion, ContractNegotiationError> {
+    pub fn negotiate(&self, peer: &Self) -> Result<ContractVersion, ContractNegotiationError> {
         if self.minimum > self.maximum || peer.minimum > peer.maximum {
             return Err(ContractNegotiationError::InvalidRange);
         }
