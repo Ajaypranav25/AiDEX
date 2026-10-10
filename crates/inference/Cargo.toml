@@ -27,5 +27,20 @@ zip = { version = "4.6", default-features = false, features = ["deflate-flate2"]
 [dev-dependencies]
 tempfile = "3"
 
+# Test fixtures only (never shipped): a fake `llama-server` that speaks the subset of
+# its HTTP API AiDEX uses, and a copy of the `aidex-sandbox-exec` helper so integration
+# tests can launch managed servers without building the aidex-sandbox package's binary.
+[[bin]]
+name = "fake-llama-server"
+path = "src/bin/fake_llama_server.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "inference-sandbox-exec"
+path = "src/bin/inference_sandbox_exec.rs"
+test = false
+doc = false
+
 [lints]
 workspace = true
