@@ -362,7 +362,6 @@ pub fn init(root: impl AsRef<Path>) -> Result<DriveStatus, DriveError> {
             required: MIN_FREE_BYTES,
         });
     }
-    writable_probe(&root)?;
     initialize_at(&root)?;
     status_at(&root, true, Some(free))
 }
@@ -383,6 +382,7 @@ fn initialize_at(root: &Path) -> Result<(), DriveError> {
         Err(DriveError::MissingManifest(_)) => DriveManifest::current(),
         Err(error) => return Err(error),
     };
+    writable_probe(root)?;
 
     for relative in [
         &manifest.layout.public_runtime,
