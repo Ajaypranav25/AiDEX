@@ -12,6 +12,8 @@ members = [
     "crates/launcher",
     "crates/packager",
     "crates/policy",
+    "crates/providers",
+    "crates/router",
     "crates/sandbox",
     "crates/sessions",
     "crates/storage",

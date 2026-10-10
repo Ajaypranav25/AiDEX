@@ -5,6 +5,10 @@
 //! are added here as fields constructed in [`Services::open`]; their JSON-RPC
 //! adapters live in `methods/<domain>.rs`.
 
+mod models;
+
+pub use models::{EventsModelObserver, ModelServices, VaultCredentials, model_event_kind};
+
 use crate::{endpoint, lifecycle::ShutdownSignal};
 use aidex_core::ServiceErrorCode;
 use aidex_drive::DrivePaths;
@@ -51,6 +55,7 @@ pub struct Services {
     events: EventLog,
     vault: Arc<VaultService>,
     workspaces: WorkspaceRegistry,
+    models: ModelServices,
     sessions: Arc<SessionStore>,
     session_recovery: RecoveryReport,
 }
@@ -85,6 +90,13 @@ impl Services {
             .map_err(|error| ServicesError::new("vault", error.code(), error.to_string()))?;
         let workspaces = WorkspaceRegistry::open(&paths)
             .map_err(|error| ServicesError::new("workspace", error.code(), error.to_string()))?;
+        let vault = Arc::new(vault);
+        // Model notifications are recorded as typed `model.*` events.
+        let models = ModelServices::open(
+            &paths,
+            Arc::clone(&vault),
+            Arc::new(EventsModelObserver::new(Arc::new(events.clone()))),
+        )?;
         let (sessions, session_recovery) = open_sessions(&paths, &events)?;
         Ok(Self {
             drive_root: drive_root.to_path_buf(),
@@ -93,8 +105,9 @@ impl Services {
             started_at: Instant::now(),
             shutdown,
             events,
-            vault: Arc::new(vault),
+            vault,
             workspaces,
+            models,
             sessions: Arc::new(sessions),
             session_recovery,
         })
@@ -139,6 +152,11 @@ impl Services {
         &self.workspaces
     }
 
+    /// Model providers, the router, and the offline switch
+    /// (`aidex-providers`, `aidex-router`).
+    pub fn models(&self) -> &ModelServices {
+        &self.models
+    }
     /// Durable sessions, checkpoints, and resume plans (`aidex-sessions`).
     pub fn sessions(&self) -> &Arc<SessionStore> {
         &self.sessions
