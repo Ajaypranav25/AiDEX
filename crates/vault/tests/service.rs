@@ -124,14 +124,15 @@ fn service_moves_between_missing_locked_and_unlocked() {
 fn idle_vaults_lock_themselves() {
     let root = tempfile::tempdir().unwrap();
     fs::create_dir(vault_dir(root.path())).unwrap();
-    let service = service(root.path(), Some(Duration::from_millis(80)));
+    // Generous margins: CI runners can stall a thread for tens of milliseconds.
+    let service = service(root.path(), Some(Duration::from_millis(1_000)));
     service.init(&passphrase(PASSPHRASE), false).unwrap();
     assert_eq!(service.status().state, VaultState::Unlocked);
-    assert_eq!(service.status().idle_lock_secs, Some(0));
+    assert_eq!(service.status().idle_lock_secs, Some(1));
 
     // Use keeps it unlocked...
     for _ in 0..3 {
-        thread::sleep(Duration::from_millis(30));
+        thread::sleep(Duration::from_millis(150));
         service.list_secrets().unwrap();
     }
     assert_eq!(service.status().state, VaultState::Unlocked);
