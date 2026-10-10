@@ -7,6 +7,7 @@
 
 pub mod agent;
 pub mod approvals;
+pub mod context;
 pub mod daemon;
 pub mod doctor;
 pub mod drive;
@@ -52,5 +53,10 @@ pub fn dispatch(command: Option<Commands>, output: Output) -> Result<Exit, CliEr
         Some(Commands::Tools(args)) => tools::run(args, output),
         Some(Commands::Stop(args)) => emergency::stop(args, output),
         Some(Commands::Resume(args)) => emergency::resume(args, output),
+        Some(Commands::Index(args)) => context::index::run(args, output),
+        Some(Commands::Search(args)) => context::search::run(args, output),
+        Some(Commands::Context(args)) => context::pack::run(args, output),
+        Some(Commands::Memory(args)) => context::memory::run(args, output),
+        Some(Commands::Rules(args)) => context::rules::run(args, output),
     }
 }

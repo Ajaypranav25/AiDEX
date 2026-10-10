@@ -7,11 +7,17 @@ use crate::commands::{
 };
 use crate::commands::{
     approvals::{ApprovalsArgs, ApprovalsCommand, ApproveArgs, DenyArgs},
+    context::{
+        index::IndexArgs, memory::MemoryArgs, pack::ContextArgs, rules::RulesArgs,
+        search::SearchArgs,
+    },
     emergency::{ResumeArgs, StopArgs},
+    model::ModelArgs,
+    offline::OfflineArgs,
     policy::PolicyArgs,
+    provider::ProviderArgs,
     tools::ToolsArgs,
 };
-use crate::commands::{model::ModelArgs, offline::OfflineArgs, provider::ProviderArgs};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -106,6 +112,16 @@ pub enum Commands {
     Stop(StopArgs),
     /// Resume tool execution after an emergency stop.
     Resume(ResumeArgs),
+    /// Build, inspect, or cancel the workspace's local search index.
+    Index(IndexArgs),
+    /// Search the workspace index offline (full text, file names, or symbols).
+    Search(SearchArgs),
+    /// Inspect the context packs the native agent receives.
+    Context(ContextArgs),
+    /// Inspect and edit session, workspace, and user memory.
+    Memory(MemoryArgs),
+    /// Show the workspace's project rules and instruction files.
+    Rules(RulesArgs),
 }
 
 impl Commands {
@@ -137,6 +153,11 @@ impl Commands {
             Some(Self::Tools(args)) => args.command.label(),
             Some(Self::Stop(_)) => "aidex stop",
             Some(Self::Resume(_)) => "aidex resume",
+            Some(Self::Index(args)) => args.command.label(),
+            Some(Self::Search(args)) => args.label(),
+            Some(Self::Context(args)) => args.command.label(),
+            Some(Self::Memory(args)) => args.command.label(),
+            Some(Self::Rules(args)) => args.command.label(),
         }
     }
 }

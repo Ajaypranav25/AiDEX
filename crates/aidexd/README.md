@@ -90,10 +90,10 @@ handlers without sockets.
 ## Limitations
 
 - Methods: `daemon.status|ping|stop`, `events.replay|latest|subscribe`, `workspace.*`,
-  `vault.*`, `session.*`, `model.*`/`provider.*`/`network.*`, and the broker's
-  `tool.list|invoke|continue`, `approval.list|show|resolve|revoke`,
-  `policy.show|profile.set|reload|explain`, and `emergency.stop|resume` exist; every
-  other domain is future work.
+  `vault.*`, `model.*`/`provider.*`/`network.*`, `session.*`, `context.*`,
+  `memory.*`, `rules.show`, and the broker's `tool.list|invoke|continue`,
+  `approval.list|show|resolve|revoke`, `policy.show|profile.set|reload|explain`, and
+  `emergency.stop|resume` exist; every other domain is future work.
 - `Services::broker()` returns the `Arc<aidex_broker::Broker>` composed over the drive
   (approvals in `private_sessions/approvals.sqlite3`, settings in
   `private_config/policy.toml`, documents in `policies/`, sandbox scratch in

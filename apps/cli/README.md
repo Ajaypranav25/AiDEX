@@ -41,6 +41,11 @@ bun run dev:cli -- approvals --pending --drive /path/to/drive
 bun run dev:cli -- approve apr_01J... --drive /path/to/drive
 bun run dev:cli -- policy explain --tool fs.delete --input '{"path":"build"}' --drive /path/to/drive
 bun run dev:cli -- stop --emergency --lock-vault --drive /path/to/drive
+bun run dev:cli -- index build --workspace project --drive /path/to/drive
+bun run dev:cli -- search --symbol parse_config --drive /path/to/drive
+bun run dev:cli -- context pack "fix the login timeout" --budget 8000 --drive /path/to/drive
+bun run dev:cli -- memory add --tag build "build with bun run build" --drive /path/to/drive
+bun run dev:cli -- rules show --drive /path/to/drive
 bun run dev:cli -- chat
 bun run dev:cli -- run "Explain this repository"
 bun run login:omp
@@ -80,6 +85,14 @@ The execution broker's commands (all with `--drive PATH` and `--json`):
 - `aidex policy show` prints the profile, privacy mode, host trust, and network mode (requested and effective), loaded policy documents (or why they failed: every call is then denied), hard rules, and whether an emergency stop is in effect. `aidex policy profile <safe|balanced|autonomous|offline-secure>` switches the profile (recorded as `policy.changed`); `aidex policy reload` re-reads `policies/*.toml`. `aidex policy explain --tool T [--input JSON] [--workspace W] [--session S] [--as-user]` plans the call and prints the decision per intent without running it, creating an approval, or recording events.
 - `aidex tools list` prints every registered tool with its action, base risk, and effects.
 - `aidex stop --emergency [--lock-vault] [--reason TEXT]` freezes tool execution, cancels pending approvals, revokes unused approvals and session grants, terminates every managed process, and revokes secret handles (optionally locking the vault); it exits 1 if a process could not be confirmed terminated. `aidex resume` lifts the stop; cancelled approvals must be requested again. While stopped, tool requests fail with exit 6 (`policy_denied`).
+
+Repository context commands use the daemon's `context.*`, `memory.*`, and `rules.show` methods. Each accepts `--workspace ID|NAME` (default: the selected workspace; none selected is exit 2), `--drive PATH`, and `--json`:
+
+- `aidex index build [--no-wait]` starts (or joins) the workspace's background index job and, unless `--no-wait`, prints progress every 2 s and the final status; a completed build exits 0, a cancelled one 9, a failed one 1. Interrupting the CLI does not stop the job; `aidex index cancel` does (committed batches are kept and the next build resumes). `aidex index status` prints counters, state (`empty`, `building`, `partial`, `complete`), repository branch/HEAD/remote names, any corruption recovery, and the latest job report (added/updated/unchanged/removed/redacted and skipped files by reason).
+- `aidex search <QUERY>... [--symbol | --file] [--path PREFIX] [--limit N]` searches the index offline: full text (every word must match), file names, or definitions. Secret files are never indexed and snippets are redacted.
+- `aidex context pack <TASK>... --budget N [--session ID] [--path P]... [--no-rules] [--no-memory] [--no-search] [--text]` shows the context pack the native agent would get: each item's tokens, trust, score, and source, the dropped candidates with reasons, and with `--text` the delimiter preamble and the delimited item texts. The total never exceeds the budget (1-100000).
+- `aidex memory list|add <TEXT>... [--tag T]...|edit <ID> [--text T] [--tag T]... [--clear-tags]|remove <ID>` with `--workspace ID|NAME` (default), `--user`, or `--session ID` inspects and edits memory. Secret-like text is refused (exit 2); memories added here are user-written.
+- `aidex rules show` prints the workspace's `.aidex/rules.toml` commands and guardrails (which can only tighten policy) and the instruction files found (`AGENTS.md`, `CLAUDE.md`, `.aidex/instructions.md`). An invalid rules file is exit 2.
 
 `aidex` and `aidex chat` open Oh My Pi's interactive terminal UI. AiDEX passes `--approval-mode always-ask`, disables OMP extensions, MCP, LSP, skills, session persistence, and automatic title generation, and requests a limited tool set. OMP still owns its CLI tool lifecycle and approval implementation; this is not an AiDEX sandbox or policy boundary.
 

@@ -5,6 +5,7 @@ members = [
     "crates/aidex-cli",
     "crates/broker",
     "crates/bundle",
+    "crates/context",
     "crates/core",
     "crates/drive",
     "crates/events",

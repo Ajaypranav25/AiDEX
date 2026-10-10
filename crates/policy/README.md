@@ -140,7 +140,7 @@ Only one `global` document may carry `[network]` (`allow_domains`, `local_networ
 
 ## Project rules (spec §55)
 
-`ProjectRules::load(<workspace>/.aidex/rules.toml)` (see `PROJECT_RULES_FILE`) reads `schema_version = 1`, an informational `[project]` table (`package_manager`, `tests`, `lint`), and `[agent]` with `never_modify` globs and `require_approval` action patterns. Project files are repository content, which is untrusted, so they can only tighten: they apply as floors no layer can loosen. Attach them with `PolicySet::set_project_rules(workspace_id, rules)`.
+`ProjectRules::load(<workspace>/.aidex/rules.toml)` (see `PROJECT_RULES_FILE`) reads `schema_version = 1`, an informational `[project]` table (`package_manager`, `tests`, `lint`, `build`), and `[agent]` with `never_modify` globs and `require_approval` action patterns. Project files are repository content, which is untrusted, so they can only tighten: they apply as floors no layer can loosen. Attach them with `PolicySet::set_project_rules(workspace_id, rules)`.
 
 ## Classifiers
 

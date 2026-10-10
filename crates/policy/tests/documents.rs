@@ -304,6 +304,7 @@ schema_version = 1
 package_manager = "bun"
 tests = "bun test"
 lint = "bun lint"
+build = "bun run build"
 
 [agent]
 never_modify = ["migrations/production", "**/*.lock"]
@@ -373,6 +374,7 @@ fn project_rules_parse_metadata_and_reject_unknown_content() {
     let rules = ProjectRules::parse(PROJECT, "rules.toml").unwrap();
     assert_eq!(rules.project.package_manager.as_deref(), Some("bun"));
     assert_eq!(rules.project.tests.as_deref(), Some("bun test"));
+    assert_eq!(rules.project.build.as_deref(), Some("bun run build"));
     assert_eq!(rules.never_modify(), ["migrations/production", "**/*.lock"]);
     assert_eq!(
         rules.require_approval(),

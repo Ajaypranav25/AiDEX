@@ -11,6 +11,7 @@ pub use models::{EventsModelObserver, ModelServices, VaultCredentials, model_eve
 
 use crate::{endpoint, lifecycle::ShutdownSignal};
 use aidex_broker::{Broker, BrokerConfig};
+use aidex_context::ContextService;
 use aidex_core::ServiceErrorCode;
 use aidex_drive::DrivePaths;
 use aidex_events::{EventLog, EventSink, RetentionPolicy};
@@ -60,6 +61,7 @@ pub struct Services {
     models: ModelServices,
     sessions: Arc<SessionStore>,
     session_recovery: RecoveryReport,
+    context: Arc<ContextService>,
 }
 
 impl Services {
@@ -105,6 +107,8 @@ impl Services {
             Arc::new(EventsModelObserver::new(Arc::new(events.clone()))),
         )?;
         let (sessions, session_recovery) = open_sessions(&paths, &events)?;
+        let context = ContextService::open(&paths, Arc::new(events.clone()))
+            .map_err(|error| ServicesError::new("context", error.code(), error.to_string()))?;
         Ok(Self {
             drive_root: drive_root.to_path_buf(),
             paths,
@@ -118,6 +122,7 @@ impl Services {
             models,
             sessions: Arc::new(sessions),
             session_recovery,
+            context: Arc::new(context),
         })
     }
 
@@ -179,6 +184,12 @@ impl Services {
     /// What startup recovery found (interrupted sessions, lost tool calls, event gaps).
     pub fn session_recovery(&self) -> &RecoveryReport {
         &self.session_recovery
+    }
+
+    /// Local index, search, project rules, memory, and context packs
+    /// (`aidex-context`). Dropping the services cancels running index jobs.
+    pub fn context(&self) -> &Arc<ContextService> {
+        &self.context
     }
 }
 
