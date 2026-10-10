@@ -16,6 +16,7 @@ required-features = ["test-fixture"]
 [dependencies]
 aidex-core = { path = "../core" }
 aidex-drive = { path = "../drive" }
+aidex-host = { path = "../host" }
 aidex-providers = { path = "../providers" }
 aidex-sandbox = { path = "../sandbox" }
 serde = { version = "1", features = ["derive"] }
@@ -26,6 +27,9 @@ ureq = { version = "3.4", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"
+# Extracts the staged llama.cpp release archive in the ignored real-runtime test.
+zip = { version = "4.6", default-features = false, features = ["deflate-flate2"] }
+flate2 = { version = "1.1", default-features = false, features = ["rust_backend"] }
 
 [lints]
 workspace = true

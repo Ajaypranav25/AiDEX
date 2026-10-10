@@ -1,3 +1,3 @@
 # Inference presets
 
-Reserved for documented inference backend build and loading profiles. Presets must not imply that model weights are included.
+AiDEX ships no static presets. `inference.start` with `backend: "auto"` and no explicit `context_window`/`threads` plans the settings from the model (file size, training context, attention shape for the KV cache), the installed runtime (`gpu_supported`), and the host (`aidex-host`: total and available RAM, physical cores, and the GPU status from the opt-in probe run by `inference.host {probe_gpu: true}`). The resulting `LaunchPlan` — backend, threads, context, GPU layers, estimated RAM, and a reason for every choice, including why the CPU backend was used — is returned in `inference.status.plan` and printed by `aidex inference status`. Presets must never imply that model weights are included.

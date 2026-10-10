@@ -198,13 +198,35 @@ pub(crate) fn write_json<T: serde::Serialize>(
             .open(&temp)?;
         f.write_all(&serde_json::to_vec_pretty(value)?)?;
         f.sync_all()?;
-        fs::rename(&temp, path)?;
+        rename(&temp, path)?;
         Ok(())
     })();
     if result.is_err() {
         let _ = fs::remove_file(temp);
     }
     result
+}
+/// `fs::rename`, retried briefly on Windows while another process (typically an
+/// antivirus scanner inspecting a freshly copied executable or model) still holds
+/// a handle and the move fails with access denied or a sharing violation.
+pub(crate) fn rename(from: &Path, to: &Path) -> std::io::Result<()> {
+    const ATTEMPTS: u64 = 40;
+    let mut attempt = 0;
+    loop {
+        match fs::rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(error)
+                if cfg!(windows)
+                    && attempt < ATTEMPTS
+                    && (error.kind() == std::io::ErrorKind::PermissionDenied
+                        || error.raw_os_error() == Some(32)) =>
+            {
+                attempt += 1;
+                std::thread::sleep(std::time::Duration::from_millis(50 * attempt.min(5)));
+            }
+            Err(error) => return Err(error),
+        }
+    }
 }
 pub(crate) fn unique() -> Result<String, InferenceError> {
     EntityId::generate("stage")

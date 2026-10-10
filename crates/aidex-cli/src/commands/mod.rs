@@ -13,6 +13,7 @@ pub mod doctor;
 pub mod drive;
 pub mod emergency;
 pub mod events;
+pub mod inference;
 pub mod model;
 pub mod offline;
 pub mod omp;
@@ -44,6 +45,7 @@ pub fn dispatch(command: Option<Commands>, output: Output) -> Result<Exit, CliEr
         Some(Commands::Vault { command }) => vault::run(command, output),
         Some(Commands::Workspace(args)) => workspace::run(args, output),
         Some(Commands::Model(args)) => model::run(args, output),
+        Some(Commands::Inference(args)) => inference::run(args, output),
         Some(Commands::Provider(args)) => provider::run(args, output),
         Some(Commands::Offline(args)) => offline::run(args, output),
         Some(Commands::Session(args)) => session::run(args, output),

@@ -20,6 +20,8 @@ fn current_host_smoke_reports_a_versioned_profile() {
     assert_eq!(profile.version, PROFILE_VERSION);
     assert!(!profile.os.is_empty());
     assert!(!profile.architecture.is_empty());
+    assert!(profile.ram_bytes.is_some());
+    assert_eq!(profile.gpu, Probe::Unknown, "the GPU probe is opt-in");
 }
 
 #[test]
@@ -72,4 +74,5 @@ fn manifest_version_and_json_serialization_are_stable() {
     assert!(first.starts_with("{\"version\":1,"));
     assert_eq!(first, second);
     assert!(first.contains("\"network\":{\"state\":\"unknown\"}"));
+    assert!(first.contains("\"gpu\":{\"state\":\"unknown\"}"));
 }
