@@ -4,7 +4,7 @@ export const UNKNOWN = "Unknown";
 
 const BYTE_UNITS = ["bytes", "KB", "MB", "GB", "TB", "PB"] as const;
 
-/** Binary-scaled size such as "114.6 GB" (1 GB = 1024³ bytes, as Windows reports). */
+/** Binary-scaled size such as "14.6 GB" or "115 GB" (1 GB = 1024³ bytes, as Windows reports). */
 export function formatBytes(bytes: number | null | undefined): string {
   if (bytes === null || bytes === undefined || !Number.isFinite(bytes) || bytes < 0) return UNKNOWN;
   let value = bytes;
