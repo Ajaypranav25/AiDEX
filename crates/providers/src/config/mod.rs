@@ -245,7 +245,7 @@ impl ProviderConfig {
         if let AuthConfig::VaultSecret { secret_name } = &self.auth {
             if !is_secret_name(secret_name) {
                 return Err(format!(
-                    "provider `{}`: secret names are 1-128 ASCII letters, digits, `.`, `_`, or `-`",
+                    "provider `{}`: secret names are 1-128 ASCII letters, digits, `.`, `_`, or `-`, starting with a letter or digit",
                     self.id
                 ));
             }

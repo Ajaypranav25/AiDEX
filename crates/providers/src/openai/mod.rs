@@ -427,6 +427,8 @@ impl ModelProvider for OpenAiCompatibleProvider {
         if !self.discover {
             return Ok(self.declared_descriptors());
         }
+        // Gate first even when cached, so an offline listing reports the refusal.
+        self.admit()?;
         let ttl = self.client.options.model_cache_ttl;
         if let Ok(cache) = self.cache.lock() {
             if let Some((at, models)) = cache.as_ref() {
@@ -435,7 +437,6 @@ impl ModelProvider for OpenAiCompatibleProvider {
                 }
             }
         }
-        self.admit()?;
         let discovered = self
             .client
             .list_models_with(self.authorization()?, &CancelToken::new())?;

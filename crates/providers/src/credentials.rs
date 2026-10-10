@@ -174,11 +174,14 @@ impl CredentialResolver for StaticCredentials {
     }
 }
 
-/// Whether `name` is an acceptable vault secret name: 1-128 ASCII letters,
-/// digits, `.`, `_`, or `-`.
+/// Whether `name` is an acceptable vault secret name (the `aidex-vault` rule):
+/// 1-128 ASCII letters, digits, `.`, `_`, or `-`, starting with a letter or digit.
 pub fn is_secret_name(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= 128
+    name.len() <= 128
+        && name
+            .bytes()
+            .next()
+            .is_some_and(|b| b.is_ascii_alphanumeric())
         && name
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
