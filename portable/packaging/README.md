@@ -4,9 +4,10 @@ AiDEX runs from the drive: a bundle of native binaries is installed into the dri
 
 | Crate | Role |
 | --- | --- |
-| [`aidex-bundle`](../../crates/bundle/README.md) | Shared contract: the `bundle.json` manifest, the `app/current.json` pointer, verification, deterministic archives, and atomic installation. The launcher, the packager, and the updater (#27) all use it. |
-| [`aidex-launcher`](../../crates/launcher/README.md) | The drive-root launcher (`AiDEX.exe`, or `./aidex` → `app/launcher/<target>/aidex-launcher`). Verifies before it runs anything. |
-| [`aidex-packager`](../../crates/packager/README.md) | Developer/CI tool: builds release binaries into a bundle, writes the archive and `SHA256SUMS`, installs bundles onto drives, and smoke-tests them. Never shipped in a bundle. |
+| [`aidex-bundle`](../../crates/bundle/README.md) | Shared contract: the `bundle.json` manifest, its `bundle.sig` signature and the trust store, the `app/current.json` pointer, the update journal, verification, deterministic archives, and atomic installation. The launcher, the packager, and the updater all use it. |
+| [`aidex-launcher`](../../crates/launcher/README.md) | The drive-root launcher (`AiDEX.exe`, or `./aidex` → `app/launcher/<target>/aidex-launcher`). Verifies integrity and signature before it runs anything. |
+| [`aidex-packager`](../../crates/packager/README.md) | Developer/CI tool: builds release binaries into a bundle with an SBOM, writes the archive and `SHA256SUMS`, generates dev/CI keys, signs and verifies bundles, installs them onto drives, and smoke-tests them. Never shipped in a bundle. |
+| [`aidex-updater`](../../crates/updater/README.md) | Signed, staged, self-tested updates with an atomic switch, crash recovery, and rollback (`aidex update …`, daemon `update.*`). |
 
 The packager is its own crate rather than a launcher sub-binary because it drives `cargo` and `git`, reads `cargo metadata`, and writes archives — none of which belongs in the binary that every launch executes. Installation lives in `aidex-bundle` so the updater can stage, verify, and switch bundles with the same code.
 
@@ -19,9 +20,11 @@ cargo run --locked -p aidex-packager -- build --target windows-x64 --out dist
 `build` runs `cargo build --release --locked --target <triple>` for exactly the shipped binaries (`aidex` from `aidex-cli`, `aidexd`, `aidex-sandbox-exec` from `aidex-sandbox`, and `aidex-launcher`) into `target/packager/`, then:
 
 1. collects license metadata for every crate linked into them (see [Licenses](#licenses));
-2. assembles `dist/.aidex-<version>-<target>.staging-<pid>/`, writes `bundle.json`, verifies every file against it, and renames it to `dist/aidex-<version>-<target>/` (replacing only a previous packager output);
-3. writes the deterministic archive `dist/aidex-<version>-<target>.zip` (Windows) or `.tar.gz` (Linux/macOS);
-4. adds or replaces the archive's line in `dist/SHA256SUMS` (`sha256sum -c SHA256SUMS` verifies it).
+2. assembles `dist/.aidex-<version>-<target>.staging-<pid>/`, generates the CycloneDX SBOM `docs/sbom.cdx.json` (see [SBOM](#sbom)), writes `bundle.json`, verifies every file against it, and renames it to `dist/aidex-<version>-<target>/` (replacing only a previous packager output);
+3. writes the deterministic archive `dist/aidex-<version>-<target>.zip` (Windows) or `.tar.gz` (Linux/macOS) and a copy of the SBOM as `dist/aidex-<version>-<target>.cdx.json`;
+4. adds or replaces the archive's and the SBOM's lines in `dist/SHA256SUMS` (`sha256sum -c SHA256SUMS` verifies them).
+
+`build` does not sign. Sign the archive afterwards with `aidex-packager sign --key <file.key> <archive>` (see [Signing](#signing-and-verification)); `--trust-key <file.pub.json>` makes the built binaries trust that key in addition to the release keys.
 
 Each target is built on its own operating system; cross-compiling is not supported or tested. The default triples are `x86_64-pc-windows-msvc`, `x86_64-unknown-linux-musl` (static, so the binaries do not depend on the host's glibc; needs `rustup target add x86_64-unknown-linux-musl` and `musl-tools` for the bundled SQLite), and `aarch64-apple-darwin`; `--triple` overrides it and is recorded in the manifest.
 
@@ -46,7 +49,7 @@ cargo run -p aidex-packager -- install --bundle dist/aidex-0.1.0-windows-x64.zip
 H:\AiDEX.exe doctor
 ```
 
-`--bundle` takes an archive or an unpacked bundle directory. For a developer folder or a test directory that is not removable media, `--init-dev-drive` initializes it first with the removable-media check skipped (the same as `aidex_drive::init_with(.., InitOptions { require_removable: false })`); it is never implied.
+`--bundle` takes an archive or an unpacked bundle directory. The signature is checked first: the bundle must be signed by a key the packager trusts (release keys, plus `--trust-key <file.pub.json>`), or `--allow-unsigned` must be given (development only; the launcher then also needs `AIDEX_ALLOW_UNSIGNED=1`). For a developer folder or a test directory that is not removable media, `--init-dev-drive` initializes it first with the removable-media check skipped (the same as `aidex_drive::init_with(.., InitOptions { require_removable: false })`); it is never implied.
 
 Install steps (each is reported to `install_with`'s observer, which can stop the install before it starts):
 
@@ -80,16 +83,22 @@ Guarantees:
 │   ├── versions/
 │   │   └── <version>-<target>[-<digest>]/
 │   │       ├── bundle.json           bundle manifest
+│   │       ├── bundle.sig            Ed25519 signature of bundle.json
 │   │       ├── bin/aidex[.exe]                 CLI
 │   │       ├── bin/aidexd[.exe]                daemon
 │   │       ├── bin/aidex-sandbox-exec[.exe]    sandbox helper (next to aidexd)
 │   │       ├── bin/aidex-launcher[.exe]        launcher
 │   │       ├── licenses/aidex/LICENSE
 │   │       ├── licenses/third-party/<crate>-<version>.txt
+│   │       ├── docs/sbom.cdx.json              CycloneDX 1.5 SBOM
 │   │       ├── desktop/   installer/           optional prebuilt apps
 │   ├── launcher/<target>/aidex-launcher        Unix launchers (selected by ./aidex)
-│   └── staging/<id>/                 installs in progress (removed when done)
-└── manifests/                        reserved for checksum/SBOM copies (#27)
+│   ├── update-journal.json           last or in-progress update/rollback (see Updates)
+│   ├── update.lock                   held while an update or rollback runs
+│   └── staging/<id>/                 installs and updates in progress (removed when done)
+└── manifests/
+    ├── revoked-keys.json             drive revocation list (optional, additive)
+    └── <version>-<target>/           bundle.json, bundle.sig, sbom.cdx.json of every installed update
 ```
 
 The launcher binary is `aidex-launcher` inside bundles because `AiDEX.exe` and `aidex.exe` are the same file on case-insensitive filesystems (NTFS, exFAT, FAT32, default APFS). `app` is the drive manifest's `app` path; other layout paths come from `aidex-drive.json` as described in [`portable/layouts/README.md`](../layouts/README.md).
@@ -138,7 +147,7 @@ A closed schema: every object rejects unknown fields, and a document with anothe
 | `created_at` | RFC 3339 UTC; the commit time (or `SOURCE_DATE_EPOCH`) so rebuilds of one commit produce the same manifest. |
 | `min_drive_schema` | Lowest `aidex-drive.json` schema the bundle runs on. |
 | `state` | Drive-relative state paths the binaries use at build time (`aidex-drive.json`, `.aidex/runtime`, and the default layout); services still resolve real paths from the drive manifest. `host_extraction` is always `false`; launchers refuse a bundle that sets it. |
-| `files` | Every file except `bundle.json`, sorted by path: bundle-relative path, lowercase-hex SHA-256, size, executable flag, role. |
+| `files` | Every file except `bundle.json` and `bundle.sig`, sorted by path: bundle-relative path, lowercase-hex SHA-256, size, executable flag, role. |
 | `licenses` | Every crate linked into the binaries, sorted: name, version, declared SPDX expression (or `NOASSERTION`), source (`workspace`, registry, or git URL), and the bundled license text (`null` if the crate ships none). |
 
 Rules enforced by `BundleManifest::validate`:
@@ -178,8 +187,9 @@ Rules enforced by `BundleManifest::validate`:
 3. Read `app/current.json` (a regular file, at most 1 MiB) and the entry for the host's target.
 4. Check that `app/` and `app/versions/` are real directories and the entry's `dir` stays inside `app/versions/`; read the bundle's `bundle.json` (a regular file, at most 4 MiB) and compare its SHA-256 with `manifest_sha256` **before** parsing it.
 5. Validate the manifest; require `target` = host target, `version` = pointer version, `min_drive_schema` ≤ the drive schema, and `host_extraction` = false.
-6. Verify the critical files — `bin/` launcher, CLI, daemon, helper, and runtime files: every path component is a real directory or regular file (no symbolic links or junctions), and size and SHA-256 match. `bin/` must contain nothing that is not listed, so a planted library next to the binaries is refused.
-7. Run `bin/aidex` with the caller's arguments unchanged (no arguments: `aidex`'s default), the caller's working directory and standard streams, and:
+6. Verify `bundle.sig` (see [Signing](#signing-and-verification)) against the keys compiled into this launcher and the drive's `manifests/revoked-keys.json`. A missing signature is refused unless the host environment sets `AIDEX_ALLOW_UNSIGNED=1` (development only; a warning is printed on every launch); a present but invalid, unknown, revoked, or out-of-window signature is always refused.
+7. Verify the critical files — `bin/` launcher, CLI, daemon, helper, and runtime files: every path component is a real directory or regular file (no symbolic links or junctions), and size and SHA-256 match. `bin/` must contain nothing that is not listed, so a planted library next to the binaries is refused.
+8. Run `bin/aidex` with the caller's arguments unchanged (no arguments: `aidex`'s default), the caller's working directory and standard streams, and:
    - `AIDEX_DRIVE_ROOT` = the drive root (without the Windows `\\?\` prefix),
    - `AIDEX_BUNDLE_DIR`, `AIDEX_BUNDLE_VERSION`, `AIDEX_BUNDLE_TARGET`, `AIDEX_LAUNCHER_VERSION`,
    - `PATH` = the bundle's `bin/` followed by the inherited `PATH`.
@@ -198,18 +208,80 @@ Exit codes (on stderr: `AiDEX launcher: <message>` and a `hint:` line):
 | 4 | Not on an initialized AiDEX drive, misplaced launcher, or an invalid / v1 drive manifest. |
 | 8 | No bundle installed (`app/current.json` missing) or none for this host's target. |
 | 10 | Incompatible: wrong-target bundle, newer pointer or manifest schema, newer drive schema, host extraction requested, or an unnamed host platform. |
-| 11 | Integrity failure: hash or size mismatch, missing file, link, unlisted file in `bin/`, pointer escaping `app/versions/`, manifest not matching its pin, version disagreement, or malformed pointer/manifest. Nothing was run. |
+| 11 | Integrity or signature failure: hash or size mismatch, missing file, link, unlisted file in `bin/`, pointer escaping `app/versions/`, manifest not matching its pin, version disagreement, malformed pointer/manifest, unsigned bundle (without the opt-in), malformed `bundle.sig`, unknown, revoked, or out-of-window key, bad signature, or an unreadable revocation list. Nothing was run. |
 | 126 | The CLI is not executable (for example a `noexec` or `showexec` mount). |
+
+If `app/update-journal.json` names an unfinished update, the launcher prints a note, reports it as `pending_update` in `--launcher-info`, and runs what the pointer selects (always a complete, verified old or new version); the daemon finishes or rolls back the update when it starts.
 
 The launcher writes nothing — not to the host and not to the drive — and extracts nothing (bundles declare `host_extraction: false`), so there is no host residue for the cleanup manager (#28) to track. The Unix `aidex` script maps `uname -s`/`uname -m` to a target and `exec`s `app/launcher/<target>/aidex-launcher`, exiting 126/127 with a message when that launcher is missing or not executable.
 
 ## Licenses
 
-The inventory is the normal-dependency closure of the four shipped packages for the target platform, from `cargo metadata --locked --filter-platform <triple>`; build and dev dependencies are not linked and are excluded, proc-macro crates are included. Each crate's declared SPDX expression is recorded, and its `LICENSE*`, `LICENCE*`, `COPYING*`, `NOTICE*`, `COPYRIGHT*`, and `UNLICENSE*` files (plus `license-file`) are concatenated into `licenses/third-party/<name>-<version>.txt`. Workspace crates are covered by the repository's MIT `LICENSE`, shipped as `licenses/aidex/LICENSE`. Crates with no license file in their package are listed with `path: null` and reported by `build`. This is license metadata, not an SBOM: there is no CycloneDX/SPDX document, no source hashes, and no provenance attestation — issue #27 adds those.
+The inventory is the normal-dependency closure of the four shipped packages for the target platform, from `cargo metadata --locked --filter-platform <triple>`; build and dev dependencies are not linked and are excluded, proc-macro crates are included. Each crate's declared SPDX expression is recorded, and its `LICENSE*`, `LICENCE*`, `COPYING*`, `NOTICE*`, `COPYRIGHT*`, and `UNLICENSE*` files (plus `license-file`) are concatenated into `licenses/third-party/<name>-<version>.txt`. Workspace crates are covered by the repository's MIT `LICENSE`, shipped as `licenses/aidex/LICENSE`. Crates with no license file in their package are listed with `path: null` and reported by `build`. The same closure is described, with versions, purls, and hashes, by the SBOM below.
+
+## SBOM
+
+Every bundle carries a CycloneDX 1.5 JSON SBOM at `docs/sbom.cdx.json` (listed in `bundle.json` with role `doc`, so it is hashed and covered by the signature); `build` also writes it next to the archive as `aidex-<version>-<target>.cdx.json` with a `SHA256SUMS` line, and every update copies it to `manifests/<version>-<target>/sbom.cdx.json` on the drive.
+
+- `metadata.component`: the bundle (`type: application`, `name: aidex`, the version, MIT, properties `aidex:target`, `aidex:rust_target`, `aidex:git_commit`, `aidex:source_dirty`, `aidex:rustc`); `metadata.timestamp` is `created_at`; `metadata.tools` names `aidex-packager`.
+- `components`: every crate linked into the shipped binaries (`type: library`) with name, version, purl (`pkg:cargo/<name>@<version>` for crates.io; `repository_url`/`vcs_url` qualifiers for other registries and git; none for unpublished workspace crates, whose `bom-ref` is `workspace:<name>@<version>`), the declared SPDX expression (Cargo's `MIT/Apache-2.0` becomes `MIT OR Apache-2.0`), the `Cargo.lock` SHA-256 of the `.crate` archive where recorded, and `aidex:source`; plus one `type: file` component per critical binary (`bin/...`) with its SHA-256.
+- `dependencies`: the linked dependency graph, rooted at the bundle.
+- Deterministic: sorted components, no random serial number, timestamp = `created_at`.
+
+`aidex_updater::sbom::Sbom::validate` checks the format, spec version, timestamp, subject, unique `bom-ref`s, purls agreeing with name and version, hash algorithms and digest lengths, license entries, and dependency references; `aidex doctor` and `aidex update verify` report whether the installed bundle's SBOM matches its digest and validates.
+
+## Signing and verification
+
+A bundle is signed by a detached Ed25519 signature over its `bundle.json`; because `bundle.json` pins the size and SHA-256 of every file (including the SBOM), the signature authenticates the whole bundle.
+
+`bundle.sig` (schema 1, closed), next to `bundle.json` and never listed in it:
+
+```json
+{
+  "schema_version": 1,
+  "algorithm": "ed25519",
+  "key_id": "<16 hex: first 8 bytes of SHA-256(public key)>",
+  "manifest_sha256": "<sha256 of the signed bundle.json>",
+  "signature": "<128 hex>"
+}
+```
+
+The signed message is the ASCII context `AIDEX-BUNDLE-SIG-V1` and a newline, followed by the exact bytes of `bundle.json` (no re-serialization, so no canonical-JSON rules are involved); verification uses `verify_strict`.
+
+**Trust.** Binaries carry their trust store: the release public keys in `crates/bundle/src/signature/release-keys.json` (with `not_before`/`not_after` and compiled-in revocations), plus keys baked in at compile time with `aidex-packager build --trust-key` (`AIDEX_BUILD_TRUSTED_KEYS`; CI's ephemeral key, or a developer's key). Test builds additionally honour `AIDEX_DEV_TRUSTED_KEYS` at run time (the `dev-trust` feature is enabled only through dev-dependencies; release bundles never read it). A key's validity window is checked against the bundle's signed `created_at`; a key that may be compromised must therefore be **revoked**, not just expired, because its holder could sign a manifest with an earlier `created_at`. Revocations come from the compiled-in list and the drive's `manifests/revoked-keys.json` (`{"schema_version":1,"revoked":[{"key_id":"…","revoked_at":"…","reason":"…"}]}`), are additive, and win over trust.
+
+**Unsigned bundles** are refused by the launcher, `aidex update`, and `aidex-packager install` by default. The development opt-ins are `AIDEX_ALLOW_UNSIGNED=1` (launcher, `aidex doctor`, `aidex update verify`), `--allow-unsigned` (`aidex update apply|check|rollback|verify`, `aidex-packager install|smoke|verify`); each prints a warning, and the updater records `update.verified { unsigned_allowed: true }`. No opt-in ever accepts a present but invalid or untrusted signature.
+
+### Signing keys
+
+- **Development and CI keys** are made with `aidex-packager keygen --name <name> --out <dir outside the repository>`: `<name>.key` (secret, 0600 on Unix, never overwritten) and `<name>.pub.json`. `*.key` is git-ignored; never commit, upload, or share the secret file. CI (`.github/workflows/package.yml`) generates an ephemeral key in each job, bakes its public half into that job's binaries, signs the archive, verifies it, smoke-tests it, and uploads only the public key. Such bundles are trusted only by binaries built in the same job.
+- **The release key** does not exist in this repository or in any workspace that pull requests can reach. The project generates it offline (or in an HSM), and stores the secret only in a protected signing environment — for GitHub, an Actions environment restricted to release tags with required reviewers, or an offline signing machine. Its public key and validity window are added to `release-keys.json` by a reviewed pull request; release builds are then made **without** `--trust-key`, so they trust release keys only, and signed in the protected environment with `aidex-packager sign`. No release key is provisioned yet: `release-keys.json` is empty, so every build today trusts only the keys it was built with.
+- **Rotation**: add the new key (with `not_before`) to `release-keys.json` and ship a release, signed by the *old* key, whose binaries trust both; sign the next releases with the new key; give the old key a `not_after` once drives have moved on. Because the launcher that verifies a bundle is the one already on the drive, an update must always be signed by a key the *currently installed* version trusts.
+- **Compromise**: add the key id to the compiled-in `revoked` list and ship a release signed by another trusted key; until drives update, users can add the id to `manifests/revoked-keys.json` (it is honoured immediately by the launcher, `aidex update`, and `aidex doctor`).
+
+### Verify a release (users)
+
+1. Check the download: `sha256sum -c SHA256SUMS --ignore-missing` (macOS: `shasum -a 256 -c SHA256SUMS`), Windows PowerShell: `Get-FileHash aidex-<version>-windows-x64.zip -Algorithm SHA256` and compare with the line in `SHA256SUMS`. This only proves the file arrived intact.
+2. Check the signature with an AiDEX you already trust: `aidex update check <archive>` verifies `bundle.sig` against the keys built into your installed AiDEX (and your drive's revocation list), every file hash, the target, and the version rules, and prints the signer's key id — compare it with the key id the project publishes. `aidex-packager verify [--trust-key <file.pub.json>] <archive>` does the same from a source checkout.
+3. On a drive, `aidex update verify` (or `AiDEX.exe --launcher-verify`) re-verifies the installed version: signature, every file, and the SBOM; `aidex doctor` reports version, signer key id, verification, and SBOM status.
+
+## Updates
+
+```sh
+aidex update check   <archive|bundle dir|release folder>     # verify only
+aidex update apply   <archive|bundle dir|release folder> [--allow-downgrade] [--allow-unsigned]
+aidex update status                                          # active, previous, integrity, last operation
+aidex update rollback                                        # current ↔ previous
+aidex update verify                                          # installed bundle: signature, every file, SBOM
+```
+
+`check`, `apply`, `rollback`, and `status` run in the daemon (`update.*` methods); `verify` runs locally. An update moves through `staging` (bounded extraction into `app/staging/<id>/`) → `verified` (signature, every file, target, drive schema, version rules) → `self_test` (the staged `aidex --version`, `aidexd --version`, `aidex doctor --json`) → `switching` (rename into `app/versions/`, atomic replacement of `app/current.json`; the old bundle becomes `previous`) → `committed` (drive-root launchers from the new bundle, provenance copied to `manifests/`, versions other than current and previous pruned). Each step is recorded in `app/update-journal.json` first; after a crash or power loss the daemon, when it starts, rolls the operation back to the previous pointer or — if the switch had happened and the new bundle verifies — finishes it. Neither the daemon nor the CLI replaces its own running binaries: the new version takes effect the next time AiDEX is started, and `aidex update apply` says so.
+
+Versions follow SemVer precedence: older packages are refused (`downgrade`) unless `--allow-downgrade` is given **and** the package is exactly the recorded previous bundle. Every refusal (bad, unknown, or revoked signature, tampered or missing file, wrong platform, downgrade, incompatible drive schema, unsafe or oversized archive, failed self-test, checksum mismatch) leaves the drive unchanged; integrity and signature refusals exit 11, version and platform refusals exit 10. Details: [`crates/updater/README.md`](../../crates/updater/README.md).
 
 ## Verification and its limits
 
-Verification detects corruption, partial copies, accidental edits, wrong-platform bundles, and files planted next to the binaries, and it fails closed. It is **not** a defence against someone who can write to the drive: they can replace `AiDEX.exe`, `aidex`, or the pointer itself. Signatures with a trust anchor outside the drive are issue #27. Other known gaps:
+Verification detects corruption, partial copies, accidental edits, wrong-platform bundles, and files planted next to the binaries, and signatures detect bundles and update packages that were not produced by a trusted signer; both fail closed. The trust anchor is compiled into the launcher and CLI **on the drive**, so signatures do not defend against someone who can replace `AiDEX.exe` or `aidex` itself; they do stop a modified bundle, manifest, or pointer, and an untrusted update package, from being run or installed by an intact AiDEX. Other known gaps:
 
 - Files are hashed and then executed by path, so a process that rewrites the drive between the check and `exec` is not detected.
 - Windows resolves a launcher's DLL imports before `main` runs, so a DLL planted next to `AiDEX.exe` at the drive root could be loaded before any check (the bundle's own `bin/` is checked).
@@ -241,7 +313,6 @@ A macOS `AiDEX.app` entry (a signed and notarized app bundle that opens Terminal
 
 ## Not included yet
 
-- Signatures, SBOM, provenance, update channels, and rollback commands (#27 — it builds on `CurrentPointer::switch`, `previous`, and `install_with`).
-- Pruning old `app/versions/` directories.
+- A provisioned release key (see [Signing keys](#signing-keys)), provenance attestations (SLSA/in-toto), OS code signing (Authenticode, notarization), and an online update feed or channels; updates are offline/manual packages.
 - Bun and Oh My Pi: `aidex chat` and `aidex run` still need Oh My Pi installed on the host; the native agent and local model runtimes (#15) are not bundled.
 - Building the Tauri desktop and installer apps.
