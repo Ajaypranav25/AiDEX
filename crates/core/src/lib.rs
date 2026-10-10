@@ -249,13 +249,82 @@ pub struct SecretRef {
     pub secret_id: EntityId,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(transparent)]
-pub struct ContractVersion(pub u16);
+pub struct ContractVersion(u16);
+
+impl JsonSchema for ContractVersion {
+    fn schema_name() -> String {
+        "ContractVersion".into()
+    }
+
+    fn json_schema(generator: &mut SchemaGenerator) -> Schema {
+        let mut schema = u16::json_schema(generator);
+        if let Schema::Object(object) = &mut schema {
+            object.number().minimum = Some(1.0);
+        }
+        schema
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ContractVersionError;
+
+impl fmt::Display for ContractVersionError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("contract version must be at least 1")
+    }
+}
+
+impl Error for ContractVersionError {}
 
 impl ContractVersion {
     pub const CURRENT: Self = Self(1);
+
+    pub fn new(value: u16) -> Result<Self, ContractVersionError> {
+        Self::try_from(value)
+    }
+
+    pub const fn get(self) -> u16 {
+        self.0
+    }
 }
+
+impl TryFrom<u16> for ContractVersion {
+    type Error = ContractVersionError;
+
+    fn try_from(value: u16) -> Result<Self, Self::Error> {
+        if value == 0 {
+            Err(ContractVersionError)
+        } else {
+            Ok(Self(value))
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ContractVersion {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Self::try_from(u16::deserialize(deserializer)?).map_err(de::Error::custom)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ContractNegotiationError {
+    InvalidRange,
+    IncompatibleVersion,
+}
+
+impl fmt::Display for ContractNegotiationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidRange => f.write_str("contract offer minimum exceeds maximum"),
+            Self::IncompatibleVersion => f.write_str("no compatible contract version"),
+        }
+    }
+}
+
+impl Error for ContractNegotiationError {}
+
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -306,6 +375,24 @@ pub struct ServiceError {
 pub struct ContractOffer {
     pub minimum: ContractVersion,
     pub maximum: ContractVersion,
+}
+
+impl ContractOffer {
+    pub fn negotiate(
+        &self,
+        peer: &Self,
+    ) -> Result<ContractVersion, ContractNegotiationError> {
+        if self.minimum > self.maximum || peer.minimum > peer.maximum {
+            return Err(ContractNegotiationError::InvalidRange);
+        }
+        let minimum = self.minimum.max(peer.minimum);
+        let maximum = self.maximum.min(peer.maximum);
+        if minimum > maximum {
+            Err(ContractNegotiationError::IncompatibleVersion)
+        } else {
+            Ok(maximum)
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -487,8 +574,31 @@ mod tests {
         assert!(serde_json::from_str::<WorkspacePath>("\"line\\nbreak\"").is_err());
         assert!(serde_json::from_str::<Timestamp>("\"2024-02-30T12:00:00Z\"").is_err());
         assert!(serde_json::from_str::<Timestamp>("\"not-a-time\"").is_err());
+        assert!(serde_json::from_str::<ContractVersion>("0").is_err());
+        assert_eq!(ContractVersion::new(0), Err(ContractVersionError));
+        assert_eq!(ContractVersion::try_from(2).unwrap().get(), 2);
     }
 
+    #[test]
+    fn offers_negotiate_highest_common_version_and_reject_invalid_ranges() {
+        let offer = |minimum, maximum| ContractOffer {
+            minimum: ContractVersion::new(minimum).unwrap(),
+            maximum: ContractVersion::new(maximum).unwrap(),
+        };
+        assert_eq!(offer(1, 5).negotiate(&offer(3, 7)).unwrap().get(), 5);
+        assert_eq!(
+            offer(4, 2).negotiate(&offer(1, 5)),
+            Err(ContractNegotiationError::InvalidRange)
+        );
+        assert_eq!(
+            offer(1, 2).negotiate(&offer(3, 4)),
+            Err(ContractNegotiationError::IncompatibleVersion)
+        );
+        assert_eq!(
+            ContractNegotiationError::IncompatibleVersion.to_string(),
+            "no compatible contract version"
+        );
+    }
     #[test]
     fn versioned_requests_and_events_round_trip_and_check_version() {
         let request = Versioned::new(ToolIntentRequest {
