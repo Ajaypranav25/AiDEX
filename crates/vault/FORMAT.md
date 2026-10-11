@@ -164,8 +164,11 @@ across replacements while `revision` and `blob` change on every write.
 3. `format` must be `aidex-vault`; an unknown `format_version` is
    `UnsupportedVersion` and is checked before strict parsing.
 4. Strict structural parsing (`CorruptHeader`): one passphrase slot with Argon2id
-   parameters inside the accepted bounds (m ≤ 1 GiB, t ≤ 64, p ≤ 16, m ≥ 8·p KiB),
-   at most one HKDF recovery slot, exact salt/nonce/key/MAC lengths.
+   parameters inside the accepted bounds (8·p KiB ≤ m ≤ 64 MiB, 1 ≤ t ≤ 3,
+   1 ≤ p ≤ 4), at most one HKDF recovery slot, exact salt/nonce/key/MAC lengths.
+   These limits apply before authentication and cap one unlock's Argon2 memory/work
+   at the default resource budget; headers above them are refused before deriving a
+   key, even if an older version allowed their parameters.
 
 `unlock`:
 
@@ -197,6 +200,14 @@ Every file write is: write a new `.<name>.<random>.tmp` in the same directory
 - **conflict detection**: before each commit the on-disk header is re-read and must
   match the SHA-256 of the state this session loaded or wrote; otherwise the write
   fails with `Conflict` and the daemon drops the session (unlock again).
+- **ambiguous header commit**: a directory sync failure after a successful header
+  rename returns `CommitUncertain` with the original I/O cause (`kind() == Io`,
+  service code `Unavailable`). The visible header and index are reconciled for
+  direct crate callers and their handles are revoked. `VaultService` drops the
+  session when its own header is affected, requiring fresh unlock before metadata
+  or values can be read. Newly referenced records are preserved. Ordinary
+  pre-rename I/O errors retain the old session; a backup destination's uncertain
+  commit does not invalidate an unchanged source session.
 
 Durability limits: Windows provides no directory flush through the Rust standard
 library, and FAT/exFAT (common on removable drives) do not journal metadata, so a
@@ -242,8 +253,10 @@ a new passphrase without the old one (`reset_passphrase`).
   what it wrote.
 - `Vault::restore_from(src, target)` refuses a target that holds vault data, copies
   the header and all well-formed record files, compares them byte-for-byte, and
-  returns the restored vault locked. Cryptographic verification needs a credential:
-  unlock it and call `UnlockedVault::verify()`.
+  returns the restored vault locked. Enumeration rejects more than 4096 correctly
+  named record files with `LimitExceeded` before building the reference vector or
+  copying files. Cryptographic verification needs a credential: unlock it and call
+  `UnlockedVault::verify()`.
 - A backup is protected exactly like the live vault: the same passphrase and the
   same recovery key unlock it, and changing the passphrase later does not change
   the backup's slot (the old passphrase keeps opening the old backup).
@@ -267,6 +280,10 @@ current policy still allows the consumer. Handles exist only in the memory of on
 unlock session: lock, idle auto-lock, daemon restart, and `revoke_all_handles`
 invalidate them. Handle issuance and resolution are Rust APIs for the broker; they
 are not exposed over IPC.
+
+Each session tracks at most 4096 handles. Issuance prunes expired and revoked
+entries at capacity, so individual or emergency revocation frees space immediately;
+pruned handles remain unresolvable (their denial may become `Unknown`).
 
 ## In-memory handling
 

@@ -53,7 +53,9 @@ let locked = vault.lock();                                   // keys zeroized, h
 Option<_>, new)`, `issue_handle`, `resolve`, `revoke_handle`, `revoke_all_handles`,
 `backup_to`, `set_kdf_params`, `set_idle_timeout`. It locks itself after 30 minutes
 without secret operations (configurable), re-reads the disk while locked (so damage or
-an external restore is reported), and drops its session on a `Conflict`.
+an external restore is reported), and drops its session on a `Conflict` or an ambiguous
+post-rename commit to its own header. Fresh unlock is required in either case;
+ordinary pre-rename I/O errors do not discard an unchanged session.
 
 Types:
 
@@ -75,8 +77,16 @@ Types:
   grep of the vault directory finds none of them (tested).
 - Wrong passphrase, tampered/truncated/missing/swapped files, unknown versions, and
   links are explicit errors; nothing falls back to plaintext or to an empty vault.
-- An interrupted write leaves the previous committed state readable; stray temp files
-  and orphaned records are ignored and cleaned up.
+- An interrupted write before the header rename leaves the previous committed state
+  readable; stray temp files and orphaned records are ignored and cleaned up. If the
+  rename succeeds but its directory sync fails, `CommitUncertain` preserves the I/O
+  cause, reconciles direct callers to the visible header/index, revokes their handles,
+  and makes the service drop its session.
+- Unauthenticated KDF headers are limited to 64 MiB, three iterations, and four lanes
+  before Argon2 runs; the default remains 64 MiB, three iterations, and one lane.
+- Restore rejects more than 4096 correctly named record files before copying any.
+- Expired and revoked handles are pruned at the 4096-handle capacity limit, so
+  revocation immediately makes capacity available for replacement handles.
 - No API returns a secret value except handle resolution for an allowed consumer.
 
 ## Limitations
