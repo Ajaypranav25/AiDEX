@@ -13,6 +13,7 @@ use crate::commands::{
     },
     emergency::{ResumeArgs, StopArgs},
     inference::InferenceArgs,
+    mcp::McpArgs,
     model::ModelArgs,
     offline::OfflineArgs,
     policy::PolicyArgs,
@@ -111,6 +112,8 @@ pub enum Commands {
     /// List the tools the broker mediates.
     #[command(alias = "tool")]
     Tools(ToolsArgs),
+    /// List, start, and stop MCP servers and inspect their tools and logs.
+    Mcp(McpArgs),
     /// Emergency stop: freeze tools, cancel approvals, kill managed processes.
     Stop(StopArgs),
     /// Resume tool execution after an emergency stop.
@@ -157,6 +160,7 @@ impl Commands {
             Some(Self::Deny(_)) => "aidex deny",
             Some(Self::Policy(args)) => args.command.label(),
             Some(Self::Tools(args)) => args.command.label(),
+            Some(Self::Mcp(args)) => args.command.label(),
             Some(Self::Stop(_)) => "aidex stop",
             Some(Self::Resume(_)) => "aidex resume",
             Some(Self::Index(args)) => args.command.label(),
