@@ -49,7 +49,7 @@ pub struct ModelList {
 }
 
 /// Result of `model.providers`.
-#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ProviderList {
     pub providers: Vec<ProviderEntry>,
@@ -298,16 +298,12 @@ fn add(
         config.auth = AuthConfig::VaultSecret { secret_name };
     }
     let registry = services.models().registry();
-    let descriptor = if update {
-        registry.update_provider(config)
+    if update {
+        registry.update_provider_with(config, None)
     } else {
-        registry.add_provider(config)
+        registry.add_provider_with(config, aidex_providers::AccountMetadata::default())
     }
-    .map_err(registry_error)?;
-    Ok(ProviderEntry {
-        descriptor,
-        origin: aidex_providers::ProviderOrigin::Configured,
-    })
+    .map_err(registry_error)
 }
 
 fn network_status(services: &Services) -> NetworkStatus {
