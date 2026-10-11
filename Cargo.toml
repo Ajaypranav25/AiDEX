@@ -23,6 +23,7 @@ members = [
     "crates/sessions",
     "crates/skills",
     "crates/native-sessions",
+    "crates/plugins",
     "crates/tools",
     "crates/harness",
     "crates/storage",

@@ -69,6 +69,7 @@ pub struct Services {
     skills: Arc<SkillService>,
     native: Arc<aidex_harness::NativeEngine>,
     inference: Arc<aidex_inference::InferenceService>,
+    plugins: Arc<aidex_plugins::PluginStore>,
     runtime: Result<Arc<aidex_adapters::RuntimeManager>, String>,
     updates: Result<Arc<Updater>, String>,
     update_recovery: Mutex<Option<Result<UpdateRecovery, String>>>,
@@ -149,6 +150,10 @@ impl Services {
             runtime.join("native-processes"),
         );
         let inference = inference::open_inference(&paths, &models)?;
+        // Installed plugin bundles; `extension.*` events go to the drive log.
+        let plugins = aidex_plugins::PluginStore::open(&paths)
+            .map_err(|error| ServicesError::new("plugins", error.code(), error.to_string()))?
+            .with_events(Arc::new(events.clone()));
         // External runtimes are optional: the daemon starts without them and
         // `runtime.*` reports why they are unavailable.
         let runtime = runtime::open_runtime(&paths, Arc::clone(&vault), &models)
@@ -171,6 +176,7 @@ impl Services {
             skills,
             native,
             inference,
+            plugins: Arc::new(plugins),
             runtime,
             updates,
             update_recovery: Mutex::new(None),
@@ -251,6 +257,10 @@ impl Services {
     }
     pub fn inference(&self) -> &Arc<aidex_inference::InferenceService> {
         &self.inference
+    }
+    /// Installed plugin bundles, their provenance, and trust (`aidex-plugins`).
+    pub fn plugins(&self) -> &Arc<aidex_plugins::PluginStore> {
+        &self.plugins
     }
     /// External agent runtimes (`aidex-adapters`), or why they could not be
     /// opened at startup.

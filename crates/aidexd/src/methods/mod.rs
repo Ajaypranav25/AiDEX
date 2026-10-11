@@ -18,6 +18,7 @@ pub mod models;
 pub mod native;
 pub mod native_history;
 pub mod native_view;
+pub mod plugins;
 pub mod policy;
 pub mod runtime;
 pub mod sessions;
@@ -75,6 +76,7 @@ pub(crate) fn register_all(
     auth::register(router, services)?;
     inference::register(router, services)?;
     native::register(router, services)?;
+    plugins::register(router, services)?;
     settings::register(router, services)?;
     skills::register(router, services)?;
     daemon::register(router, services)?;

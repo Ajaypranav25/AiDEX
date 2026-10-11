@@ -17,6 +17,7 @@ pub mod inference;
 pub mod model;
 pub mod offline;
 pub mod omp;
+pub mod plugins;
 pub mod policy;
 pub mod provider;
 pub mod session;
@@ -56,6 +57,7 @@ pub fn dispatch(command: Option<Commands>, output: Output) -> Result<Exit, CliEr
         Some(Commands::Deny(args)) => approvals::deny(args, output),
         Some(Commands::Policy(args)) => policy::run(args, output),
         Some(Commands::Tools(args)) => tools::run(args, output),
+        Some(Commands::Plugins(args)) => plugins::run(args, output),
         Some(Commands::Stop(args)) => emergency::stop(args, output),
         Some(Commands::Resume(args)) => emergency::resume(args, output),
         Some(Commands::Index(args)) => context::index::run(args, output),
