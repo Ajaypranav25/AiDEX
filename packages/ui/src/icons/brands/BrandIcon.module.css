@@ -4,14 +4,12 @@
   vertical-align: middle;
 }
 
-/* Inline style sets --aidex-brand-color; the stylesheet applies it so each theme can adjust it. */
+/*
+ * Inline style sets --aidex-brand-color; the stylesheet applies it so each theme can adjust it. The
+ * light theme lowers --aidex-brand-color-strength to darken marks for contrast on light surfaces.
+ */
 .brand {
-  color: var(--aidex-brand-color);
-}
-
-/* Darken brand colors on light surfaces so pale marks keep their contrast. */
-:global(html[data-theme="light"]) .brand {
-  color: color-mix(in oklab, var(--aidex-brand-color) 78%, black);
+  color: color-mix(in oklab, var(--aidex-brand-color) var(--aidex-brand-color-strength, 100%), black);
 }
 
 .monogramTile {

@@ -8,7 +8,7 @@
 | --- | --- |
 | `@aidex/ui/styles.css` | Design tokens and base element styles. Import once in the app root layout. |
 | `@aidex/ui/themes` | `accentPresets`, `DEFAULT_ACCENT`, and `applyAccent(color)` for runtime accent changes. |
-| `@aidex/ui/icons` | Project-owned 24×24 stroke icons and the AiDEX `LogoMark`. |
+| `@aidex/ui/icons` | Project-owned 24×24 stroke icons, the AiDEX `LogoMark`, and `BrandIcon` provider logos. |
 | `@aidex/ui/primitives` | Controls, form fields, display atoms, and layout. |
 | `@aidex/ui/components` | Product components, data display, and content display. |
 | `@aidex/ui/desktop` | Desktop frames: shell, navigation, page layouts. |
@@ -38,8 +38,10 @@ Every component accepts its root element's props (including `ref` and `className
 | `Tabs` + `TabPanel` | `id`, `label`, `items: { value, label, icon?, count? }[]`, `value`, `onValueChange`, `variant` pill · underline; wrap the selected content in `<TabPanel tabsId={id} value={value}>` |
 | `ChoiceCardGroup` | `label`, `options: { value, title, description?, icon?, meta?, disabled? }[]`, `value`, `onValueChange`, `columns` 1 · 2 · 3, `variant` cards · rows |
 | `SwatchPicker` | `label`, `swatches: { value, label }[]`, `value`, `onValueChange`, `allowCustom` |
-| `Badge` | `tone` accent · success · neutral, `icon` |
-| `StatusIndicator` | `label`, `tone` success · warning · neutral (dot plus text) |
+| `Badge` | `tone` accent · success · warning · danger · neutral, `size` sm · md, `icon` |
+| `StatusIndicator` | `label`, `tone` success · warning · danger · neutral (dot plus text) |
+| `StatusDot` | `tone` success · warning · danger · neutral · accent, `size` sm (6px) · md (9px), `label` (announced as an image; without it the dot is decorative and nearby text must name the status) |
+| `Popover` | `open`, `onOpenChange`, `anchorRef`, `placement` bottom-start · bottom-end · top-start · top-end (flips to stay on screen), `offset` (6), `label` or `labelledBy`, `role` dialog · menu · listbox, `initialFocusRef`, `container` (portal target; pass the open `<dialog>` inside a modal), `id`. Non-modal: focus moves in on open; Escape closes and returns focus to the anchor; a press outside or focus leaving closes it. Not a root-element passthrough |
 | `IconBadge` | `icon`, `tone` neutral · accent, `size` md · lg |
 | `ProgressBar` | `label`, `value`, `max`, `showCount` |
 | `Divider` | optional `label` (e.g. "or") |
@@ -59,6 +61,9 @@ Every component accepts its root element's props (including `ref` and `className
 | `SectionHeader` | `title`, `level` 2 · 3, `meta`, `actions` |
 | `Brand` | `name`, `size` md · lg · xl, `layout` inline · stacked |
 | `Composer` | `value`, `onValueChange`, `onSubmit`, `onAttach`, `label`, `placeholder`, `attachments`, `toolbarStart`, `toolbarEnd`, `size` default · compact |
+| `Dialog` | `open`, `title`, `onClose`, `description` (linked as the accessible description), `size` md · lg · xl (480 / 720 / 960px, clamped to the window); native modal `<dialog>` |
+| `ModelPicker` | `providers`, `models`, `value` (model key), `onValueChange`, `favorites: ReadonlySet<string>`, `onToggleFavorite`, `open`, `onOpenChange`, `anchorRef`, `label`, `onOpenProviderSetup`, `onManageProviders`, `emptyText`, `loading`, `jumpModifierLabel` ("⌘" or "Ctrl"), `placement`, `container`, `id`. See [Model picker](#model-picker) |
+| `ModelPickerTrigger` | `provider`, `model`, `placeholder`, `open`, `onToggle`, `size` sm · md, `shortcutLabel` (appended to the tooltip), `disabled`, `ref` (pass it as the picker's `anchorRef`) |
 | `Notice` | `tone` info · success · warning · danger, `variant` plain · banner (pass `role="alert"` for errors) |
 | `MediaItem` | `media`, `title`, `description`, `trailing`, `titleLevel`, `size` md · lg |
 | `InfoCard` | `icon`, `status`, `label`, `value`, `detail` |
@@ -66,6 +71,9 @@ Every component accepts its root element's props (including `ref` and `className
 | `List` + `ListRow` | `ListRow`: `media`, `title`, `subtitle`, `meta: ReactNode[]`, `trailing`, `selected`, `onSelect` (whole row becomes a button) |
 | `KeyValueList` | `items: { label, value }[]` |
 | `SettingRow` | `title`, `description`, `control`, `controlId` |
+| `SettingsSection` | `title`, `icon`, `description`, `actions`, `titleLevel` 2 · 3 · 4; bordered, titled group whose children stack with a gap |
+| `ProviderRow` | `brand`, `title`, `version`, `headline`, `detail`, `tone` success · warning · danger · neutral (dot only for warning and danger), `selected`, `disabled` (dims, stays selectable), `badges`, `trailing` (outside the select button), `onSelect`. An `<li>` for a `List` |
+| `ProviderTile` | `brand`, `name`, `description` (one line), `badges`, `selected` (`aria-pressed`; leave undefined for a plain action), `onSelect`, `disabled`; compact catalog button |
 | `EmptyState` | `icon`, `title`, `description`, `actions`, `titleLevel` |
 | `StatTile` | `label`, `value`, `hint`, `icon`, `tone` |
 | `Meter` | `label`, `value`, `max`, `valueText`, `tone`, `warnAt`, `dangerAt` |
@@ -102,6 +110,32 @@ Every component accepts its root element's props (including `ref` and `className
 | `SetupWindow` | `title`, `subtitle`, `badge`, `steps` (a `StepTrack`), `footer` (a `SetupFooter`), `contentRef`; centered window with title bar, step track, scrolling content column, pinned footer |
 | `SetupFooter` | `note` (polite live text), `noteId`, action buttons as children |
 | `StepTrack` | `label`, `steps: { id, title, status: complete · current · upcoming, reachable? }[]`, `onSelect` |
+
+### Icons
+
+| Export | Notes |
+| --- | --- |
+| Stroke icons | `createIcon` 24×24 strokes (`size`, `title`), e.g. `StarIcon` and `StarFilledIcon` for favorites |
+| `BrandIcon` | `brand` (glyph key), `size` (20), `tone` brand · mono, `title`; other SVG props pass through. See [Brand icons](#brand-icons) |
+| `hasBrandIcon(brand)`, `brandTitle(brand)`, `monogram(label)`, `type BrandId` | glyph lookup, display name, and the fallback initials |
+
+## Brand icons
+
+`BrandIcon` draws provider and agent-runtime logos from `icons/brands/brandGlyphs.ts`: generated, monochrome 24×24 path data (49 brands) from `@lobehub/icons-static-svg`, MIT licensed; see `icons/brands/NOTICE.md`. Do not edit the data by hand. Brand names and logos identify the provider only.
+
+- **Color.** `tone="brand"` (default) colors the glyph with its brand color through the `--aidex-brand-color` custom property; glyphs without a usable color, and `tone="mono"`, inherit `currentColor`. In the light theme the brand color is darkened (`color-mix(in oklab, <brand> 78%, black)`, through the `--aidex-brand-color-strength` token) to keep contrast on light surfaces.
+- **Fallback.** A key without a glyph renders a rounded-square monogram of up to two initials from `title`, or from `brandTitle(brand)` when there is no title (`monogram("llama.cpp server")` is "LS"; a single word gives its first two letters).
+- **Accessibility.** Without `title` the icon is decorative (`aria-hidden`); with one it is `role="img"` with that name. Next to a visible provider name, leave `title` off.
+
+## Model picker
+
+`ModelPicker` is data only: the app maps its providers and models to `ModelPickerProvider` (`id`, `name`, `brand`, `status` ready · warning · error · disabled · setup, `statusText`, `kind` model · runtime · local, `setupLabel`) and `ModelPickerModel` (`key`, `providerId`, `name`, `shortName`, `description`, `contextWindow`, `capabilities` tools · vision · json · reasoning, `badge` new · default · custom, `unavailable`, `disabledReason`, `legacy`), and persists selection and favorites itself.
+
+- **Layout.** A popover (380px wide, up to 420px tall) with a 44px provider rail (Favorites, then providers; agent runtimes after a divider) and a search field above a listbox. Each rail button shows a status dot; its tooltip and accessible name name any non-ready state ("Groq — Unavailable. 401 Unauthorized").
+- **Views.** It opens on Favorites when any listed model is a favorite, otherwise on the selected model's provider (or the first ready one). Favorites are ordered by rail order. A provider view lists favorites, then current models, then a "Legacy models" row that expands the `legacy` ones. Typing searches every provider: tokens are matched against name, short name, provider name, and key (exact, prefix, word boundary, substring, then fuzzy for tokens of three or more characters), favorites are boosted, and ties sort by name. The rail hides while searching.
+- **Footer.** A provider that is not ready (or has no models) shows its `statusText` or a fallback with an "Open provider setup" button when `onOpenProviderSetup` is set. `onManageProviders` adds a "Manage providers" bar.
+- **Keyboard.** Focus starts in the search field. ArrowUp/ArrowDown move the active option (`aria-activedescendant`), Enter selects it (or toggles the legacy row), Escape closes and returns focus to the trigger. ArrowLeft on an empty query or Shift+Tab moves to the rail, where ArrowUp/ArrowDown/Home/End move, Enter or Space selects, and ArrowRight or typing returns to search. Tab from search reaches the active row's favorite button. While open, Mod+1…Mod+9 choose the first nine enabled rows (hints show when `jumpModifierLabel` is set) and Mod+Shift+ArrowUp/ArrowDown switch provider, skipping disabled ones. Rows with a `disabledReason` are skipped and show the reason as their tooltip.
+- **Search helpers.** `rankBySearch(items, query, toSearchable)` and `scoreModelSearch(model, query)` expose the same ranking, for example to filter a model list elsewhere; `formatContextWindow(tokens)` gives "200K" / "1M".
 
 ## Code diffs
 

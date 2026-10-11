@@ -162,10 +162,7 @@
   border: 0;
 }
 
-:global(html[data-reduce-motion="true"]) .spinner {
-  animation: none;
-}
-
+/* `html[data-reduce-motion="true"]` is handled globally in styles.css. */
 @media (prefers-reduced-motion: reduce) {
   .spinner {
     animation: none;

@@ -1,6 +1,6 @@
 "use client";
 
-import type { MouseEvent, Ref } from "react";
+import { useRef, type MouseEvent, type Ref } from "react";
 import { BrandIcon, hasBrandIcon } from "../../icons/brands/BrandIcon";
 import { CheckIcon, ChevronRightIcon, StarFilledIcon, StarIcon } from "../../icons/interface";
 import { Badge, type BadgeTone } from "../../primitives/Badge";
@@ -67,35 +67,51 @@ export function ModelPickerList({
   listRef,
 }: ModelPickerListProps) {
   const empty = rows.length === 0;
+  // Browsers can replay a mouse move when the list scrolls under a resting pointer; only real
+  // pointer movement may take the active option away from the keyboard.
+  const pointerRef = useRef<{ x: number; y: number } | null>(null);
+  const handleHover = (event: MouseEvent, rowId: string | null) => {
+    const last = pointerRef.current;
+    if (last && last.x === event.clientX && last.y === event.clientY) return;
+    pointerRef.current = { x: event.clientX, y: event.clientY };
+    // Disabled rows (null) are skipped like they are for the keyboard.
+    if (rowId !== null && rowId !== activeId) onActivate(rowId);
+  };
   return (
     <>
-      <div ref={listRef} id={id} role="listbox" aria-label="Models" className={cx(styles.list, empty && styles.listEmpty)}>
-      {rows.map((row) =>
-        row.type === "legacy" ? (
-          <LegacyOption
-            key={row.id}
-            row={row}
-            domId={optionId(row.id)}
-            active={row.id === activeId}
-            onActivate={onActivate}
-            onToggle={onToggleLegacy}
-          />
-        ) : (
-          <ModelOption
-            key={row.id}
-            row={row}
-            domId={optionId(row.id)}
-            active={row.id === activeId}
-            selected={row.model.key === value}
-            jumpIndex={jumpKeys.indexOf(row.model.key)}
-            jumpModifierLabel={jumpModifierLabel}
-            favoritesView={favoritesView}
-            onActivate={onActivate}
-            onSelect={onSelectModel}
-            onToggleFavorite={onToggleFavorite}
-          />
-        ),
-      )}
+      <div
+        ref={listRef}
+        id={id}
+        role="listbox"
+        aria-label="Models"
+        className={cx(styles.list, empty && styles.listEmpty)}
+      >
+        {rows.map((row) =>
+          row.type === "legacy" ? (
+            <LegacyOption
+              key={row.id}
+              row={row}
+              domId={optionId(row.id)}
+              active={row.id === activeId}
+              onHover={handleHover}
+              onToggle={onToggleLegacy}
+            />
+          ) : (
+            <ModelOption
+              key={row.id}
+              row={row}
+              domId={optionId(row.id)}
+              active={row.id === activeId}
+              selected={row.model.key === value}
+              jumpIndex={jumpKeys.indexOf(row.model.key)}
+              jumpModifierLabel={jumpModifierLabel}
+              favoritesView={favoritesView}
+              onHover={handleHover}
+              onSelect={onSelectModel}
+              onToggleFavorite={onToggleFavorite}
+            />
+          ),
+        )}
       </div>
       {empty && emptyText ? <p className={styles.empty}>{emptyText}</p> : null}
     </>
@@ -110,7 +126,7 @@ function ModelOption({
   jumpIndex,
   jumpModifierLabel,
   favoritesView,
-  onActivate,
+  onHover,
   onSelect,
   onToggleFavorite,
 }: {
@@ -121,7 +137,7 @@ function ModelOption({
   jumpIndex: number;
   jumpModifierLabel?: string;
   favoritesView: boolean;
-  onActivate: (rowId: string) => void;
+  onHover: (event: MouseEvent, rowId: string | null) => void;
   onSelect: (model: ModelPickerModel) => void;
   onToggleFavorite: (key: string, removesRow: boolean) => void;
 }) {
@@ -158,8 +174,8 @@ function ModelOption({
       title={tooltip}
       className={cx(styles.option, active && styles.active, selected && styles.selected, disabled && styles.disabled)}
       onMouseDown={keepFocus}
-      onMouseMove={() => {
-        if (!disabled && !active) onActivate(row.id);
+      onMouseMove={(event) => {
+        onHover(event, disabled ? null : row.id);
       }}
       onClick={() => {
         if (!disabled) onSelect(model);
@@ -219,13 +235,13 @@ function LegacyOption({
   row,
   domId,
   active,
-  onActivate,
+  onHover,
   onToggle,
 }: {
   row: LegacyRow;
   domId: string;
   active: boolean;
-  onActivate: (rowId: string) => void;
+  onHover: (event: MouseEvent, rowId: string | null) => void;
   onToggle: (providerId: string) => void;
 }) {
   const count = `${row.count} ${row.count === 1 ? "model" : "models"}`;
@@ -237,8 +253,8 @@ function LegacyOption({
       aria-label={`Legacy models, ${count}, ${row.expanded ? "expanded" : "collapsed"}`}
       className={cx(styles.option, styles.legacy, active && styles.active)}
       onMouseDown={keepFocus}
-      onMouseMove={() => {
-        if (!active) onActivate(row.id);
+      onMouseMove={(event) => {
+        onHover(event, row.id);
       }}
       onClick={() => onToggle(row.providerId)}
     >
