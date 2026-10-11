@@ -5,7 +5,7 @@ use aidex_events::EventKind;
 use aidex_native_sessions::{Mode, Run, SessionConfig};
 use aidex_providers::{
     CapabilitySource, ChatRequest, ChatResponse, ModelDescriptor, ModelProvider, ModelRef,
-    ProviderError, StreamEvent, ToolCallSupport,
+    ProviderError, RegistryError, StreamEvent, ToolCallSupport,
 };
 use std::{
     sync::Arc,
@@ -17,20 +17,22 @@ impl NativeEngine {
         target: &ModelRef,
         config: &SessionConfig,
     ) -> Result<(Arc<dyn ModelProvider>, ModelDescriptor), ProviderError> {
+        let absent = || ProviderError::unavailable("configured model provider is absent");
         let provider = self
             .registry
             .provider(&target.provider_id)
-            .ok_or_else(|| ProviderError::unavailable("configured model provider is absent"))?;
-        let listing = self.registry.models();
-        let model = listing
-            .models
-            .iter()
-            .find(|m| m.model == *target)
-            .ok_or_else(|| {
-                ProviderError::InvalidRequest(
-                    "configured model is not in the provider catalog".into(),
-                )
-            })?;
+            .ok_or_else(absent)?;
+        // List only the run's own provider; its listing failure is the error.
+        let models =
+            self.registry
+                .models_for(&target.provider_id)
+                .map_err(|error| match error {
+                    RegistryError::Provider { error, .. } => error,
+                    _ => absent(),
+                })?;
+        let model = models.iter().find(|m| m.model == *target).ok_or_else(|| {
+            ProviderError::InvalidRequest("configured model is not in the provider catalog".into())
+        })?;
         if !model.capabilities.chat || !model.capabilities.streaming {
             return Err(ProviderError::InvalidRequest(
                 "configured model does not support streamed chat".into(),
