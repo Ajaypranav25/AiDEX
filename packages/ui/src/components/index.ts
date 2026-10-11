@@ -1,6 +1,6 @@
 export { Brand, type BrandProps } from "./Brand";
 export { Composer, type ComposerProps } from "./Composer";
-export { Dialog } from "./Dialog";
+export { Dialog, type DialogProps } from "./Dialog";
 export { InfoCard, type InfoCardProps } from "./InfoCard";
 export { MediaItem, type MediaItemProps } from "./MediaItem";
 export { Notice, type NoticeProps } from "./Notice";

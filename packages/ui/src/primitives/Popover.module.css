@@ -1,0 +1,53 @@
+/* Above `ToastRegion` (50) so a popover opened next to a toast stays usable. */
+.popover {
+  position: fixed;
+  z-index: 60;
+  min-width: 180px;
+  max-width: calc(100vw - 16px);
+  max-height: var(--aidex-popover-available-height, calc(100dvh - 16px));
+  overflow: auto;
+  border: 1px solid var(--aidex-color-border-strong);
+  border-radius: var(--aidex-radius-lg);
+  background: var(--aidex-color-surface-raised);
+  color: var(--aidex-color-text);
+  box-shadow: 0 16px 48px color-mix(in srgb, var(--aidex-color-bg) 72%, transparent);
+  animation: enter-below var(--aidex-duration-fast) var(--aidex-ease);
+}
+
+/* The surface takes focus only programmatically or from a click on non-interactive content. */
+.popover:focus {
+  outline: none;
+}
+
+.top {
+  animation-name: enter-above;
+}
+
+/* The background token is near-white in the light theme, so derive the shadow from the text color. */
+:global(html[data-theme="light"]) .popover {
+  box-shadow: 0 12px 32px color-mix(in srgb, var(--aidex-color-text) 16%, transparent);
+}
+
+:global(html[data-reduce-motion="true"]) .popover {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .popover {
+    animation: none;
+  }
+}
+
+@keyframes enter-below {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes enter-above {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}

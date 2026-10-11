@@ -1,0 +1,28 @@
+.icon {
+  display: inline-block;
+  flex: none;
+  vertical-align: middle;
+}
+
+/* Inline style sets --aidex-brand-color; the stylesheet applies it so each theme can adjust it. */
+.brand {
+  color: var(--aidex-brand-color);
+}
+
+/* Darken brand colors on light surfaces so pale marks keep their contrast. */
+:global(html[data-theme="light"]) .brand {
+  color: color-mix(in oklab, var(--aidex-brand-color) 78%, black);
+}
+
+.monogramTile {
+  fill: color-mix(in srgb, currentColor 14%, transparent);
+  stroke: color-mix(in srgb, currentColor 32%, transparent);
+  stroke-width: 1;
+}
+
+.monogramText {
+  fill: currentColor;
+  font-family: var(--aidex-font-sans);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
