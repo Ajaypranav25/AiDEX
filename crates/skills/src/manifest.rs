@@ -64,7 +64,9 @@ impl SkillManifest {
         let description = match front_matter.get("description") {
             Some(FrontMatterValue::Text(text)) if !text.trim().is_empty() => text.trim().to_owned(),
             Some(FrontMatterValue::Text(_)) | None => {
-                return Err("`description` is required (add YAML front matter with a description)".into());
+                return Err(
+                    "`description` is required (add YAML front matter with a description)".into(),
+                );
             }
             Some(_) => return Err("`description` must be text".into()),
         };

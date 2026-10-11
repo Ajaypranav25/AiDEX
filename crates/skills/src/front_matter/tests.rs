@@ -178,9 +178,10 @@ fn malformed_front_matter_reports_lines_without_values() {
 
 #[test]
 fn documents_split_with_crlf_bom_and_missing_front_matter() {
-    let document =
-        SkillDocument::parse("\u{feff}---\r\nname: crlf\r\ndescription: \"x\"\r\n---\r\n\r\n# Body\r\nline\r\n\r\n")
-            .unwrap();
+    let document = SkillDocument::parse(
+        "\u{feff}---\r\nname: crlf\r\ndescription: \"x\"\r\n---\r\n\r\n# Body\r\nline\r\n\r\n",
+    )
+    .unwrap();
     let front = document.front_matter.unwrap();
     assert_eq!(front.get("name"), Some(&text("crlf")));
     assert_eq!(front.get("description"), Some(&text("x")));
@@ -200,7 +201,11 @@ fn documents_split_with_crlf_bom_and_missing_front_matter() {
     assert!(unclosed.message.contains("not closed"), "{unclosed}");
     assert_eq!(unclosed.line, Some(1));
     let lines = SkillDocument::parse("---\nname: a\nname: b\n---\n").unwrap_err();
-    assert_eq!(lines.line, Some(3), "line numbers count from the file start");
+    assert_eq!(
+        lines.line,
+        Some(3),
+        "line numbers count from the file start"
+    );
 }
 
 #[test]

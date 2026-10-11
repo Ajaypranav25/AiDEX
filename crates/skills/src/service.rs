@@ -105,7 +105,9 @@ impl SkillService {
             EventKind::ExtensionDisabled { extension_id, kind }
         };
         let scope = match workspace_id {
-            Some(workspace) if id.scope().is_workspace() => EventScope::workspace(workspace.clone()),
+            Some(workspace) if id.scope().is_workspace() => {
+                EventScope::workspace(workspace.clone())
+            }
             _ => EventScope::global(),
         };
         self.events
@@ -158,7 +160,8 @@ impl SkillService {
         if dir.parent() != Some(root.as_path()) {
             return Err(SkillError::UnsafePath(dir));
         }
-        fsio::write_atomic(&file, text.as_bytes()).map_err(|error| SkillError::io(&file, &error))?;
+        fsio::write_atomic(&file, text.as_bytes())
+            .map_err(|error| SkillError::io(&file, &error))?;
         self.catalog(None, &[])?.summary(&id)
     }
 

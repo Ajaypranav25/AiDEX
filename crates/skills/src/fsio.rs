@@ -137,7 +137,10 @@ pub(crate) fn read_text(path: &Path, max: u64) -> Result<String, ReadFailure> {
 /// Write `bytes` to `destination` atomically: an exclusive temporary sibling,
 /// fsync, then rename over the destination (which must not be a link).
 pub(crate) fn write_atomic(destination: &Path, bytes: &[u8]) -> io::Result<()> {
-    if matches!(inspect(destination)?, Entry::Link | Entry::Dir | Entry::Other) {
+    if matches!(
+        inspect(destination)?,
+        Entry::Link | Entry::Dir | Entry::Other
+    ) {
         return Err(io::Error::new(
             ErrorKind::InvalidInput,
             "the destination is a link or not a regular file",

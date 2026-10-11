@@ -112,7 +112,9 @@ pub(crate) fn discover(
         let owner = extra.owner.trim();
         if owner.is_empty()
             || owner.len() > 128
-            || owner.chars().any(|ch| ch.is_control() || ch == '/' || ch == '\\')
+            || owner
+                .chars()
+                .any(|ch| ch.is_control() || ch == '/' || ch == '\\')
         {
             return Err(SkillError::Invalid(
                 "extra skill roots need a plugin name".into(),

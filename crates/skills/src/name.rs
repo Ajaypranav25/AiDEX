@@ -120,7 +120,9 @@ impl SkillId {
     /// Parse `<scope>:<name>`.
     pub fn parse(text: &str) -> Result<Self, SkillError> {
         let (scope, name) = text.trim().split_once(':').ok_or_else(|| {
-            SkillError::InvalidId("skill ids look like `<scope>:<name>`, e.g. `drive:review`".into())
+            SkillError::InvalidId(
+                "skill ids look like `<scope>:<name>`, e.g. `drive:review`".into(),
+            )
         })?;
         Self::new(scope.parse()?, name)
     }

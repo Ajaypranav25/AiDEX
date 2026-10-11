@@ -131,7 +131,9 @@ fn split(text: &str) -> Result<Option<(&str, &str)>, FrontMatterError> {
     }
     let start = offset;
     while offset < text.len() {
-        let end = text[offset..].find('\n').map_or(text.len(), |at| offset + at);
+        let end = text[offset..]
+            .find('\n')
+            .map_or(text.len(), |at| offset + at);
         let line = text[offset..end].trim_end();
         if line == "---" || line == "..." {
             let body = text.get(end + 1..).unwrap_or("");
@@ -147,9 +149,7 @@ fn split(text: &str) -> Result<Option<(&str, &str)>, FrontMatterError> {
 
 fn normalize_body(body: &str) -> String {
     let body = body.replace("\r\n", "\n");
-    body.trim_start_matches(['\n', '\r'])
-        .trim_end()
-        .to_owned()
+    body.trim_start_matches(['\n', '\r']).trim_end().to_owned()
 }
 
 impl FrontMatter {
@@ -232,7 +232,10 @@ fn split_key<'a>(line: &Line<'a>) -> Result<(&'a str, &'a str), FrontMatterError
         .iter()
         .enumerate()
         .position(|(at, byte)| {
-            *byte == b':' && bytes.get(at + 1).is_none_or(|next| *next == b' ' || *next == b'\t')
+            *byte == b':'
+                && bytes
+                    .get(at + 1)
+                    .is_none_or(|next| *next == b' ' || *next == b'\t')
         })
         .ok_or_else(|| FrontMatterError::at(line.number, "expected `key: value`"))?;
     let key = content[..colon].trim_end();

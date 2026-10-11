@@ -28,7 +28,11 @@ fn roots_apply_in_precedence_order_with_scope_defaults() {
     let (ws_dir, ws) = workspace("wsp_one");
     let root = ws_dir.path();
     skill(&root.join(".aidex/skills"), "review", "Project review");
-    skill(&root.join(".claude/skills"), "review", "Shadowed by project");
+    skill(
+        &root.join(".claude/skills"),
+        "review",
+        "Shadowed by project",
+    );
     skill(&root.join(".agents/skills"), "lint", "Agents lint");
     write(
         &root.join(".codex/skills"),
@@ -67,7 +71,10 @@ fn roots_apply_in_precedence_order_with_scope_defaults() {
     assert!(!review.enabled, "project skills start disabled");
 
     let lint = by_name(&skills, "lint");
-    assert_eq!((lint.scope, lint.description.as_str()), (SkillScope::Repo, "Agents lint"));
+    assert_eq!(
+        (lint.scope, lint.description.as_str()),
+        (SkillScope::Repo, "Agents lint")
+    );
     assert_eq!(lint.location, ".agents/skills/lint/SKILL.md");
     assert!(!lint.enabled, "repo skills start disabled");
     let fmt = by_name(&skills, "fmt");
@@ -81,7 +88,10 @@ fn roots_apply_in_precedence_order_with_scope_defaults() {
     assert!(notes.plugin.is_none());
 
     let deploy = by_name(&skills, "deploy");
-    assert_eq!((deploy.id.as_str(), deploy.enabled), ("plugin:deploy", true));
+    assert_eq!(
+        (deploy.id.as_str(), deploy.enabled),
+        ("plugin:deploy", true)
+    );
     assert_eq!(deploy.plugin.as_deref(), Some("acme"));
     assert_eq!(deploy.location, "plugins/acme/skills/deploy/SKILL.md");
     assert!(deploy.size_bytes > 0);
@@ -129,22 +139,65 @@ fn front_matter_problems_are_listed_with_errors() {
         "SKILL.md",
         "---\ndescription: 'Named by its directory'\nuser-invocable: false\ndisable-model-invocation: true\nallowed-tools: [Read, Grep]\nversion: 2.0.1\n---\nBody\n",
     );
-    write(&root, "plain", "SKILL.md", "# No front matter\n\nJust text.\n");
-    write(&root, "nodesc", "SKILL.md", "---\nname: nodesc\n---\nBody\n");
-    write(&root, "badbool", "SKILL.md", "---\nname: badbool\ndescription: d\nuser-invocable: maybe\n---\n");
-    write(&root, "Bad_Dir", "SKILL.md", "---\nname: Not A Slug\ndescription: d\n---\n");
-    write(&root, "unclosed", "SKILL.md", "---\nname: unclosed\ndescription: d\n");
+    write(
+        &root,
+        "plain",
+        "SKILL.md",
+        "# No front matter\n\nJust text.\n",
+    );
+    write(
+        &root,
+        "nodesc",
+        "SKILL.md",
+        "---\nname: nodesc\n---\nBody\n",
+    );
+    write(
+        &root,
+        "badbool",
+        "SKILL.md",
+        "---\nname: badbool\ndescription: d\nuser-invocable: maybe\n---\n",
+    );
+    write(
+        &root,
+        "Bad_Dir",
+        "SKILL.md",
+        "---\nname: Not A Slug\ndescription: d\n---\n",
+    );
+    write(
+        &root,
+        "unclosed",
+        "SKILL.md",
+        "---\nname: unclosed\ndescription: d\n",
+    );
     fs::create_dir_all(root.join("empty-dir")).unwrap();
     skill(&root.join(".hidden"), "secret", "Hidden roots are skipped");
-    write(&root, "dup-a", "SKILL.md", &skill_text("same", "First", "a"));
-    write(&root, "dup-b", "SKILL.md", &skill_text("same", "Second", "b"));
+    write(
+        &root,
+        "dup-a",
+        "SKILL.md",
+        &skill_text("same", "First", "a"),
+    );
+    write(
+        &root,
+        "dup-b",
+        "SKILL.md",
+        &skill_text("same", "Second", "b"),
+    );
 
     let catalog = SkillCatalog::discover(&drive.paths, None, &[]).unwrap();
     let skills = catalog.summaries();
     let names: Vec<&str> = skills.iter().map(|skill| skill.name.as_str()).collect();
     assert_eq!(
         names,
-        ["bad-dir", "badbool", "dir-named", "nodesc", "plain", "same", "unclosed"]
+        [
+            "bad-dir",
+            "badbool",
+            "dir-named",
+            "nodesc",
+            "plain",
+            "same",
+            "unclosed"
+        ]
     );
 
     let named = by_name(&skills, "dir-named");
@@ -161,7 +214,10 @@ fn front_matter_problems_are_listed_with_errors() {
         ("unclosed", "not closed"),
     ] {
         let summary = by_name(&skills, name);
-        let error = summary.error.as_deref().unwrap_or_else(|| panic!("{summary:?}"));
+        let error = summary
+            .error
+            .as_deref()
+            .unwrap_or_else(|| panic!("{summary:?}"));
         assert!(error.contains(fragment), "{name}: {error}");
         assert!(summary.description.is_empty());
         assert!(!summary.user_invocable && !summary.model_invocable);
@@ -186,7 +242,12 @@ fn oversized_and_binary_skill_files_are_refused() {
     let huge = "x".repeat(usize::try_from(MAX_SKILL_FILE_BYTES).unwrap() + 1);
     write(&root, "huge", "SKILL.md", &skill_text("huge", "d", &huge));
     let long_body = "y".repeat(MAX_BODY_BYTES + 1);
-    write(&root, "long", "SKILL.md", &skill_text("long", "d", &long_body));
+    write(
+        &root,
+        "long",
+        "SKILL.md",
+        &skill_text("long", "d", &long_body),
+    );
     let fits = "z".repeat(MAX_BODY_BYTES);
     write(&root, "fits", "SKILL.md", &skill_text("fits", "d", &fits));
     let dir = root.join("binary");
@@ -196,14 +257,26 @@ fn oversized_and_binary_skill_files_are_refused() {
     let catalog = SkillCatalog::discover(&drive.paths, None, &[]).unwrap();
     let skills = catalog.summaries();
     let huge = by_name(&skills, "huge");
-    assert!(huge.error.as_deref().unwrap().contains("larger than"), "{huge:?}");
+    assert!(
+        huge.error.as_deref().unwrap().contains("larger than"),
+        "{huge:?}"
+    );
     assert!(huge.size_bytes > MAX_SKILL_FILE_BYTES);
     let long = by_name(&skills, "long");
     assert!(
-        long.error.as_deref().unwrap().contains("instructions are larger"),
+        long.error
+            .as_deref()
+            .unwrap()
+            .contains("instructions are larger"),
         "{long:?}"
     );
-    assert!(by_name(&skills, "binary").error.as_deref().unwrap().contains("UTF-8"));
+    assert!(
+        by_name(&skills, "binary")
+            .error
+            .as_deref()
+            .unwrap()
+            .contains("UTF-8")
+    );
     let fits = catalog.load_body(&id("drive:fits")).unwrap();
     assert_eq!(fits.body.len(), MAX_BODY_BYTES);
 }
@@ -222,7 +295,10 @@ fn links_are_never_followed() {
         let catalog = SkillCatalog::discover(&drive.paths, None, &[]).unwrap();
         let skills = catalog.summaries();
         let linked = by_name(&skills, "linked");
-        assert!(linked.error.as_deref().unwrap().contains("links"), "{linked:?}");
+        assert!(
+            linked.error.as_deref().unwrap().contains("links"),
+            "{linked:?}"
+        );
         assert!(linked.description.is_empty());
         assert_eq!(
             catalog.load_body(&id("drive:linked")).unwrap_err().reason(),
@@ -239,7 +315,10 @@ fn links_are_never_followed() {
         let catalog = SkillCatalog::discover(&drive.paths, None, &[]).unwrap();
         let skills = catalog.summaries();
         let linked = by_name(&skills, "file-link");
-        assert!(linked.error.as_deref().unwrap().contains("link"), "{linked:?}");
+        assert!(
+            linked.error.as_deref().unwrap().contains("link"),
+            "{linked:?}"
+        );
     }
 
     // A linked workspace root is reported as an issue and skipped.
@@ -247,7 +326,12 @@ fn links_are_never_followed() {
     fs::create_dir_all(ws_dir.path().join(".aidex")).unwrap();
     if dir_link(outside.path(), &ws_dir.path().join(".aidex").join("skills")) {
         let catalog = SkillCatalog::discover(&drive.paths, Some(&ws), &[]).unwrap();
-        assert!(catalog.summaries().iter().all(|skill| skill.name != "elsewhere"));
+        assert!(
+            catalog
+                .summaries()
+                .iter()
+                .all(|skill| skill.name != "elsewhere")
+        );
         let issue = &catalog.issues()[0];
         assert_eq!(issue.scope, SkillScope::Project);
         assert_eq!(issue.location, ".aidex/skills");
@@ -290,11 +374,21 @@ fn bodies_and_details_are_redacted() {
 
     let detail = catalog.inspect(&id("drive:deploy")).unwrap();
     assert!(!detail.body.as_deref().unwrap().contains(&token));
-    let keys: Vec<&str> = detail.front_matter.iter().map(|entry| entry.key.as_str()).collect();
-    assert_eq!(keys, ["name", "description", "allowed-tools", "user_invocable"]);
+    let keys: Vec<&str> = detail
+        .front_matter
+        .iter()
+        .map(|entry| entry.key.as_str())
+        .collect();
+    assert_eq!(
+        keys,
+        ["name", "description", "allowed-tools", "user_invocable"]
+    );
     let json = serde_json::to_value(&detail).unwrap();
     assert_eq!(json["id"], "drive:deploy");
-    assert_eq!(json["front_matter"][2]["value"], serde_json::json!(["Bash", "Read"]));
+    assert_eq!(
+        json["front_matter"][2]["value"],
+        serde_json::json!(["Bash", "Read"])
+    );
     assert_eq!(json["front_matter"][3]["value"], true);
     assert!(!json.to_string().contains(&token));
 
@@ -309,7 +403,14 @@ fn bodies_and_details_are_redacted() {
         catalog.load_body(&id("drive:deploy")).unwrap_err().reason(),
         "skill_unavailable"
     );
-    assert!(catalog.inspect(&id("drive:deploy")).unwrap().summary.error.is_some());
+    assert!(
+        catalog
+            .inspect(&id("drive:deploy"))
+            .unwrap()
+            .summary
+            .error
+            .is_some()
+    );
 }
 
 #[test]

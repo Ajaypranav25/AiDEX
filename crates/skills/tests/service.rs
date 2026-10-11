@@ -32,7 +32,11 @@ fn emitted(events: &MemoryEventSink) -> Vec<(&'static str, String, Option<String
         .take()
         .into_iter()
         .map(|envelope| {
-            let workspace = envelope.scope.workspace_id.as_ref().map(ToString::to_string);
+            let workspace = envelope
+                .scope
+                .workspace_id
+                .as_ref()
+                .map(ToString::to_string);
             let name = envelope.name();
             match envelope.event {
                 EventKind::ExtensionEnabled { extension_id, kind }
@@ -51,7 +55,12 @@ fn enablement_is_persisted_per_workspace_and_emits_events() {
     let drive = drive();
     let (service, events) = service(&drive.paths);
     skill(&drive.paths.skills(), "notes", "Drive notes");
-    write(&drive.paths.skills(), "broken", "SKILL.md", "---\nname: broken\n---\n");
+    write(
+        &drive.paths.skills(),
+        "broken",
+        "SKILL.md",
+        "---\nname: broken\n---\n",
+    );
     let (one_dir, one) = workspace("wsp_one");
     let (two_dir, two) = workspace("wsp_two");
     for root in [one_dir.path(), two_dir.path()] {
@@ -59,11 +68,18 @@ fn enablement_is_persisted_per_workspace_and_emits_events() {
     }
 
     // Drive skills start enabled; disabling records the decision and an event.
-    let summary = service.set_enabled(None, &[], &id("drive:notes"), false).unwrap();
+    let summary = service
+        .set_enabled(None, &[], &id("drive:notes"), false)
+        .unwrap();
     assert!(!summary.enabled);
-    assert_eq!(emitted(&events), [("extension.disabled", "drive:notes".into(), None)]);
+    assert_eq!(
+        emitted(&events),
+        [("extension.disabled", "drive:notes".into(), None)]
+    );
     // Repeating the same decision is not a change: no event.
-    service.set_enabled(None, &[], &id("drive:notes"), false).unwrap();
+    service
+        .set_enabled(None, &[], &id("drive:notes"), false)
+        .unwrap();
     assert!(events.is_empty());
     let catalog = service.catalog(None, &[]).unwrap();
     assert!(!catalog.summary(&id("drive:notes")).unwrap().enabled);
@@ -94,7 +110,11 @@ fn enablement_is_persisted_per_workspace_and_emits_events() {
     assert!(summary.enabled);
     assert_eq!(
         emitted(&events),
-        [("extension.enabled", "repo:deploy".into(), Some("wsp_one".into()))]
+        [(
+            "extension.enabled",
+            "repo:deploy".into(),
+            Some("wsp_one".into())
+        )]
     );
     let body = service
         .catalog(Some(&one), &[])
@@ -117,7 +137,9 @@ fn enablement_is_persisted_per_workspace_and_emits_events() {
         .set_enabled(None, &[], &id("drive:broken"), true)
         .unwrap_err();
     assert_eq!(error.reason(), "invalid_skill");
-    service.set_enabled(None, &[], &id("drive:broken"), false).unwrap();
+    service
+        .set_enabled(None, &[], &id("drive:broken"), false)
+        .unwrap();
     assert_eq!(emitted(&events).len(), 1);
     assert!(matches!(
         service.set_enabled(None, &[], &id("drive:missing"), true),
@@ -157,7 +179,11 @@ fn drive_skills_are_saved_replaced_and_deleted() {
     let saved = service
         .save_drive_skill(&SkillDraft {
             version: Some("1.0.0".into()),
-            ..draft("release-notes", "Write release notes", "# Steps\n\n1. Read the log")
+            ..draft(
+                "release-notes",
+                "Write release notes",
+                "# Steps\n\n1. Read the log",
+            )
         })
         .unwrap();
     assert_eq!(saved.id, "drive:release-notes");
@@ -171,7 +197,10 @@ fn drive_skills_are_saved_replaced_and_deleted() {
     let replaced = service
         .save_drive_skill(&draft("release-notes", "Updated", "New body"))
         .unwrap();
-    assert_eq!((replaced.description.as_str(), replaced.version), ("Updated", None));
+    assert_eq!(
+        (replaced.description.as_str(), replaced.version),
+        ("Updated", None)
+    );
     let body = service
         .catalog(None, &[])
         .unwrap()
@@ -186,12 +215,19 @@ fn drive_skills_are_saved_replaced_and_deleted() {
         "skill.md",
         &skill_text("odd", "Old", "old"),
     );
-    let odd = service.save_drive_skill(&draft("odd", "New", "new")).unwrap();
+    let odd = service
+        .save_drive_skill(&draft("odd", "New", "new"))
+        .unwrap();
     assert_eq!(odd.location, "skills/Odd Dir/skill.md");
     assert!(!drive.paths.skills().join("odd").exists());
 
     // A directory holding another skill is not overwritten.
-    write(&drive.paths.skills(), "taken", "SKILL.md", &skill_text("other", "d", "b"));
+    write(
+        &drive.paths.skills(),
+        "taken",
+        "SKILL.md",
+        &skill_text("other", "d", "b"),
+    );
     let error = service
         .save_drive_skill(&draft("taken", "d", "b"))
         .unwrap_err();
@@ -245,7 +281,6 @@ fn saving_refuses_a_linked_skill_directory() {
     assert_eq!(error.reason(), "unsafe_path", "{error}");
     let error = service.delete_drive_skill("linked").unwrap_err();
     assert_eq!(error.reason(), "unsafe_path", "{error}");
-    let outside_text =
-        fs::read_to_string(outside.path().join("linked").join("SKILL.md")).unwrap();
+    let outside_text = fs::read_to_string(outside.path().join("linked").join("SKILL.md")).unwrap();
     assert!(outside_text.contains("Outside"));
 }

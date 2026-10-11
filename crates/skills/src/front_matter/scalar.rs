@@ -217,7 +217,10 @@ pub(super) fn parse_block_scalar(
     let trailing = indicators.collect::<String>();
     let trailing = trailing.trim();
     if !trailing.is_empty() && !trailing.starts_with('#') {
-        return Err(FrontMatterError::at(key_line, "invalid block scalar header"));
+        return Err(FrontMatterError::at(
+            key_line,
+            "invalid block scalar header",
+        ));
     }
     let mut index = start;
     while index < lines.len() && (lines[index].content.is_empty() || lines[index].indent > 0) {
@@ -245,13 +248,13 @@ pub(super) fn parse_block_scalar(
             }
         }
     }
-    let trailing_blank = texts.iter().rev().take_while(|line| line.is_empty()).count();
+    let trailing_blank = texts
+        .iter()
+        .rev()
+        .take_while(|line| line.is_empty())
+        .count();
     let body = &texts[..texts.len() - trailing_blank];
-    let text = if folded {
-        fold(body)
-    } else {
-        body.join("\n")
-    };
+    let text = if folded { fold(body) } else { body.join("\n") };
     let value = match chomp {
         Chomp::Strip => text,
         Chomp::Clip if text.is_empty() => text,
@@ -343,8 +346,7 @@ pub(super) fn parse_flow_list(rest: &str) -> Result<Option<Vec<String>>, &'stati
             }
             b'[' | b'{' => return Ok(None),
             b'"' | b'\'' => {
-                let (value, len) =
-                    scan_quoted(&inner[at..])?.ok_or("unterminated quoted value")?;
+                let (value, len) = scan_quoted(&inner[at..])?.ok_or("unterminated quoted value")?;
                 items.push(value);
                 at += len;
             }

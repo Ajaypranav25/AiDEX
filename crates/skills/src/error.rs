@@ -19,18 +19,30 @@ pub enum SkillError {
     /// plain text on the drive, so it is refused rather than redacted.
     CredentialDetected,
     /// The skill cannot be used for invocation: unknown, disabled, or invalid.
-    Unavailable { id: String, reason: String },
+    Unavailable {
+        id: String,
+        reason: String,
+    },
     /// A project or repo skill was named without a workspace.
     WorkspaceRequired,
     /// The change conflicts with what is on disk.
     Conflict(String),
     /// `private_config/skills.toml` does not match its closed schema.
-    State { path: PathBuf, message: String },
+    State {
+        path: PathBuf,
+        message: String,
+    },
     /// `private_config/skills.toml` was written by a different schema version.
-    StateVersion { path: PathBuf, found: u32 },
+    StateVersion {
+        path: PathBuf,
+        found: u32,
+    },
     /// A managed path is a symbolic link, junction, or not the expected kind.
     UnsafePath(PathBuf),
-    Io { path: PathBuf, message: String },
+    Io {
+        path: PathBuf,
+        message: String,
+    },
     /// The change committed but its event could not be recorded.
     EventNotRecorded(String),
 }

@@ -1,6 +1,6 @@
 //! Drafting drive skills: validation and `SKILL.md` rendering.
 
-use std::borrow::Cow;
+use std::{borrow::Cow, fmt};
 
 use aidex_events::redact_text;
 use serde::{Deserialize, Serialize};
@@ -12,7 +12,7 @@ use crate::{
 };
 
 /// A drive skill as `skill.save` takes it.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SkillDraft {
     pub name: String,
@@ -21,6 +21,19 @@ pub struct SkillDraft {
     pub body: String,
     #[serde(default)]
     pub version: Option<String>,
+}
+
+/// User-typed text may hold a pasted credential: Debug output is redacted and
+/// shows only the size of the body.
+impl fmt::Debug for SkillDraft {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SkillDraft")
+            .field("name", &redact_text(&self.name))
+            .field("description", &redact_text(&self.description))
+            .field("body_bytes", &self.body.len())
+            .field("version", &self.version.as_deref().map(redact_text))
+            .finish()
+    }
 }
 
 /// A YAML double-quoted scalar (the text has no control characters).
@@ -172,6 +185,7 @@ mod tests {
             let error = render_skill_file(&bad).unwrap_err();
             assert_eq!(error.reason(), reason, "{bad:?}");
             assert!(!error.to_string().contains(&token));
+            assert!(!format!("{bad:?}").contains(&token), "Debug is redacted");
         }
     }
 }

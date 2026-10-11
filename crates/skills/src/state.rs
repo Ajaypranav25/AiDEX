@@ -171,9 +171,8 @@ impl SkillState {
             path: path.clone(),
             message: format!("cannot encode skills.toml: {error}"),
         })?;
-        let text = format!(
-            "# AiDEX skill enablement. Change with `aidex skills enable|disable`.\n{text}"
-        );
+        let text =
+            format!("# AiDEX skill enablement. Change with `aidex skills enable|disable`.\n{text}");
         fsio::write_atomic(&path, text.as_bytes()).map_err(|error| SkillError::io(&path, &error))
     }
 }

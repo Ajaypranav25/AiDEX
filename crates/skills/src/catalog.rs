@@ -174,7 +174,10 @@ impl SkillCatalog {
 
     /// Every visible skill, sorted by name.
     pub fn summaries(&self) -> Vec<SkillSummary> {
-        self.skills.iter().map(|skill| skill.summary.clone()).collect()
+        self.skills
+            .iter()
+            .map(|skill| skill.summary.clone())
+            .collect()
     }
 
     /// Enabled, valid skills (candidates for invocation), sorted by name.
