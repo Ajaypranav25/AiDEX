@@ -481,6 +481,7 @@ dependencies = [
  "aidex-updater",
  "aidex-vault",
  "aidex-workspace",
+ "base64 0.22.1",
  "getrandom 0.3.4",
  "rusqlite",
  "serde",
