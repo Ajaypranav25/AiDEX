@@ -30,9 +30,17 @@ export type PopoverProps = {
   /** Accessible name; use `labelledBy` instead when a visible heading names the popover. */
   label?: string;
   labelledBy?: string;
-  role?: "dialog" | "menu" | "listbox";
+  /** `group` suits a surface that only wraps another widget, e.g. a listbox driven from a text field. */
+  role?: "dialog" | "menu" | "listbox" | "group";
   /** Element focused on open; defaults to the first focusable element inside the popover. */
   initialFocusRef?: RefObject<HTMLElement | null>;
+  /**
+   * When false, focus stays where it is on open and is not moved back on close: for a popup driven
+   * from a text field that keeps focus (combobox pattern with `aria-activedescendant`). Default true.
+   */
+  autoFocus?: boolean;
+  /** Sizes the popover to the anchor's width, e.g. a suggestion list under a composer. */
+  matchAnchorWidth?: boolean;
   /**
    * Portal target (default `document.body`). Pass the open `<dialog>` element when the popover is
    * opened from inside a native modal, so it renders in the same top layer.
@@ -49,7 +57,7 @@ const FOCUSABLE =
   'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 type Side = "top" | "bottom";
-type Position = { top: number; left: number; side: Side; availableHeight: number };
+type Position = { top: number; left: number; side: Side; availableHeight: number; width?: number };
 
 function computePosition(
   anchor: DOMRect,
@@ -76,7 +84,12 @@ function computePosition(
 
 function samePosition(a: Position | null, b: Position): boolean {
   return (
-    a !== null && a.top === b.top && a.left === b.left && a.side === b.side && a.availableHeight === b.availableHeight
+    a !== null &&
+    a.top === b.top &&
+    a.left === b.left &&
+    a.side === b.side &&
+    a.availableHeight === b.availableHeight &&
+    a.width === b.width
   );
 }
 
@@ -102,6 +115,8 @@ function PopoverSurface({
   labelledBy,
   role = "dialog",
   initialFocusRef,
+  autoFocus = true,
+  matchAnchorWidth = false,
   id,
   className,
   children,
@@ -123,15 +138,17 @@ function PopoverSurface({
     const surface = surfaceRef.current;
     const anchor = anchorRef.current;
     if (!surface || !anchor) return;
-    const next = computePosition(
-      anchor.getBoundingClientRect(),
-      surface.offsetWidth,
-      surface.offsetHeight,
-      placement,
-      offset,
-    );
+    const anchorRect = anchor.getBoundingClientRect();
+    let width = surface.offsetWidth;
+    if (matchAnchorWidth) {
+      // Apply the width before measuring so the height reflects the final line wrapping.
+      width = Math.round(anchorRect.width);
+      surface.style.width = `${width}px`;
+    }
+    const next: Position = computePosition(anchorRect, width, surface.offsetHeight, placement, offset);
+    if (matchAnchorWidth) next.width = width;
     setPosition((previous) => (samePosition(previous, next) ? previous : next));
-  }, [anchorRef, placement, offset]);
+  }, [anchorRef, placement, offset, matchAnchorWidth]);
 
   // Position before the first paint, then follow layout changes.
   useLayoutEffect(updatePosition, [updatePosition]);
@@ -160,7 +177,7 @@ function PopoverSurface({
   // Move focus in on open; on close, return it to the anchor unless the user moved it elsewhere.
   useLayoutEffect(() => {
     const surface = surfaceRef.current;
-    if (!surface) return;
+    if (!surface || !autoFocus) return;
     const anchor = anchorRef.current;
     const focusInitial = () => {
       const target = initialFocusRef?.current ?? surface.querySelector<HTMLElement>(FOCUSABLE) ?? surface;
@@ -212,6 +229,7 @@ function PopoverSurface({
   const style = {
     top: position?.top ?? 0,
     left: position?.left ?? 0,
+    width: position?.width,
     "--aidex-popover-available-height": position ? `${position.availableHeight}px` : undefined,
   } as CSSProperties;
 

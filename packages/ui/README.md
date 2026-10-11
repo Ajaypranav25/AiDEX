@@ -41,7 +41,7 @@ Every component accepts its root element's props (including `ref` and `className
 | `Badge` | `tone` accent · success · warning · danger · neutral, `size` sm · md, `icon` |
 | `StatusIndicator` | `label`, `tone` success · warning · danger · neutral (dot plus text) |
 | `StatusDot` | `tone` success · warning · danger · neutral · accent, `size` sm (6px) · md (9px), `label` (announced as an image; without it the dot is decorative and nearby text must name the status) |
-| `Popover` | `open`, `onOpenChange`, `anchorRef`, `placement` bottom-start · bottom-end · top-start · top-end (flips to stay on screen), `offset` (6), `label` or `labelledBy`, `role` dialog · menu · listbox, `initialFocusRef`, `container` (portal target; pass the open `<dialog>` inside a modal), `id`. Non-modal: focus moves in on open; Escape closes and returns focus to the anchor; a press outside or focus leaving closes it. Not a root-element passthrough |
+| `Popover` | `open`, `onOpenChange`, `anchorRef`, `placement` bottom-start · bottom-end · top-start · top-end (flips to stay on screen), `offset` (6), `label` or `labelledBy`, `role` dialog · menu · listbox · group, `initialFocusRef`, `autoFocus` (default true; false keeps focus in a text field that drives the popup), `matchAnchorWidth`, `container` (portal target; pass the open `<dialog>` inside a modal), `id`. Non-modal: focus moves in on open; Escape closes and returns focus to the anchor; a press outside or focus leaving closes it. Not a root-element passthrough |
 | `IconBadge` | `icon`, `tone` neutral · accent, `size` md · lg |
 | `ProgressBar` | `label`, `value`, `max`, `showCount` |
 | `Divider` | optional `label` (e.g. "or") |
@@ -60,7 +60,8 @@ Every component accepts its root element's props (including `ref` and `className
 | `PageHeader` | `title`, `description`, `eyebrow`, `actions`, `meta` (status line), `back: { label, onClick }`, `titleRef` |
 | `SectionHeader` | `title`, `level` 2 · 3, `meta`, `actions` |
 | `Brand` | `name`, `size` md · lg · xl, `layout` inline · stacked |
-| `Composer` | `value`, `onValueChange`, `onSubmit`, `onAttach`, `label`, `placeholder`, `attachments`, `toolbarStart`, `toolbarEnd`, `size` default · compact |
+| `Composer` | `value`, `onValueChange`, `onSubmit`, `onAttach`, `label`, `placeholder`, `attachments`, `toolbarStart`, `toolbarEnd`, `size` default · compact, `textareaRef`, `ref` (the form; a `CommandMenu` anchor), `onKeyDown` (runs first; `preventDefault()` stops Enter from sending), `onSelectionChange(caret)`, `suggestions: { listId, open, activeId }` (field ARIA for a `CommandMenu`), `menu` (slot for the popup). See [Command menu](#command-menu) |
+| `CommandMenu` | `open`, `anchorRef`, `inputRef`, `query`, `sections: { id, label?, items }[]`, `activeId`, `onActiveChange`, `onSelect`, `onClose`, `id`, `label`, `loading`, `loadingText`, `emptyText`, `footer`, `placement` (top-start), `matchAnchorWidth` (true), `container`. Items: `{ id, title, prefix?, description?, icon?, badge?: string · { label, tone?, icon? }, disabled?, tooltip? }`. See [Command menu](#command-menu) |
 | `Dialog` | `open`, `title`, `onClose`, `description` (linked as the accessible description), `size` md · lg · xl (480 / 720 / 960px, clamped to the window); native modal `<dialog>` |
 | `ModelPicker` | `providers`, `models`, `value` (model key), `onValueChange`, `favorites: ReadonlySet<string>`, `onToggleFavorite`, `open`, `onOpenChange`, `anchorRef`, `label`, `onOpenProviderSetup`, `onManageProviders`, `emptyText`, `loading`, `jumpModifierLabel` ("⌘" or "Ctrl"), `placement`, `container`, `id`. See [Model picker](#model-picker) |
 | `ModelPickerTrigger` | `provider`, `model`, `placeholder`, `open`, `onToggle`, `size` sm · md, `shortcutLabel` (appended to the tooltip), `disabled`, `ref` (pass it as the picker's `anchorRef`) |
@@ -81,11 +82,18 @@ Every component accepts its root element's props (including `ref` and `className
 | `BarChart` | `caption`, `hideCaption`, `data: { label, value, highlight? }[]`, `unit`, `max` |
 | `DataTable` | `columns: { key, header, align?, width?, rowHeader?, render? }[]`, `rows`, `rowKey`, `caption`, `hideCaption`, `emptyText` |
 | `EntityCard` | `media`, `title`, `subtitle`, `badges`, `description`, `footer`, `selected`, `onSelect` |
+| `ArtifactCard` | `name`, `kind` document · code · data · diagram · plan · web_page · other (picks the icon and badge; unknown kinds read as "File"), `kindLabel`, `icon`, `size` (bytes) or `sizeLabel`, `createdAt` or `createdLabel`, `detail` (e.g. language or MIME type), `onOpen` (the name becomes a button), `actions`, `titleLevel` |
+| `PlanCard` | `markdown`, `title` (default: the plan's first heading, else "Proposed plan"), `status` active · superseded · completed, `actions` (footer, e.g. Implement), `headerActions`, `onOpenLink`, `codeBlockActions`, `collapseAfterLines` (20), `previewLines` (10), `expanded` / `defaultExpanded` / `onExpandedChange`, `titleLevel`. See [Plans and artifacts](#plans-and-artifacts) |
 | `StepList` | `steps: { title, description?, status: done · active · pending · failed }[]` |
 | `ActivityLog` | `entries: { time, text, tone? }[]`, `live` |
 | `TaskGraph` | `root`, `nodes: { id, label, icon?, status?, detail? }[]` |
 | `CodeDiff` | `fileName`, `language?`, either `oldCode` + `newCode` or a unified `patch`, `layout` unified · split (or `defaultLayout` + `onLayoutChange`), `showLayoutToggle`, `actions`. See [Code diffs](#code-diffs). `getDiffStats(fileName, source)` returns the same `{ additions, deletions }` the header shows |
 | `CodeBlock`, `Terminal`, `InlineCode` | `CodeBlock`: `code`, `title`, `language`, `actions`. `Terminal`: `lines: { kind: command · output · error, text }[]`, `title` |
+| `Markdown` | `source`, `onOpenLink(url)`, `headingLevelOffset`, `breaks`, `codeBlockActions(block)`, `renderText(text)`. Safe subset, no raw HTML; see [Markdown](#markdown) |
+| `InlineChip` | `label`, `icon`, `tooltip`, `kindLabel` (spoken prefix, e.g. "Skill"), `tone` accent · neutral, `unresolved` (dashed), `rawText` (`data-raw-text`). Non-interactive pill for `$skill` tokens; `renderSkillTokens(text, render)` swaps `$name` mentions for chips |
+| `WorkLogRow` | `icon`, `label`, `secondary` (muted, one line), `status` running · completed · failed (spinner; danger dot plus "Failed"), `statusText`, `trailing` (outside the toggle), `children` (expandable detail; the header becomes an `aria-expanded` button), `expanded` / `defaultExpanded` / `onExpandedChange` |
+| `WorkLogGroup` | Same header props as `WorkLogRow`; `children` are the member rows, listed indented when expanded. `webSearchSummary(n)` gives "Searched the web" / "Searched the web N times" |
+| `WebResultList` | `results: { title?, url, snippet?, published? }[]`, `onOpenLink(url)`, `openHint` (spoken after each title; "opens in your browser"), `emptyText`. Titles open through `onOpenLink`; unsafe URLs show as text |
 | `ChatMessage` | `role` user · assistant, `meta`, `actions` |
 | `FileTree` | `nodes: { id, name, kind: folder · file, children?, meta? }[]`, `selectedId`, `onSelect`, `defaultExpanded` |
 | `Timeline` | `items: { id, title, time, description? }[]`, `selectedId`, `onSelect` |
@@ -115,7 +123,7 @@ Every component accepts its root element's props (including `ref` and `className
 
 | Export | Notes |
 | --- | --- |
-| Stroke icons | `createIcon` 24×24 strokes (`size`, `title`), e.g. `StarIcon` and `StarFilledIcon` for favorites |
+| Stroke icons | `createIcon` 24×24 strokes (`size`, `title`), e.g. `StarIcon` and `StarFilledIcon` for favorites, `ImageIcon` for linked (never loaded) images |
 | `BrandIcon` | `brand` (glyph key), `size` (20), `tone` brand · mono, `title`; other SVG props pass through. See [Brand icons](#brand-icons) |
 | `hasBrandIcon(brand)`, `brandTitle(brand)`, `monogram(label)`, `type BrandId` | glyph lookup, display name, and the fallback initials |
 
@@ -136,6 +144,30 @@ Every component accepts its root element's props (including `ref` and `className
 - **Footer.** A provider that is not ready (or has no models) shows its `statusText` or a fallback with an "Open provider setup" button when `onOpenProviderSetup` is set. `onManageProviders` adds a "Manage providers" bar.
 - **Keyboard.** Focus starts in the search field. ArrowUp/ArrowDown move the active option (`aria-activedescendant`), Enter selects it (or toggles the legacy row), Escape closes and returns focus to the trigger. ArrowLeft on an empty query or Shift+Tab moves to the rail, where ArrowUp/ArrowDown/Home/End move, Enter or Space selects, and ArrowRight or typing returns to search. Tab from search reaches the active row's favorite button. While open, Mod+1…Mod+9 choose the first nine enabled rows (hints show when `jumpModifierLabel` is set) and Mod+Shift+ArrowUp/ArrowDown switch provider, skipping disabled ones. Rows with a `disabledReason` are skipped and show the reason as their tooltip.
 - **Search helpers.** `rankBySearch(items, query, toSearchable)` and `scoreModelSearch(model, query)` expose the same ranking, for example to filter a model list elsewhere; `formatContextWindow(tokens)` gives "200K" / "1M".
+
+## Markdown
+
+`Markdown` renders model output, skill bodies, plans, and markdown artifacts with a dependency-free parser (`parseMarkdown(source)` returns the block tree; `markdownInlineText(nodes)` flattens inline nodes to text). Both are pure, so they run during static export and in unit tests.
+
+- **Syntax.** ATX and setext headings, paragraphs, `*emphasis*`, `**strong**`, `~~strikethrough~~`, code spans, fenced code (rendered with `CodeBlock`, language from the fence), ordered, unordered, nested, and task lists, blockquotes, GFM tables with alignment, horizontal rules, inline and reference links, `<autolinks>`, bare `https://` and `www.` links, images, hard breaks, backslash escapes, and common entities.
+- **Streaming.** An unclosed fence runs to the end of the text and renders as code (`data-streaming="true"` on its `CodeBlock`), so a response that is still arriving never flashes as prose.
+- **Safety.** Raw HTML is never interpreted: `<script>` or `<img onerror>` stays literal text. Links and images keep only absolute `http(s)` URLs (links also `mailto:`) without embedded credentials, checked by `safeExternalUrl` (exported with `urlHost`); `javascript:`, `data:`, `file:`, relative, and obfuscated schemes become inert text. Links have no `href`, so the webview can never navigate: activating one (click or Enter) calls `onOpenLink(url)`, and the URL is the tooltip. Without `onOpenLink`, links render as plain text. Images are never loaded; they show as an image chip that opens like a link. Nesting depth and delimiter runs are bounded, so hostile input cannot exhaust the stack.
+- **Headings and chips.** `headingLevelOffset` shifts heading tags under the surrounding outline while keeping their look. `renderText` maps plain text runs (never code or link text), for example `(text) => renderSkillTokens(text, toChip)` to show `$skill` chips.
+
+## Command menu
+
+`CommandMenu` is the composer's `$` skills menu and `/` command menu: a `Popover` above the composer, sized to it, holding a listbox of sections. It is fully controlled; the app detects the trigger, filters and ranks `sections` from `query`, and inserts the pick.
+
+- **Focus stays in the text field.** Pass the composer's `textareaRef` as `inputRef` and the composer `ref` as `anchorRef`, and give the composer `suggestions={{ listId, open, activeId }}` (or spread `commandMenuFieldProps(...)` onto another field) so the field carries `aria-controls` and `aria-activedescendant` (option ids come from `commandMenuOptionId(listId, itemId)`).
+- **Keyboard.** While open, ArrowUp/ArrowDown in the field move the active row (wrapping, skipping disabled rows), Enter or Tab selects it, and Escape closes. These keys never reach the field, so Enter does not send. With no active row, Enter and Tab behave as usual. Opening highlights the first enabled row; after that the highlight stays on its row while the row is listed and enabled, and otherwise moves to the first enabled row.
+- **Pointer.** Hovering highlights a row and clicking selects it without taking focus from the field. A press outside, or focus moving elsewhere in the page, calls `onClose`.
+- **States.** `loading` with no rows shows `loadingText` with a spinner; no rows shows `emptyText` (t3code copy: "No skills found. Try / to browse provider commands." for skills, "No matching command." otherwise). A polite live region announces the result count. The first match of `query` in each title is bold and underlined.
+- **Mentions.** `splitSkillTokens(text)` and `findSkillMentions(text)` find `$name` tokens (letters, digits, `_`, `-`, at least one letter; amounts such as `$20`, `$20k`, `$1.5` are not mentions).
+
+## Plans and artifacts
+
+- **`PlanCard`.** The plan's first heading becomes the title (a "Summary" heading right after it is dropped) and the rest renders with `Markdown` under it. Plans over about 20 lines (long lines count once per 100 characters) show a 10-line preview that fades out, with a "Show full plan" / "Show less" toggle (`aria-expanded`). `splitPlanMarkdown`, `planLineCount`, and `planPreview` expose the same logic.
+- **`ArtifactCard`.** `formatByteSize` gives "1.5 KB"; `createdAt` is shown with `formatDateTime` in the viewer's locale inside a `<time>` element. `artifactKindLabel(kind)` gives the badge text.
 
 ## Code diffs
 

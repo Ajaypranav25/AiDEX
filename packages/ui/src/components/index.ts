@@ -1,4 +1,5 @@
 export { Brand, type BrandProps } from "./Brand";
+export * from "./CommandMenu";
 export { Composer, type ComposerProps } from "./Composer";
 export { Dialog, type DialogProps } from "./Dialog";
 export { InfoCard, type InfoCardProps } from "./InfoCard";
