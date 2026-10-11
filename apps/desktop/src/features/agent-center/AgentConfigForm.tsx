@@ -3,8 +3,7 @@ import { SectionHeader } from "@aidex/ui/components";
 import { RefreshIcon } from "@aidex/ui/icons";
 import { Button, Divider, Grid, Select, Stack, TextArea } from "@aidex/ui/primitives";
 import { useToast } from "../../app/providers/toast";
-import { modelOptions } from "../../lib/sample/models";
-import { fallbackModelOptions, hasErrors, validateConfig } from "./agentConfig";
+import { agentModelOptions, fallbackModelOptions, hasErrors, validateConfig } from "./agentConfig";
 import { HarnessSection } from "./HarnessSection";
 import { PermissionsSection } from "./PermissionsSection";
 import type { AgentConfig, SampleAgent } from "./sample";
@@ -66,7 +65,7 @@ export function AgentConfigForm({ agent }: Props) {
             <Grid columns={2} gap={4}>
               <Select
                 label="Default model"
-                options={modelOptions}
+                options={agentModelOptions}
                 value={config.modelId}
                 onChange={(event) => update("modelId", event.target.value)}
               />

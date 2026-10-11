@@ -1,6 +1,13 @@
 // Options and validation for the agent settings form.
-import { modelOptions } from "../../lib/sample/models";
 import type { AgentConfig, AgentPermissions, Autonomy } from "./sample";
+
+/** Sample model choices for this sample page; ids match the agent configs in `sample.ts`. */
+export const agentModelOptions = [
+  { value: "gemma-4", label: "Gemma 4 · Local" },
+  { value: "qwen-coder-7b", label: "Qwen2.5 Coder 7B · Local" },
+  { value: "llama-3.2-3b", label: "Llama 3.2 3B · Local" },
+  { value: "provider-default", label: "Provider model · Cloud" },
+] as const;
 
 export const autonomyOptions: readonly { value: Autonomy; label: string }[] = [
   { value: "ask-every-step", label: "Ask every step" },
@@ -14,7 +21,7 @@ export const sandboxOptions = [
   { value: "relaxed", label: "Relaxed · read-only host access" },
 ] as const;
 
-export const fallbackModelOptions = [{ value: "none", label: "No fallback" }, ...modelOptions] as const;
+export const fallbackModelOptions = [{ value: "none", label: "No fallback" }, ...agentModelOptions] as const;
 
 export const permissionRows: readonly { key: keyof AgentPermissions; title: string; description: string }[] = [
   { key: "readFiles", title: "Read workspace files", description: "Open and search files in the selected workspace." },
