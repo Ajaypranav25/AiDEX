@@ -40,10 +40,7 @@ struct Queue {
 }
 
 impl Queue {
-    fn mark_lagged(&mut self) {
-        if !self.lagged {
-            self.lag_count += 1;
-        }
+    fn require_catch_up(&mut self) {
         self.lagged = true;
         self.items.clear();
         self.bytes = 0;
@@ -94,7 +91,8 @@ impl LiveSlot {
         }
         if matches {
             if queue.items.len() >= self.capacity || queue.bytes + bytes > MAX_QUEUED_BYTES {
-                queue.mark_lagged();
+                queue.lag_count += 1;
+                queue.require_catch_up();
             } else {
                 queue.items.push_back((envelope.clone(), bytes));
                 queue.bytes += bytes;
@@ -104,10 +102,11 @@ impl LiveSlot {
         self.ready.notify_all();
     }
 
-    /// Invalidate live delivery after a durable write that bypassed fan-out.
+    /// Invalidate live delivery after a durable write that bypassed fan-out,
+    /// without counting a queue overflow.
     /// Called under the log lock, just like ordinary queue overflow.
-    pub(crate) fn mark_lagged(&self) {
-        self.lock().mark_lagged();
+    pub(crate) fn require_catch_up(&self) {
+        self.lock().require_catch_up();
         self.ready.notify_all();
     }
 
@@ -129,7 +128,7 @@ pub(crate) fn fan_out(slots: &[Arc<LiveSlot>], envelope: &EventEnvelope, bytes: 
     }
 }
 
-/// The live queue overflowed; resume from disk.
+/// Live delivery was invalidated; resume from disk.
 struct Lagged;
 
 /// An ordered subscription delivery.
@@ -303,6 +302,7 @@ impl Subscription {
     }
 
     /// Times this subscriber overflowed its live queue and fell back to disk.
+    /// Disk catch-up requested by legacy import does not count as an overflow.
     pub fn lag_count(&self) -> u64 {
         self.slot.lock().lag_count
     }

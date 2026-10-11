@@ -298,7 +298,7 @@ impl EventLog {
             // Import commits a new durable range without offering its rows live.
             // Reset subscribers through disk catch-up before any later append.
             for slot in &inner.subscribers {
-                slot.mark_lagged();
+                slot.require_catch_up();
             }
         }
         Ok(outcome)

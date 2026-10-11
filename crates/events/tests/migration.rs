@@ -409,6 +409,9 @@ fn active_subscribers_catch_up_imported_history_before_later_appends() {
             assert_eq!(filtered.try_next().unwrap(), None);
         }
         log.import_legacy(&legacy_path).unwrap();
+        // Import needs disk catch-up, but no live queue overflow occurred.
+        assert_eq!(all.lag_count(), 0);
+        assert_eq!(filtered.lag_count(), 0);
         log.append(EventScope::global(), EventKind::DriveSafeToRemove {})
             .unwrap();
         let mut seen = Vec::new();
@@ -419,12 +422,16 @@ fn active_subscribers_catch_up_imported_history_before_later_appends() {
         }
         assert_eq!(seen, (1..=601).collect::<Vec<_>>());
         let mut seen_filtered = Vec::new();
+        let mut filtered_watermarks = Vec::new();
         while let Some(item) = filtered.try_next().unwrap() {
             if let Some(event) = item.event {
                 seen_filtered.push(event.cursor.get());
+            } else {
+                filtered_watermarks.push(item.cursor.get());
             }
         }
         assert_eq!(seen_filtered, (1..=599).step_by(2).collect::<Vec<_>>());
+        assert_eq!(filtered_watermarks, [601]);
         // Both rejoin live delivery after multiple disk pages, without duplicates.
         let next = log
             .append(
@@ -443,6 +450,26 @@ fn active_subscribers_catch_up_imported_history_before_later_appends() {
         ));
         assert_eq!(all.try_next().unwrap(), None);
         assert_eq!(filtered.try_next().unwrap(), None);
+        assert_eq!(all.lag_count(), 0);
+        assert_eq!(filtered.lag_count(), 0);
+
+        // A real capacity-one overflow still counts once until disk recovery.
+        for task in ["overflow_one", "overflow_two", "while_lagged"] {
+            log.append(
+                EventScope::workspace(id("ws_a")),
+                common::task_started(task),
+            )
+            .unwrap();
+        }
+        for subscription in [&mut all, &mut filtered] {
+            assert_eq!(subscription.lag_count(), 1);
+            assert_eq!(subscription.queued(), 0);
+            let recovered: Vec<_> = std::iter::from_fn(|| subscription.try_next().unwrap())
+                .filter_map(|item| item.event.map(|event| event.cursor.get()))
+                .collect();
+            assert_eq!(recovered, [603, 604, 605]);
+            assert_eq!(subscription.lag_count(), 1);
+        }
     }
 }
 

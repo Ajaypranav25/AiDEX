@@ -86,10 +86,11 @@ session_id, kinds }`, `RetentionPolicy { max_events, max_age }`, `ReplayPage`,
   overtake queued matching events, are coalesced in constant space for nonmatches,
   and are progress notifications, not periodic heartbeats. Publishers never block:
   a full event queue marks the subscriber lagged and drops its queue; the subscriber
-  then catches up from disk after the last consumed cursor and rejoins. A successful legacy
-  import also sends existing subscribers through disk catch-up before later live
-  events; if import retention removed unseen history, they report `CursorExpired`
-  rather than skipping it. Dropping a subscription unregisters it.
+  then catches up from disk after the last consumed cursor and rejoins. A successful
+  legacy import also sends existing subscribers through disk catch-up before later
+  live events, without increasing `Subscription::lag_count()` (which counts live
+  queue overflows). If import retention removed unseen history, they report
+  `CursorExpired` rather than skipping it. Dropping a subscription unregisters it.
 - **Ephemeral events** (`agent.delta`, `process.output`) are never stored and take
   no cursor; their envelope carries the latest durable cursor. They reach live
   subscribers only, and are lost while a subscriber lags.
