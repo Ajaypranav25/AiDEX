@@ -1,8 +1,11 @@
 import { useCallback, useState } from "react";
 import { HomePage } from "../features/home/HomePage";
+import { ProviderCatalogProvider } from "../features/model-manager/catalog/ProviderCatalog";
 import { useCommandShortcut } from "../hooks/useCommandShortcut";
+import { useKeyChord } from "../hooks/useKeyChord";
 import { MainLayout } from "../layouts/MainLayout";
 import { screenKeyOf } from "../lib/routes";
+import { DEFAULT_PROVIDERS_SHORTCUT } from "../lib/shortcuts";
 import { NavigationProvider, useNavigation } from "./providers/navigation";
 import { PreferencesProvider, usePreferences } from "./providers/preferences";
 import { ToastProvider } from "./providers/toast";
@@ -14,7 +17,9 @@ export function Workspace() {
     <NavigationProvider initialRoute={{ page: "chat" }}>
       <PreferencesProvider>
         <ToastProvider>
-          <WorkspaceScreens />
+          <ProviderCatalogProvider>
+            <WorkspaceScreens />
+          </ProviderCatalogProvider>
         </ToastProvider>
       </PreferencesProvider>
     </NavigationProvider>
@@ -23,7 +28,7 @@ export function Workspace() {
 
 function WorkspaceScreens() {
   const { route, navigate } = useNavigation();
-  const { setPendingPrompt, setPendingWorkspaceId } = usePreferences();
+  const { setPendingPrompt, setPendingWorkspaceId, settings } = usePreferences();
   // A new chat resets its draft and optional project context.
   const [sessionKey, setSessionKey] = useState(0);
 
@@ -34,7 +39,13 @@ function WorkspaceScreens() {
     setSessionKey((key) => key + 1);
   }, [navigate, setPendingPrompt, setPendingWorkspaceId]);
 
+  const openProviders = useCallback(
+    () => navigate({ page: "models", tab: "providers" }),
+    [navigate],
+  );
+
   useCommandShortcut("k", startNewSession);
+  useKeyChord(settings.shortcuts?.providers || DEFAULT_PROVIDERS_SHORTCUT, openProviders);
 
   if (route.page === "home") {
     return (
