@@ -441,6 +441,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "aidex-web"
+version = "0.1.0"
+dependencies = [
+ "aidex-core",
+ "aidex-drive",
+ "getrandom 0.3.4",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+ "ureq",
+ "url",
+ "zeroize",
+]
+
+[[package]]
 name = "aidex-workspace"
 version = "0.1.0"
 dependencies = [
