@@ -3,7 +3,10 @@
 
 mod support;
 
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 use aidex_providers::{
     AccountMetadata, AuthConfig, ConfigError, FakeProvider, HealthStatus, Locality, ModelConfig,
@@ -12,7 +15,7 @@ use aidex_providers::{
     ProviderOrigin, ProviderPatch, ProviderRegistry, ProvidersConfig, RecordingObserver,
     RegistryError,
 };
-use support::temp_drive;
+use support::{FakeServer, Reply, temp_drive};
 
 fn load(paths: &aidex_drive::DrivePaths) -> Result<ProviderRegistry, RegistryError> {
     ProviderRegistry::load(
@@ -351,4 +354,60 @@ fn updating_a_default_holder_to_disabled_clears_the_default() {
         .unwrap();
     assert!(!entry.enabled);
     assert_eq!(registry.default_model(), None);
+}
+
+#[test]
+fn a_provider_disabled_while_its_default_is_checked_never_becomes_the_default() {
+    let release = Arc::new(AtomicBool::new(false));
+    let server = FakeServer::start(vec![Reply::Held(
+        release.clone(),
+        Box::new(Reply::Json(200, r#"{"data":[{"id":"tiny"}]}"#.into())),
+    )]);
+    let observer = Arc::new(RecordingObserver::new());
+    let registry = Arc::new(
+        ProviderRegistry::in_memory(
+            Arc::new(NoVault::default()),
+            Arc::new(OfflineMode::new(false)),
+        )
+        .with_observer(observer.clone()),
+    );
+    let id = ProviderId::new("local").unwrap();
+    registry
+        .add_provider(ProviderConfig::new(
+            id.clone(),
+            ProviderKind::OpenaiCompatible,
+            server.base_url(),
+        ))
+        .unwrap();
+
+    let setter = {
+        let registry = Arc::clone(&registry);
+        std::thread::spawn(move || {
+            registry.set_default_model(ModelRef::parse("local/tiny").unwrap())
+        })
+    };
+    // The listing check is in flight; disable the provider before it answers.
+    server.wait_for_requests(1);
+    registry
+        .patch_provider(
+            &id,
+            ProviderPatch {
+                display_name: None,
+                enabled: Some(false),
+            },
+        )
+        .unwrap();
+    release.store(true, Ordering::SeqCst);
+
+    assert!(matches!(
+        setter.join().unwrap(),
+        Err(RegistryError::NotFound(_))
+    ));
+    assert_eq!(registry.default_model(), None);
+    assert!(
+        !observer
+            .events()
+            .iter()
+            .any(|event| matches!(event, ModelEvent::DefaultChanged { model: Some(_) }))
+    );
 }

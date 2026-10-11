@@ -926,6 +926,16 @@ impl ProviderRegistry {
 
     fn store_default(&self, model: Option<ModelRef>) -> Result<(), RegistryError> {
         let mut inner = self.write();
+        // The listing check ran without the lock. A provider disabled or
+        // removed since then cleared no default, so refuse to persist one on
+        // it now; under this lock the check and the write are atomic with
+        // patch_provider and remove_provider.
+        if let Some(model) = &model
+            && (!inner.providers.contains_key(&model.provider_id)
+                || !inner.is_enabled(&model.provider_id))
+        {
+            return Err(RegistryError::NotFound(model.provider_id.clone()));
+        }
         let mut next = inner.config.clone();
         next.default_model = model.as_ref().map(ToString::to_string);
         self.commit(&mut inner, Some(next), None)?;
