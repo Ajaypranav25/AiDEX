@@ -21,6 +21,7 @@ members = [
     "crates/router",
     "crates/sandbox",
     "crates/sessions",
+    "crates/skills",
     "crates/native-sessions",
     "crates/tools",
     "crates/harness",

@@ -374,6 +374,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "aidex-skills"
+version = "0.1.0"
+dependencies = [
+ "aidex-core",
+ "aidex-drive",
+ "aidex-events",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
 name = "aidex-storage"
 version = "0.1.0"
 dependencies = [
