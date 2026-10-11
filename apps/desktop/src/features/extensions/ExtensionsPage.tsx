@@ -1,80 +1,62 @@
-import { useEffect, useState } from "react";
 import { PageHeader } from "@aidex/ui/components";
 import { PageFrame } from "@aidex/ui/desktop";
-import { GridIcon, PlusIcon } from "@aidex/ui/icons";
-import { Button, TabPanel, Tabs } from "@aidex/ui/primitives";
+import { TabPanel, Tabs, Text } from "@aidex/ui/primitives";
 import { useNavigation } from "../../app/providers/navigation";
-import { useToast } from "../../app/providers/toast";
+import { useAidexStatus } from "../../hooks/useAidexStatus";
 import { tabOf, type PageTab } from "../../lib/routes";
-import { McpPanel } from "./McpPanel";
-import { PluginsPanel, type PluginView } from "./PluginsPanel";
-import { SkillsPanel } from "./SkillsPanel";
-import { installedPlugins, mcpServers, sampleSkills } from "./sample";
-import { useToggles } from "./useToggles";
+import { CoreStatusNotice } from "../system/CoreStatusNotice";
+import { useExtensionLists } from "./data";
+import { McpPanel } from "./mcp/McpPanel";
+import { PluginsPanel } from "./plugins/PluginsPanel";
+import { SkillsPanel } from "./skills/SkillsPanel";
+import { WebPanel } from "./web/WebPanel";
 
 type ExtensionsTab = PageTab<"extensions">;
 
 const TABS_ID = "extensions-tabs";
 
-const tabItems = [
-  { value: "skills", label: "Skills", count: sampleSkills.length },
-  { value: "mcp", label: "MCP servers", count: mcpServers.length },
-  { value: "plugins", label: "Plugins", count: installedPlugins.length },
-] as const satisfies readonly { value: ExtensionsTab; label: string; count: number }[];
-
+/** Extensions screen: tabs for skills, MCP servers, plugins, and web search; the route `id` selects an item. */
 export function ExtensionsPage() {
   const { route, replace } = useNavigation();
-  const notify = useToast();
   const tab = tabOf(route, "extensions");
-  // Toggles and the plugin view live here so they survive switching tabs.
-  const skillToggles = useToggles(sampleSkills);
-  const pluginToggles = useToggles(installedPlugins);
-  const [pluginView, setPluginView] = useState<PluginView>("installed");
+  const lists = useExtensionLists();
+  const { daemonRunning } = useAidexStatus();
+  const select = (id: string | undefined) => replace({ page: "extensions", tab, id });
 
-  // A sidebar shortcut to an installed plugin shows the installed view, where its card is marked.
-  useEffect(() => {
-    if (tab === "plugins" && route.id) setPluginView("installed");
-  }, [tab, route.id]);
-
-  const primary: Record<ExtensionsTab, { label: string; onClick: () => void }> = {
-    skills: {
-      label: "Install skill",
-      onClick: () => notify("Preview: installing skills will be available when AiDEX Core is connected."),
-    },
-    mcp: {
-      label: "Add server",
-      onClick: () => notify("Preview: adding MCP servers will be available when AiDEX Core is connected."),
-    },
-    plugins: { label: "Browse marketplace", onClick: () => setPluginView("marketplace") },
-  };
-  const action = primary[tab];
+  const tabItems: { value: ExtensionsTab; label: string; count?: number }[] = [
+    { value: "skills", label: "Skills", count: lists.skills?.length },
+    { value: "mcp", label: "MCP servers", count: lists.servers?.length },
+    { value: "plugins", label: "Plugins", count: lists.plugins?.length },
+    { value: "web", label: "Web search" },
+  ];
 
   return (
-    <PageFrame width="default">
+    <PageFrame width="wide">
       <PageHeader
         title="Plugins"
-        description="Reusable skills, MCP servers, and extensions in one place."
-        actions={
-          <Button variant="primary" icon={tab === "plugins" ? <GridIcon /> : <PlusIcon />} onClick={action.onClick}>
-            {action.label}
-          </Button>
-        }
+        description="Skills, MCP servers, plugins, and web search that extend what your agents can do."
       />
+      <CoreStatusNotice requires="daemon" />
       <Tabs
         id={TABS_ID}
-        label="Plugin sections"
+        label="Extension sections"
         variant="underline"
         items={tabItems}
         value={tab}
         onValueChange={(next) => replace({ page: "extensions", tab: next })}
       />
-      {/* Panels are keyed by the route id so a sidebar shortcut re-opens them with that item selected. */}
       <TabPanel tabsId={TABS_ID} value={tab}>
-        {tab === "skills" ? <SkillsPanel key={route.id} toggles={skillToggles} initialEditingId={route.id} /> : null}
-        {tab === "mcp" ? <McpPanel key={route.id} initialServerId={route.id} /> : null}
-        {tab === "plugins" ? (
-          <PluginsPanel view={pluginView} onViewChange={setPluginView} toggles={pluginToggles} focusId={route.id} />
-        ) : null}
+        {!daemonRunning ? (
+          <Text tone="muted">Skills, MCP servers, plugins, and web search settings appear once AiDEX Core is running.</Text>
+        ) : tab === "skills" ? (
+          <SkillsPanel selectedId={route.id} onSelect={select} />
+        ) : tab === "mcp" ? (
+          <McpPanel selectedId={route.id} onSelect={select} />
+        ) : tab === "plugins" ? (
+          <PluginsPanel selectedId={route.id} onSelect={select} />
+        ) : (
+          <WebPanel />
+        )}
       </TabPanel>
     </PageFrame>
   );

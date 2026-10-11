@@ -21,13 +21,12 @@ export type PageId =
 
 /**
  * Pages whose content is still sample data because their backend has not landed (workspaces #11,
- * sessions #12, models #14/#15, agents #19/#23, extensions #24, remote #29). The shell labels them.
+ * sessions #12, models #14/#15, agents #19/#23, remote #29). The shell labels them.
  * Home, Settings, and Security mix live Core data with labelled samples and say so themselves.
  */
 export const samplePages: ReadonlySet<PageId> = new Set<PageId>([
   "agents",
   "agent-config",
-  "extensions",
 ]);
 
 /** `tab` selects a section within a page; `id` names the record a page shows (workspace, agent, model). */
@@ -59,7 +58,7 @@ export const pageTabs = {
   workspace: ["overview", "files", "git", "environment", "sessions", "memory"],
   execution: ["execution", "graph"],
   models: ["providers", "local"],
-  extensions: ["skills", "mcp", "plugins"],
+  extensions: ["skills", "mcp", "plugins", "web"],
   security: ["overview", "vault", "sandbox", "approvals"],
   remote: ["devices", "sessions"],
   settings: ["appearance", "shortcuts", "updates", "diagnostics", "drive"],
@@ -79,7 +78,7 @@ export function tabOf<Page extends TabbedPage>(
   ) as PageTab<Page>;
 }
 
-/** Pages whose `id` is an in-page selection (a file, a checkpoint, a filter, a provider) rather than the record shown. */
+/** Pages whose `id` is an in-page selection (a file, a checkpoint, a filter, a provider, a skill) rather than the record shown. */
 const selectionPages: ReadonlySet<PageId> = new Set([
   "review",
   "checkpoints",
