@@ -32,8 +32,10 @@ pub use chat::{
     is_tool_name,
 };
 pub use config::{
-    AuthConfig, CONFIG_VERSION, ConfigError, ModelConfig, NETWORK_FILE, NetworkConfig,
-    PROVIDERS_FILE, ProviderConfig, ProviderKind, ProvidersConfig, config_file,
+    AccountMetadata, AuthConfig, CONFIG_VERSION, ConfigError, MAX_ACCOUNT_NAME_CHARS, ModelConfig,
+    NETWORK_FILE, NetworkConfig, PROVIDER_ACCOUNTS_FILE, PROVIDERS_FILE, ProviderAccountMeta,
+    ProviderAccountsConfig, ProviderConfig, ProviderKind, ProvidersConfig, config_file,
+    is_account_name, is_preset_id,
 };
 pub use credentials::{
     CredentialResolver, NoVault, SecretBytes, StaticCredentials, is_secret_name,
@@ -57,5 +59,6 @@ pub use presets::{
 };
 pub use provider::{HealthStatus, ModelProvider, ProviderDescriptor, ProviderHealth};
 pub use registry::{
-    ModelListing, ProviderEntry, ProviderFailure, ProviderOrigin, ProviderRegistry, RegistryError,
+    CatalogStatus, ModelListing, ProviderEntry, ProviderFailure, ProviderOrigin, ProviderPatch,
+    ProviderRegistry, RegistryError,
 };
