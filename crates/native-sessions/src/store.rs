@@ -246,6 +246,18 @@ impl SessionStore {
         command: &str,
         parent: Option<String>,
     ) -> Result<Run, StoreError> {
+        self.begin_with(id, content, command, parent, &RunOptions::default())
+    }
+    /// [`begin`](Self::begin) with per-request options (invoked skills, web
+    /// tools). Options are part of the command fingerprint.
+    pub fn begin_with(
+        &self,
+        id: &str,
+        content: &str,
+        command: &str,
+        parent: Option<String>,
+        options: &RunOptions,
+    ) -> Result<Run, StoreError> {
         if content.trim().is_empty()
             || content.len() > 256 * 1024
             || command.is_empty()
@@ -254,7 +266,19 @@ impl SessionStore {
             return Err("invalid message or command id".into());
         }
         self.update(id, |s| {
-            let fp = digest(format!("{content}\0{parent:?}").as_bytes());
+            // Options join the fingerprint only when present, so command ids
+            // recorded before they existed keep their fingerprints.
+            let fp = if options.is_empty() {
+                digest(format!("{content}\0{parent:?}").as_bytes())
+            } else {
+                digest(
+                    format!(
+                        "{content}\0{parent:?}\0{:?}\0{}",
+                        options.skills, options.web_search
+                    )
+                    .as_bytes(),
+                )
+            };
             if let Some(existing) = s.commands.get(command) {
                 if existing.fingerprint != fp {
                     return Err("command id reused with different arguments".into());
@@ -299,6 +323,9 @@ impl SessionStore {
                 } else {
                     None
                 },
+                skills: options.skills.clone(),
+                web_search: options.web_search,
+                message_index: parent.is_none().then_some(s.messages.len()),
             };
             if parent.is_none() {
                 s.messages.push(message);
