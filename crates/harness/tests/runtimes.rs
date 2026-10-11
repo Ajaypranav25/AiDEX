@@ -19,6 +19,16 @@ fn fixture() -> (
     Arc<NativeEngine>,
     String,
 ) {
+    fixture_with_model("runtime-model")
+}
+fn fixture_with_model(
+    model: &str,
+) -> (
+    tempfile::TempDir,
+    tempfile::TempDir,
+    Arc<NativeEngine>,
+    String,
+) {
     let drive = tempfile::tempdir().unwrap();
     let ws = tempfile::tempdir().unwrap();
     aidex_drive::init_with(
@@ -54,7 +64,7 @@ fn fixture() -> (
         )
         .unwrap(),
     );
-    let session=store.create(serde_json::from_value(json!({"runtime_id":"fixture-runtime","workspace_id":workspace.id,"provider_id":"unused","model_id":"runtime-model","mode":"agent"})).unwrap()).unwrap();
+    let session=store.create(serde_json::from_value(json!({"runtime_id":"fixture-runtime","workspace_id":workspace.id,"provider_id":RUNTIME_PROVIDER_ID,"model_id":model,"mode":"agent"})).unwrap()).unwrap();
     let engine = NativeEngine::new(
         store,
         registry,
@@ -201,4 +211,53 @@ fn authentication_material_is_refused_as_runtime_resume_metadata() {
     let r = e.start(&s, "prompt", "once", None).unwrap();
     assert_eq!(wait(&e, &r.id).status, RunStatus::Failed);
     assert!(e.store().get(&s).unwrap().runtime_ref.is_none());
+}
+/// Completes at once and records the model each request asked for.
+struct ModelProbe {
+    models: std::sync::Mutex<Vec<Option<String>>>,
+}
+impl RuntimeExecutor for ModelProbe {
+    fn descriptor(&self) -> RuntimeDescriptor {
+        RuntimeDescriptor {
+            id: "fixture-runtime".into(),
+            name: "Model probe".into(),
+            modes: vec![Mode::Agent],
+            permission_modes: vec![PermissionMode::Supervised],
+            supports_resume: false,
+            supports_approvals: false,
+        }
+    }
+    fn validate(&self, _: &RuntimeRequest) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    fn execute(
+        &self,
+        r: &RuntimeRequest,
+        _: &mut dyn FnMut(&RuntimeEvent) -> RuntimeControl,
+        _: &CancelToken,
+    ) -> Result<RuntimeResponse, RuntimeError> {
+        self.models.lock().unwrap().push(r.model.clone());
+        Ok(RuntimeResponse {
+            status: RuntimeStatus::Completed,
+            runtime_ref: None,
+            message: Some(ChatMessage::assistant("probed")),
+        })
+    }
+}
+#[test]
+fn default_model_sentinel_lets_the_runtime_choose_its_own_model() {
+    for (configured, expected) in [
+        (RUNTIME_DEFAULT_MODEL, None),
+        ("gpt-5-codex", Some("gpt-5-codex".to_owned())),
+    ] {
+        let (_d, _ws, e, s) = fixture_with_model(configured);
+        let probe = Arc::new(ModelProbe {
+            models: std::sync::Mutex::new(Vec::new()),
+        });
+        e.register_runtime("fixture-runtime", probe.clone())
+            .unwrap();
+        let r = e.start(&s, "prompt", "once", None).unwrap();
+        assert_eq!(wait(&e, &r.id).status, RunStatus::Completed);
+        assert_eq!(*probe.models.lock().unwrap(), [expected]);
+    }
 }

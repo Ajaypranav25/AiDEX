@@ -68,6 +68,12 @@ impl RuntimeManager {
     pub fn catalog(&self) -> Vec<DriverInfo> {
         catalog()
     }
+    /// Whether a runtime configuration was ever saved on this drive. Reads
+    /// only file metadata: no vault access, so it never creates the runtime
+    /// encryption key and works while the vault is locked.
+    pub fn has_saved_configuration(&self) -> bool {
+        self.state.root.join("runtime-config.sealed").is_file()
+    }
     pub fn list(&self) -> Result<Vec<RuntimeConfig>, RuntimeError> {
         let Some(bytes) = self.state.read("runtime-config.sealed")? else {
             return Ok(vec![]);

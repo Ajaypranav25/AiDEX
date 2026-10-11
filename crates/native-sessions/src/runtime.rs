@@ -6,6 +6,14 @@ use aidex_providers::ChatMessage;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// `SessionConfig.provider_id` placeholder for sessions run by an external
+/// runtime; the harness ignores the provider for those sessions.
+pub const RUNTIME_PROVIDER_ID: &str = "runtime";
+/// `SessionConfig.model_id` that asks an external runtime to use its own
+/// configured default model: the harness sends [`RuntimeRequest::model`] as
+/// `None` instead of this literal.
+pub const RUNTIME_DEFAULT_MODEL: &str = "default";
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RuntimeDescriptor {
     pub id: String,
@@ -44,6 +52,7 @@ pub struct RuntimeRequest {
     pub workspace: Option<RuntimeWorkspace>,
     pub permission_mode: PermissionMode,
     pub instructions: String,
+    /// The model to use; `None` means the runtime's own default.
     pub model: Option<String>,
     pub messages: Vec<ChatMessage>,
     pub max_steps: u32,

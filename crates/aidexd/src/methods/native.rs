@@ -104,6 +104,7 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
         let mut config: SessionConfig = parse_params(p)?;
         config.validate().map_err(native_error)?;
         validate_workspace(&s, &config)?;
+        super::runtime::ensure_session_runtime(&s, &config);
         if config.title.trim().is_empty() {
             config.title = "New conversation".into();
         }
@@ -150,17 +151,16 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
         let s = services.clone();
         router.register(method, move |_, p| {
             let p: SendParams = parse_params(p)?;
-            if method == "agent.start"
-                && s.native()
-                    .store()
-                    .get(&p.session_id)
-                    .map_err(native_error)?
-                    .configuration
-                    .mode
-                    != Mode::Agent
-            {
+            let config = s
+                .native()
+                .store()
+                .get(&p.session_id)
+                .map_err(native_error)?
+                .configuration;
+            if method == "agent.start" && config.mode != Mode::Agent {
                 return Err(RpcError::invalid_params("agent.start requires agent mode"));
             }
+            super::runtime::ensure_session_runtime(&s, &config);
             to_result(&view::run(
                 &s.native()
                     .start(&p.session_id, &p.content, &p.command_id, p.parent_run_id)

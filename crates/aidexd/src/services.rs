@@ -7,6 +7,7 @@
 
 mod inference;
 mod models;
+mod runtime;
 
 pub use models::{EventsModelObserver, ModelServices, VaultCredentials, model_event_kind};
 
@@ -66,6 +67,7 @@ pub struct Services {
     context: Arc<ContextService>,
     native: Arc<aidex_harness::NativeEngine>,
     inference: Arc<aidex_inference::InferenceService>,
+    runtime: Result<Arc<aidex_adapters::RuntimeManager>, String>,
     updates: Result<Arc<Updater>, String>,
     update_recovery: Mutex<Option<Result<UpdateRecovery, String>>>,
 }
@@ -142,6 +144,10 @@ impl Services {
             runtime.join("native-processes"),
         );
         let inference = inference::open_inference(&paths, &models)?;
+        // External runtimes are optional: the daemon starts without them and
+        // `runtime.*` reports why they are unavailable.
+        let runtime = runtime::open_runtime(&paths, Arc::clone(&vault), &models)
+            .map_err(|error| error.to_string());
         let updates = open_updates(&paths, &events, updater);
         Ok(Self {
             drive_root: drive_root.to_path_buf(),
@@ -159,6 +165,7 @@ impl Services {
             context: Arc::new(context),
             native,
             inference,
+            runtime,
             updates,
             update_recovery: Mutex::new(None),
         })
@@ -234,6 +241,11 @@ impl Services {
     }
     pub fn inference(&self) -> &Arc<aidex_inference::InferenceService> {
         &self.inference
+    }
+    /// External agent runtimes (`aidex-adapters`), or why they could not be
+    /// opened at startup.
+    pub fn runtime(&self) -> Result<&Arc<aidex_adapters::RuntimeManager>, &str> {
+        self.runtime.as_ref().map_err(String::as_str)
     }
     /// The drive's updater (`aidex-updater`), or why it is unavailable (a host without
     /// a bundle target, or an invalid built-in trust configuration).
