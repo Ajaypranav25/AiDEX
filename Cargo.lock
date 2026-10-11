@@ -290,6 +290,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "aidex-plugins"
+version = "0.1.0"
+dependencies = [
+ "aidex-core",
+ "aidex-drive",
+ "aidex-events",
+ "flate2",
+ "getrandom 0.3.4",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "toml",
+ "zip 7.2.0",
+]
+
+[[package]]
 name = "aidex-policy"
 version = "0.1.0"
 dependencies = [
