@@ -1,0 +1,28 @@
+[package]
+name = "aidex-packager"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Developer and CI tool that builds, installs, and smoke-tests portable AiDEX bundles."
+
+[[bin]]
+name = "aidex-packager"
+path = "src/main.rs"
+
+[dependencies]
+aidex-bundle = { path = "../bundle", features = ["archive"] }
+aidex-core = { path = "../core" }
+aidex-drive = { path = "../drive" }
+aidex-updater = { path = "../updater" }
+clap.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Cargo.lock checksums for SBOM component hashes.
+toml = { version = "0.8", default-features = false, features = ["parse"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

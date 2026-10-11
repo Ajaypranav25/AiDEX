@@ -3,21 +3,36 @@ resolver = "2"
 members = [
     "crates/aidexd",
     "crates/aidex-cli",
+    "crates/adapters",
+    "crates/auth",
+    "crates/broker",
+    "crates/bundle",
+    "crates/launcher",
+    "crates/packager",
     "crates/core",
+    "crates/context",
     "crates/drive",
     "crates/events",
     "crates/host",
+    "crates/inference",
     "crates/policy",
+    "crates/preferences",
+    "crates/providers",
+    "crates/router",
     "crates/sandbox",
     "crates/sessions",
+    "crates/native-sessions",
+    "crates/tools",
+    "crates/harness",
     "crates/storage",
+    "crates/updater",
     "crates/vault",
     "crates/workspace",
 ]
 
 [workspace.package]
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "MIT"
 
 [workspace.lints.rust]

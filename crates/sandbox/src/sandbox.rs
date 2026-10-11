@@ -94,6 +94,25 @@ impl Sandbox {
         plan: &EnforcementPlan,
         command: CommandSpec,
     ) -> Result<ManagedProcess, SandboxError> {
+        self.spawn_inner(plan, command, false)
+    }
+
+    /// Launch with stdin retained for a bidirectional protocol. The helper consumes
+    /// only its exact framed plan, and the tracked target inherits the remaining pipe.
+    pub fn spawn_interactive(
+        &self,
+        plan: &EnforcementPlan,
+        command: CommandSpec,
+    ) -> Result<ManagedProcess, SandboxError> {
+        self.spawn_inner(plan, command, true)
+    }
+
+    fn spawn_inner(
+        &self,
+        plan: &EnforcementPlan,
+        command: CommandSpec,
+        interactive: bool,
+    ) -> Result<ManagedProcess, SandboxError> {
         self.check_plan(plan)?;
         if !command.program.is_absolute() {
             return Err(SandboxError::ProgramNotFound(format!(
@@ -119,7 +138,7 @@ impl Sandbox {
             self.inner.registry.clone(),
         ));
         self.inner.registry.register(&shared)?;
-        match start(&shared, frame, command.stdin) {
+        match start(&shared, frame, command.stdin, interactive) {
             Ok(()) => Ok(ManagedProcess { shared }),
             Err(error) => {
                 self.inner.registry.remove(&shared.id);
@@ -168,6 +187,7 @@ fn start(
     shared: &Arc<ProcessShared>,
     frame: Vec<u8>,
     stdin: Option<Vec<u8>>,
+    interactive: bool,
 ) -> Result<(), SandboxError> {
     let (launched_tx, launched_rx) = mpsc::sync_channel::<Result<LaunchedPipes, SandboxError>>(1);
     let monitor_shared = Arc::clone(shared);
@@ -203,9 +223,30 @@ fn start(
                 monitor::run_stderr_reader(shared, stderr);
             })
         },
-        spawn_thread(format!("aidex-sandbox-stdin-{}", shared.id), move || {
-            monitor::run_stdin_writer(stdin_pipe, frame, stdin);
-        }),
+        {
+            let shared = Arc::clone(shared);
+            spawn_thread(format!("aidex-sandbox-stdin-{}", shared.id), move || {
+                if interactive {
+                    use std::io::Write;
+                    let mut pipe = stdin_pipe;
+                    if pipe
+                        .write_all(&frame)
+                        .and_then(|()| pipe.write_all(stdin.as_deref().unwrap_or_default()))
+                        .and_then(|()| pipe.flush())
+                        .is_err()
+                    {
+                        let _ = shared.kill(KillReason::HandshakeFailed);
+                        return;
+                    }
+                    *shared
+                        .stdin
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(pipe);
+                } else {
+                    monitor::run_stdin_writer(stdin_pipe, frame, stdin);
+                }
+            })
+        },
     ];
     if let Some(Err(error)) = started.into_iter().find(Result::is_err) {
         let _ = shared.kill(KillReason::HandshakeFailed);
@@ -274,12 +315,13 @@ pub fn default_helper_path() -> PathBuf {
         return PathBuf::from(name);
     };
     let beside = directory.join(&name);
-    if !beside.is_file() && directory.file_name().is_some_and(|dir| dir == "deps") {
-        if let Some(parent) = directory.parent() {
-            let candidate = parent.join(&name);
-            if candidate.is_file() {
-                return candidate;
-            }
+    if !beside.is_file()
+        && directory.file_name().is_some_and(|dir| dir == "deps")
+        && let Some(parent) = directory.parent()
+    {
+        let candidate = parent.join(&name);
+        if candidate.is_file() {
+            return candidate;
         }
     }
     beside

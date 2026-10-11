@@ -1,144 +1,279 @@
-import { EntityCard, KeyValueList, List, ListRow, MediaItem, Meter, SectionHeader } from "@aidex/ui/components";
-import { BoxIcon, CloudIcon, DownloadIcon, SettingsIcon } from "@aidex/ui/icons";
-import { Badge, Button, Card, Grid, IconBadge, Split, Stack, StatusIndicator } from "@aidex/ui/primitives";
-import { useNavigation } from "../../app/providers/navigation";
-import { usePreferences } from "../../app/providers/preferences";
-import { useToast } from "../../app/providers/toast";
-import { compatibilityTone, currentModelName, formatGb } from "./format";
-import { downloadableModels, driveCapacityGb, localModels, runtimeInfo } from "./sample";
+import { useEffect, useState } from "react";
+import { List, ListRow, Notice } from "@aidex/ui/components";
+import {
+  Button,
+  Card,
+  Select,
+  Stack,
+  Text,
+  TextField,
+} from "@aidex/ui/primitives";
+import { call } from "@aidex/client/rpc";
+import { toAidexError } from "@aidex/client/errors";
+import type { InferenceBackend } from "@aidex/client/dto/inference";
+import { useRpc } from "../../hooks/useRpc";
+import { ModelInventory } from "./ModelInventory";
+import { LocalInferenceNotice } from "./LocalInferenceNotice";
+import { useInferenceStatus } from "../../hooks/useInferenceStatus";
 
-const usedGb = Math.round(localModels.reduce((sum, model) => sum + model.sizeGb, 0) * 10) / 10;
-
-function CurrentModelCard() {
-  const { modelId } = usePreferences();
-  const { navigate } = useNavigation();
-  const local = localModels.find((model) => model.id === modelId);
-
+export function LocalModelsPanel() {
+  const catalog = useRpc("inference.catalog");
+  const status = useInferenceStatus();
+  const [showImport, setShowImport] = useState(false);
+  const [source, setSource] = useState("");
+  const [runtimeSource, setRuntimeSource] = useState("");
+  const [backend, setBackend] = useState<InferenceBackend>("auto");
+  const [context, setContext] = useState("2048");
+  const [threads, setThreads] = useState("2");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  const starting = status.data?.state === "starting";
+  const installed = !!catalog.data?.models.length;
+  useEffect(() => {
+    const settings = catalog.data?.settings;
+    if (!settings) return;
+    setBackend(settings.backend);
+    setContext(String(settings.context_window ?? 2048));
+    setThreads(String(settings.threads ?? 2));
+  }, [
+    catalog.data?.settings?.model_id,
+    catalog.data?.settings?.backend,
+    catalog.data?.settings?.context_window,
+    catalog.data?.settings?.threads,
+  ]);
+  const act = async (operation: () => Promise<unknown>) => {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await operation();
+      catalog.refetch();
+      status.refetch();
+    } catch (caught) {
+      setError(toAidexError(caught).message);
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <Card padding="md">
-      <MediaItem
-        media={<IconBadge tone="accent" icon={local ? <BoxIcon /> : <CloudIcon />} />}
-        title={currentModelName(modelId)}
-        description={
-          local
-            ? `In use for new chats and agent runs · ${local.quantization} · ${formatGb(local.sizeGb)}`
-            : "In use for new chats and agent runs · runs on a connected cloud provider"
-        }
-        trailing={
-          local ? (
-            <Button variant="outline" onClick={() => navigate({ page: "model", id: local.id })}>
-              View details
-            </Button>
-          ) : (
-            <StatusIndicator tone="success" label="In use" />
-          )
-        }
-      />
-    </Card>
-  );
-}
-
-function InstalledModels() {
-  const { modelId } = usePreferences();
-  const { navigate } = useNavigation();
-
-  return (
-    <section aria-labelledby="local-models-heading">
-      <SectionHeader title={<span id="local-models-heading">On this drive</span>} meta={`${localModels.length} models`} />
-      <List metaWidth="132px">
-        {localModels.map((model) => {
-          const inUse = model.id === modelId;
-          return (
-            <ListRow
-              key={model.id}
-              media={<IconBadge size="md" icon={<BoxIcon />} />}
-              title={model.name}
-              subtitle={`${model.quantization} · GGUF · ${model.summary}`}
-              meta={[
-                inUse ? <Badge key="use">In use</Badge> : model.kind === "embedding" ? "Embeddings" : "Chat",
-                <Badge key="fit" tone={compatibilityTone(model.compatibility)}>
-                  {model.compatibility}
-                </Badge>,
-                formatGb(model.sizeGb),
-              ]}
-              selected={inUse}
-              onSelect={() => navigate({ page: "model", id: model.id })}
-            />
-          );
-        })}
-      </List>
-    </section>
-  );
-}
-
-function DownloadableModels() {
-  const notify = useToast();
-  return (
-    <section aria-labelledby="download-models-heading">
-      <SectionHeader title={<span id="download-models-heading">Available to download</span>} meta="Sample compatibility results" />
-      <Grid columns={3} gap={4}>
-        {downloadableModels.map((model) => (
-          <EntityCard
-            key={model.id}
-            media={<IconBadge size="md" icon={<BoxIcon />} />}
-            title={model.name}
-            subtitle={model.detail}
-            badges={<Badge tone={compatibilityTone(model.compatibility)}>{model.compatibility}</Badge>}
-            description={model.description}
-            footer={
+    <Stack gap={5}>
+      {(error || catalog.error || status.error) && (
+        <Notice tone="danger">
+          {error ?? catalog.error?.message ?? status.error?.message}
+        </Notice>
+      )}
+      <LocalInferenceNotice status={status.data} onRefresh={status.refetch} />
+      <Card padding="md">
+        <Stack gap={3}>
+          <Text>
+            llama.cpp:{" "}
+            {catalog.data?.runtime
+              ? `${catalog.data.runtime.release} · ${catalog.data.runtime.verified ? "verified" : "unverified"}`
+              : catalog.data
+                ? "Not installed"
+                : "Checking runtime…"}
+          </Text>
+          {!!catalog.data && (!catalog.data.runtime || showImport) && (
+            <>
+              <TextField
+                label="Verified runtime distribution folder"
+                hint="Leave empty to use the runtime bundled on this drive. A runtime-manifest.json with file checksums is required."
+                value={runtimeSource}
+                onChange={(event) => setRuntimeSource(event.target.value)}
+              />
               <Button
+                disabled={busy || starting}
                 variant="outline"
-                icon={<DownloadIcon />}
-                aria-label={`Download ${model.name}`}
-                onClick={() => notify(`Preview: downloading ${model.name} will be available when AiDEX Core is connected.`)}
+                onClick={() =>
+                  void act(() =>
+                    call(
+                      "inference.runtime.install",
+                      runtimeSource.trim()
+                        ? { source: runtimeSource.trim() }
+                        : {},
+                    ),
+                  )
+                }
               >
-                Download
+                Install runtime
               </Button>
+            </>
+          )}
+          {!!catalog.data && (!installed || showImport) && (
+            <>
+              <TextField
+                label="Import GGUF file"
+                value={source}
+                onChange={(event) => setSource(event.target.value)}
+                hint="Absolute file path. The file is checked and copied to the portable drive."
+              />
+              <Button
+                disabled={busy || starting || !source.trim()}
+                onClick={() =>
+                  void act(async () => {
+                    await call("inference.import", { source: source.trim() });
+                    setSource("");
+                  })
+                }
+              >
+                Import model
+              </Button>
+            </>
+          )}
+          {installed && (
+            <>
+              <Text tone="muted">
+                Your installed models and runtime stay on this drive. AiDEX
+                remembers the last started model and loads it automatically on
+                launch.
+              </Text>
+              <Button
+                variant="ghost"
+                disabled={busy || starting}
+                onClick={() => setShowImport((value) => !value)}
+              >
+                {showImport
+                  ? "Hide setup options"
+                  : "Add another model or replace runtime"}
+              </Button>
+            </>
+          )}
+          {busy && (
+            <Button
+              variant="outline"
+              onClick={() =>
+                void call("inference.cancel").catch((caught) =>
+                  setError(toAidexError(caught).message),
+                )
+              }
+            >
+              Cancel operation
+            </Button>
+          )}
+        </Stack>
+      </Card>
+      <Stack direction="row" gap={3} wrap>
+        <Select
+          label="Compute"
+          value={backend}
+          options={[
+            { value: "auto", label: "Auto" },
+            { value: "cpu", label: "CPU" },
+            {
+              value: "gpu",
+              label: "GPU",
+              disabled: !catalog.data?.runtime?.gpu_supported,
+            },
+          ]}
+          onChange={(event) =>
+            setBackend(event.target.value as InferenceBackend)
+          }
+        />
+        <TextField
+          label="Context tokens"
+          value={context}
+          onChange={(event) => setContext(event.target.value)}
+        />
+        <TextField
+          label="CPU threads"
+          value={threads}
+          onChange={(event) => setThreads(event.target.value)}
+        />
+      </Stack>
+      <Text>
+        Inference {status.data?.state ?? "loading"}
+        {status.data?.model_name ? ` · ${status.data.model_name}` : ""}
+        {status.data?.backend ? ` · ${status.data.backend}` : ""}
+      </Text>
+      {status.data?.limitations.map((limitation) => (
+        <Notice key={limitation} tone="warning">
+          {limitation}
+        </Notice>
+      ))}
+      {status.data?.state === "ready" && (
+        <Button
+          disabled={busy}
+          variant="outline"
+          onClick={() => void act(() => call("inference.stop"))}
+        >
+          Stop inference
+        </Button>
+      )}
+      <List>
+        {catalog.data?.models.map((model) => (
+          <ListRow
+            key={model.id}
+            title={model.name}
+            subtitle={model.path}
+            meta={[
+              model.availability,
+              `${(model.size_bytes / 1024 ** 3).toFixed(2)} GiB`,
+              `GGUF v${model.gguf_version}`,
+            ]}
+            trailing={
+              <Stack direction="row" gap={2}>
+                <Button
+                  disabled={
+                    busy ||
+                    starting ||
+                    model.availability !== "available" ||
+                    !catalog.data?.runtime ||
+                    status.data?.state === "ready"
+                  }
+                  onClick={() =>
+                    void act(() => {
+                      const context_window = Number(context),
+                        threadCount = Number(threads);
+                      if (
+                        !Number.isInteger(context_window) ||
+                        context_window < 512 ||
+                        !Number.isInteger(threadCount) ||
+                        threadCount < 1
+                      )
+                        throw new Error(
+                          "Enter valid positive integer limits (context at least 512).",
+                        );
+                      const start = call("inference.start", {
+                        model_id: model.id,
+                        backend,
+                        context_window,
+                        threads: threadCount,
+                      });
+                      status.refetch();
+                      return start;
+                    })
+                  }
+                >
+                  {starting && status.data?.model_id === model.id
+                    ? "Loading…"
+                    : "Start"}
+                </Button>
+                <Button
+                  disabled={
+                    busy || starting || status.data?.model_id === model.id
+                  }
+                  variant="ghost"
+                  onClick={() => {
+                    if (
+                      window.confirm(
+                        `Remove the managed copy of ${model.name}? The original import is preserved.`,
+                      )
+                    )
+                      void act(() =>
+                        call("inference.model.remove", { id: model.id }),
+                      );
+                  }}
+                >
+                  Remove
+                </Button>
+              </Stack>
             }
           />
         ))}
-      </Grid>
-    </section>
-  );
-}
-
-function RuntimeAndStorage() {
-  const { navigate } = useNavigation();
-  return (
-    <Split emphasis="equal">
-      <section aria-labelledby="runtime-heading">
-        <SectionHeader
-          title={<span id="runtime-heading">Runtime</span>}
-          actions={
-            <Button variant="ghost" icon={<SettingsIcon />} onClick={() => navigate({ page: "settings" })}>
-              Runtime settings
-            </Button>
-          }
-        />
-        <KeyValueList items={runtimeInfo} />
-      </section>
-      <section aria-labelledby="storage-heading">
-        <SectionHeader title={<span id="storage-heading">Storage</span>} />
-        <Meter
-          label="Model storage on the AiDEX drive"
-          value={usedGb}
-          max={driveCapacityGb}
-          tone="accent"
-          valueText={`Models use ${usedGb} GB of 1 TB`}
-        />
-      </section>
-    </Split>
-  );
-}
-
-/** Local tab of the Model Center: current model, installed GGUF models, downloads, runtime, and storage. */
-export function LocalModelsPanel() {
-  return (
-    <Stack gap={10}>
-      <CurrentModelCard />
-      <InstalledModels />
-      <DownloadableModels />
-      <RuntimeAndStorage />
+      </List>
+      {!!catalog.data && !catalog.data.models.length && (
+        <Text tone="muted">Import a GGUF model to use local chat.</Text>
+      )}
+      <ModelInventory localOnly />
     </Stack>
   );
 }

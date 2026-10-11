@@ -58,16 +58,16 @@ pub(crate) fn canonical_file(path: &Path) -> Result<PathBuf, SandboxError> {
 pub(crate) fn simplify(path: PathBuf) -> PathBuf {
     #[cfg(windows)]
     {
-        if let Some(text) = path.to_str() {
-            if let Some(rest) = text.strip_prefix(r"\\?\") {
-                let bytes = rest.as_bytes();
-                let is_drive_path = bytes.len() >= 3
-                    && bytes[0].is_ascii_alphabetic()
-                    && bytes[1] == b':'
-                    && bytes[2] == b'\\';
-                if is_drive_path && rest.len() < 260 {
-                    return PathBuf::from(rest);
-                }
+        if let Some(text) = path.to_str()
+            && let Some(rest) = text.strip_prefix(r"\\?\")
+        {
+            let bytes = rest.as_bytes();
+            let is_drive_path = bytes.len() >= 3
+                && bytes[0].is_ascii_alphabetic()
+                && bytes[1] == b':'
+                && bytes[2] == b'\\';
+            if is_drive_path && rest.len() < 260 {
+                return PathBuf::from(rest);
             }
         }
         path

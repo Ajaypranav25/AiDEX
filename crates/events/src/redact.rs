@@ -268,12 +268,12 @@ const PREFIXES: &[Prefix] = &[
 fn prefixed_tokens(bytes: &[u8], spans: &mut Vec<(usize, usize)>) {
     let mut at = 0;
     while at < bytes.len() {
-        if word_start(bytes, at) {
-            if let Some(end) = prefixed_token_at(bytes, at).or_else(|| jwt_at(bytes, at)) {
-                spans.push((at, end));
-                at = end;
-                continue;
-            }
+        if word_start(bytes, at)
+            && let Some(end) = prefixed_token_at(bytes, at).or_else(|| jwt_at(bytes, at))
+        {
+            spans.push((at, end));
+            at = end;
+            continue;
         }
         at += 1;
     }

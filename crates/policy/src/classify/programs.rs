@@ -121,10 +121,10 @@ pub(crate) fn normalize_program(word: &str) -> String {
     let base = word.rsplit(['/', '\\']).next().unwrap_or(word);
     let lower = base.to_ascii_lowercase();
     for extension in [".exe", ".com", ".bat", ".cmd"] {
-        if let Some(stem) = lower.strip_suffix(extension) {
-            if !stem.is_empty() {
-                return stem.to_owned();
-            }
+        if let Some(stem) = lower.strip_suffix(extension)
+            && !stem.is_empty()
+        {
+            return stem.to_owned();
         }
     }
     lower

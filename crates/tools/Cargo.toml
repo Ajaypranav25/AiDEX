@@ -1,0 +1,35 @@
+[package]
+name = "aidex-tools"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Typed, two-phase (plan/execute) AiDEX tools with workspace confinement."
+
+[features]
+# Development and test only: `DirectLauncher` runs processes without any sandbox.
+direct-launcher = []
+
+[dependencies]
+aidex-core = { path = "../core" }
+aidex-events = { path = "../events" }
+aidex-policy = { path = "../policy" }
+aidex-sandbox = { path = "../sandbox" }
+aidex-workspace = { path = "../workspace" }
+globset = { version = "0.4", default-features = false }
+ignore = "0.4"
+regex = "1"
+schemars = "0.8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_path_to_error = "0.1"
+sha2 = "0.10"
+similar = "2"
+
+[dev-dependencies]
+aidex-tools = { path = ".", features = ["direct-launcher"] }
+sha2 = "0.10"
+tempfile = "3"
+
+[lints]
+workspace = true

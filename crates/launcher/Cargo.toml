@@ -1,0 +1,40 @@
+[package]
+name = "aidex-launcher"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Drive-root AiDEX launcher: verifies the installed bundle, then runs the aidex CLI from the drive."
+
+# Installed at the drive root as `AiDEX.exe` (Windows) or under `app/launcher/<target>/`
+# (Linux/macOS). The cargo name differs from `AiDEX` because `AiDEX.exe` and the CLI's
+# `aidex.exe` would be the same file on case-insensitive filesystems.
+[[bin]]
+name = "aidex-launcher"
+path = "src/main.rs"
+
+# Test-only stand-in for the `aidex` CLI; it reports its arguments and environment.
+# It is never part of a bundle (the packager builds only the `aidex-launcher` binary here).
+[[bin]]
+name = "aidex-launcher-test-cli"
+path = "tests/support/test_cli.rs"
+test = false
+doc = false
+
+[dependencies]
+aidex-bundle = { path = "../bundle" }
+aidex-drive = { path = "../drive" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(windows)'.dependencies]
+ctrlc = "3.5"
+
+[dev-dependencies]
+aidex-core = { path = "../core" }
+# Test builds trust keys from AIDEX_DEV_TRUSTED_KEYS (generated at run time by the tests).
+aidex-bundle = { path = "../bundle", features = ["dev-trust"] }
+tempfile = "3"
+
+[lints]
+workspace = true

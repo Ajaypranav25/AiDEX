@@ -32,7 +32,7 @@ export function SettingsPage() {
       <PageHeader
         title="Settings"
         description="Appearance and preferences for this drive."
-        meta={<StatusIndicator tone="neutral" label="Sample data until AiDEX Core is connected" />}
+        meta={<StatusIndicator tone="neutral" label="Diagnostics and Drive are live; updates and cleanup are sample data" />}
       />
       <Tabs
         id={TABS_ID}

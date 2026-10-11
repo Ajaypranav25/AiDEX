@@ -70,6 +70,9 @@ pub struct DaemonOptions {
     pub poll_interval: Duration,
     /// Defaults to `root.is_dir()`; a `false` result stops the daemon.
     pub drive_present: DriveProbe,
+    /// Updater trust store and self-test; `None` uses the built-in trust store and
+    /// the process self-test (tests inject run-time keys here).
+    pub updater: Option<aidex_updater::UpdaterConfig>,
 }
 
 impl Default for DaemonOptions {
@@ -78,6 +81,7 @@ impl Default for DaemonOptions {
             transport: TransportConfig::default(),
             poll_interval: Duration::from_millis(50),
             drive_present: Arc::new(|root: &Path| root.is_dir()),
+            updater: None,
         }
     }
 }
@@ -201,8 +205,10 @@ impl Daemon {
             return Err(DaemonError::DriveUnavailable(root.to_path_buf()));
         }
         let shutdown = ShutdownSignal::new();
-        let services =
-            Arc::new(Services::open(root, shutdown.clone()).map_err(DaemonError::Services)?);
+        let services = Arc::new(
+            Services::open_with(root, shutdown.clone(), options.updater.clone())
+                .map_err(DaemonError::Services)?,
+        );
         let mut router = Router::new();
         methods::register_all(&mut router, &services).map_err(DaemonError::Router)?;
         Ok(Self {
@@ -248,6 +254,9 @@ impl Daemon {
             token,
         };
         endpoint::publish(&self.root, &endpoint).map_err(DaemonError::Endpoint)?;
+        // This daemon now owns the drive: finish or roll back an interrupted update
+        // before serving (outcome and failures are events and `update.status`).
+        self.services.recover_updates();
         let events = self.services.events().clone();
         let started = EventKind::DaemonStarted {
             pid: self.services.pid(),
@@ -261,18 +270,31 @@ impl Daemon {
                 error.to_string(),
             )));
         }
+        let broker = Arc::clone(self.services.broker());
+        let native = self.services.native().clone();
+        let inference = self.services.inference().clone();
         drop(self.services);
         let root = self.root.clone();
         let options = self.options;
         let thread = thread::Builder::new()
             .name("aidexd-accept".into())
             .spawn(move || {
+                // The saved model is verified and loaded on its own worker;
+                // accepting IPC never waits for GGUF hashing or llama.cpp readiness.
+                let _ = inference.restore_saved();
                 let outcome = server.run(
                     &root,
                     options.poll_interval,
                     &options.drive_present,
-                    |outcome| record_stopping(&events, outcome),
+                    |outcome| {
+                        native.shutdown();
+                        let _ = inference.shutdown();
+                        record_stopping(&events, outcome);
+                        // No tool process outlives the daemon (or the drive).
+                        broker.shutdown_processes(matches!(outcome, Ok(StopReason::DriveRemoved)));
+                    },
                 );
+                let _ = inference.shutdown();
                 let cleanup = endpoint::remove(&root);
                 match (outcome, cleanup) {
                     (Ok(reason), Ok(())) => Ok(reason),
@@ -392,16 +414,15 @@ pub fn recover_stale_endpoint(root: &Path) -> Result<Recovery, DaemonError> {
     else {
         return Ok(Recovery::NoEndpoint);
     };
-    if summary.version == CONTRACT_VERSION {
-        if let Ok(endpoint) = endpoint::read(root) {
-            if Client::connect_endpoint(&endpoint, lifecycle_client()).is_ok() {
-                return Err(DaemonError::AlreadyRunning { pid: endpoint.pid });
-            }
-        }
-    }
     if let Some(port) = summary.port.filter(|port| *port != 0) {
         let address = SocketAddr::from(([127, 0, 0, 1], port));
         if TcpStream::connect_timeout(&address, PROBE_TIMEOUT).is_ok() {
+            if summary.version == CONTRACT_VERSION
+                && let Ok(endpoint) = endpoint::read(root)
+                && Client::connect_endpoint(&endpoint, lifecycle_client()).is_ok()
+            {
+                return Err(DaemonError::AlreadyRunning { pid: endpoint.pid });
+            }
             let detail = if summary.version == CONTRACT_VERSION {
                 "it is responding but did not accept this user's capability".to_owned()
             } else {

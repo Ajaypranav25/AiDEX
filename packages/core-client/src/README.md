@@ -1,3 +1,3 @@
 # Core client source
 
-Generated or maintained client code belongs here once `protocol/` defines stable contracts.
+Unused: the client lives in `packages/client/src` (see `../README.md`).

@@ -296,6 +296,14 @@ pub fn samples(text: &str) -> Vec<EventKind> {
         EventKind::DaemonStopping {
             reason: DaemonStopReason::Requested,
         },
+        EventKind::EmergencyStopped {
+            reason: t(),
+            cancelled_approvals: 2,
+            revoked_approvals: 1,
+            terminated_processes: 3,
+            revoked_handles: 4,
+        },
+        EventKind::EmergencyResumed {},
         EventKind::ExtensionEnabled {
             extension_id: id("skill_review"),
             kind: ExtensionKind::Skill,
@@ -303,6 +311,35 @@ pub fn samples(text: &str) -> Vec<EventKind> {
         EventKind::ExtensionDisabled {
             extension_id: id("mcp_github"),
             kind: ExtensionKind::Mcp,
+        },
+        EventKind::UpdateStaged {
+            update_id: id("upd_1"),
+            version: t(),
+            target: t(),
+        },
+        EventKind::UpdateVerified {
+            update_id: id("upd_1"),
+            version: t(),
+            signer_key_id: Some(t()),
+            unsigned_allowed: false,
+        },
+        EventKind::UpdateSwitched {
+            update_id: id("upd_1"),
+            operation: t(),
+            from_version: Some(t()),
+            to_version: t(),
+        },
+        EventKind::UpdateRolledBack {
+            update_id: id("upd_1"),
+            from_version: Some(t()),
+            to_version: None,
+            reason: t(),
+        },
+        EventKind::UpdateFailed {
+            update_id: None,
+            stage: t(),
+            code: t(),
+            message: t(),
         },
         EventKind::LegacyV1 {
             record: LegacyRecord::ToolFinished,

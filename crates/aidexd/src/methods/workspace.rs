@@ -7,11 +7,13 @@
 
 use crate::{
     errors::RpcError,
+    methods::record_event,
     router::{Router, RouterError},
     rpc::{MAX_MESSAGE_BYTES, expect_no_params, parse_params, to_result},
     services::Services,
 };
 use aidex_core::{EntityId, WorkspacePath};
+use aidex_events::{EventKind, EventScope};
 use aidex_workspace::{
     ApplyReport, ApplySelection, Discovery, EphemeralCreated, EphemeralDiff, FileChange,
     SkippedEntry, Workspace, WorkspaceError, discover,
@@ -170,6 +172,28 @@ fn host_path(path: &str) -> Result<&Path, RpcError> {
     Ok(Path::new(path))
 }
 
+/// The event-catalog kind of a workspace.
+fn event_kind(kind: &aidex_workspace::WorkspaceKind) -> aidex_events::WorkspaceKind {
+    match kind {
+        aidex_workspace::WorkspaceKind::Host => aidex_events::WorkspaceKind::Host,
+        aidex_workspace::WorkspaceKind::Drive => aidex_events::WorkspaceKind::Drive,
+        aidex_workspace::WorkspaceKind::Ephemeral { .. } => aidex_events::WorkspaceKind::Ephemeral,
+    }
+}
+
+/// `workspace.added`, scoped to the new workspace.
+fn record_added(services: &Services, workspace: &Workspace) -> Result<(), RpcError> {
+    record_event(
+        services,
+        EventScope::workspace(workspace.id.clone()),
+        EventKind::WorkspaceAdded {
+            workspace_id: workspace.id.clone(),
+            kind: event_kind(&workspace.kind),
+            name: workspace.name.clone(),
+        },
+    )
+}
+
 /// Bound a review so the response fits one message line.
 pub fn bounded_review(diff: EphemeralDiff) -> EphemeralReview {
     let total_changes = diff.changes.len();
@@ -228,6 +252,7 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
             .workspaces()
             .add_host(host_path(&params.path)?, params.name.as_deref())
             .map_err(workspace_error)?;
+        record_added(&shared, &workspace)?;
         to_result(&workspace)
     })?;
     let shared = Arc::clone(services);
@@ -237,6 +262,7 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
             .workspaces()
             .create_drive(&params.name)
             .map_err(workspace_error)?;
+        record_added(&shared, &workspace)?;
         to_result(&workspace)
     })?;
     let shared = Arc::clone(services);
@@ -268,6 +294,13 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
         let registry = shared.workspaces();
         let found = registry.find(&params.id_or_name).map_err(workspace_error)?;
         let workspace = registry.select(&found.id).map_err(workspace_error)?;
+        record_event(
+            &shared,
+            EventScope::workspace(workspace.id.clone()),
+            EventKind::WorkspaceSelected {
+                workspace_id: workspace.id.clone(),
+            },
+        )?;
         to_result(&workspace)
     })?;
     let shared = Arc::clone(services);
@@ -287,6 +320,13 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
             registry.remove(&id)
         }
         .map_err(workspace_error)?;
+        record_event(
+            &shared,
+            EventScope::workspace(workspace.id.clone()),
+            EventKind::WorkspaceRemoved {
+                workspace_id: workspace.id.clone(),
+            },
+        )?;
         to_result(&Removed {
             workspace,
             deleted_data: params.delete_data,
@@ -305,6 +345,14 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
         let created: EphemeralCreated = registry
             .create_ephemeral(&source.id)
             .map_err(workspace_error)?;
+        record_event(
+            &shared,
+            EventScope::workspace(created.workspace.id.clone()),
+            EventKind::WorkspaceEphemeralCreated {
+                workspace_id: created.workspace.id.clone(),
+                source_workspace_id: source.id.clone(),
+            },
+        )?;
         to_result(&created)
     })?;
     let shared = Arc::clone(services);
@@ -323,14 +371,19 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
             None => ApplySelection::All,
             Some(paths) => ApplySelection::Paths(paths),
         };
+        let id = exact_id(&params.id)?;
         let report: ApplyReport = shared
             .workspaces()
-            .apply(
-                &exact_id(&params.id)?,
-                &selection,
-                params.review_digest.as_deref(),
-            )
+            .apply(&id, &selection, params.review_digest.as_deref())
             .map_err(workspace_error)?;
+        record_event(
+            &shared,
+            EventScope::workspace(id.clone()),
+            EventKind::WorkspaceEphemeralApplied {
+                workspace_id: id,
+                files_changed: report.applied.len() as u64,
+            },
+        )?;
         to_result(&report)
     })?;
     let shared = Arc::clone(services);
@@ -340,6 +393,13 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
             .workspaces()
             .discard(&exact_id(&params.id)?)
             .map_err(workspace_error)?;
+        record_event(
+            &shared,
+            EventScope::workspace(workspace.id.clone()),
+            EventKind::WorkspaceEphemeralDiscarded {
+                workspace_id: workspace.id.clone(),
+            },
+        )?;
         to_result(&Discarded { workspace })
     })?;
     Ok(())

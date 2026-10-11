@@ -134,13 +134,13 @@ impl WorkspaceRegistry {
             .unwrap_or_else(PoisonError::into_inner);
         let context = self.context(id)?;
         let diff = self.review_context(&context)?;
-        if let Some(expected) = expected_digest {
-            if expected != diff.digest {
-                return Err(WorkspaceError::ReviewChanged {
-                    expected: expected.to_owned(),
-                    actual: diff.digest,
-                });
-            }
+        if let Some(expected) = expected_digest
+            && expected != diff.digest
+        {
+            return Err(WorkspaceError::ReviewChanged {
+                expected: expected.to_owned(),
+                actual: diff.digest,
+            });
         }
         let selected: Vec<&FileChange> = match selection {
             ApplySelection::All => diff.changes.iter().collect(),

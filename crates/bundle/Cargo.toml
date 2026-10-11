@@ -1,0 +1,39 @@
+[package]
+name = "aidex-bundle"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Portable AiDEX bundle manifests, drive pointers, integrity verification, and atomic drive installation."
+
+[features]
+default = []
+# Deterministic .zip/.tar.gz writing and bounded extraction (packager and updater only;
+# the launcher does not need it).
+archive = ["dep:flate2", "dep:tar", "dep:zip"]
+# Trust keys named in `AIDEX_DEV_TRUSTED_KEYS` at run time. Enabled only through
+# dev-dependencies (tests); release bundles never honour that variable.
+dev-trust = []
+
+[dependencies]
+aidex-core = { path = "../core" }
+aidex-drive = { path = "../drive" }
+ed25519-dalek = "2.2"
+flate2 = { version = "1.1", optional = true }
+getrandom = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tar = { version = "0.4.46", default-features = false, optional = true }
+zip = { version = "7.2", default-features = false, features = ["deflate-flate2"], optional = true }
+zeroize = "1.7"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
+
+[[test]]
+name = "archive"
+required-features = ["archive"]

@@ -135,10 +135,10 @@ fn nested_repositories(root: &Path) -> (Vec<WorkspacePath>, bool) {
         for (name, path) in children {
             let mut child = relative.clone();
             child.push(name);
-            if is_repository_root(&path) {
-                if let Ok(nested) = WorkspacePath::new(child.join("/")) {
-                    found.push(nested);
-                }
+            if is_repository_root(&path)
+                && let Ok(nested) = WorkspacePath::new(child.join("/"))
+            {
+                found.push(nested);
             }
             if child.len() < MAX_SCAN_DEPTH {
                 queue.push_back((path, child));

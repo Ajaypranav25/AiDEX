@@ -5,16 +5,25 @@
 //! are added here as fields constructed in [`Services::open`]; their JSON-RPC
 //! adapters live in `methods/<domain>.rs`.
 
+mod inference;
+mod models;
+
+pub use models::{EventsModelObserver, ModelServices, VaultCredentials, model_event_kind};
+
 use crate::{endpoint, lifecycle::ShutdownSignal};
+use aidex_broker::{Broker, BrokerConfig};
+use aidex_context::ContextService;
 use aidex_core::ServiceErrorCode;
 use aidex_drive::DrivePaths;
-use aidex_events::{EventLog, RetentionPolicy};
+use aidex_events::{EventLog, EventSink, RetentionPolicy};
+use aidex_sessions::{RecoveryReport, SessionStore};
+use aidex_updater::{RecoveryReport as UpdateRecovery, Updater, UpdaterConfig};
 use aidex_vault::{VaultService, VaultServiceConfig};
 use aidex_workspace::WorkspaceRegistry;
 use std::{
     fmt,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -49,7 +58,16 @@ pub struct Services {
     shutdown: ShutdownSignal,
     events: EventLog,
     vault: Arc<VaultService>,
-    workspaces: WorkspaceRegistry,
+    workspaces: Arc<WorkspaceRegistry>,
+    broker: Arc<Broker>,
+    models: ModelServices,
+    sessions: Arc<SessionStore>,
+    session_recovery: RecoveryReport,
+    context: Arc<ContextService>,
+    native: Arc<aidex_harness::NativeEngine>,
+    inference: Arc<aidex_inference::InferenceService>,
+    updates: Result<Arc<Updater>, String>,
+    update_recovery: Mutex<Option<Result<UpdateRecovery, String>>>,
 }
 
 impl Services {
@@ -59,6 +77,17 @@ impl Services {
     /// `ServicesError::new("<domain>", error.code(), error.to_string())`, and
     /// store it in a field with an accessor.
     pub fn open(drive_root: &Path, shutdown: ShutdownSignal) -> Result<Self, ServicesError> {
+        Self::open_with(drive_root, shutdown, None)
+    }
+
+    /// [`open`](Self::open) with an explicit updater configuration (tests inject a
+    /// trust store and self-test); `None` uses the binary's built-in trust store and
+    /// the process self-test.
+    pub fn open_with(
+        drive_root: &Path,
+        shutdown: ShutdownSignal,
+        updater: Option<UpdaterConfig>,
+    ) -> Result<Self, ServicesError> {
         if !drive_root.is_dir() {
             return Err(ServicesError::new(
                 "daemon",
@@ -80,8 +109,40 @@ impl Services {
             .map_err(|error| ServicesError::new("vault", error.code(), error.to_string()))?;
         let vault = VaultService::open(vault_dir, VaultServiceConfig::default())
             .map_err(|error| ServicesError::new("vault", error.code(), error.to_string()))?;
-        let workspaces = WorkspaceRegistry::open(&paths)
-            .map_err(|error| ServicesError::new("workspace", error.code(), error.to_string()))?;
+        let workspaces =
+            Arc::new(WorkspaceRegistry::open(&paths).map_err(|error| {
+                ServicesError::new("workspace", error.code(), error.to_string())
+            })?);
+        let vault = Arc::new(vault);
+        let broker = open_broker(&paths, &events, &workspaces, &vault)?;
+        spawn_approval_expiry(&broker, &shutdown);
+        // Model notifications are recorded as typed `model.*` events; remote provider
+        // calls and their credentials pass the broker's policy.
+        let models = ModelServices::open(
+            &paths,
+            Arc::clone(&vault),
+            Arc::clone(&broker),
+            Arc::new(EventsModelObserver::new(Arc::new(events.clone()))),
+        )?;
+        let (sessions, session_recovery) = open_sessions(&paths, &events)?;
+        let context = ContextService::open(&paths, Arc::new(events.clone()))
+            .map_err(|error| ServicesError::new("context", error.code(), error.to_string()))?;
+        let private_sessions = Arc::new(
+            aidex_native_sessions::SessionStore::open(
+                paths.sessions().join("native.sqlite3"),
+                vault.clone(),
+            )
+            .map_err(|e| ServicesError::new("native", ServiceErrorCode::Unavailable, e))?,
+        );
+        let native = aidex_harness::NativeEngine::new(
+            private_sessions,
+            models.registry().clone(),
+            workspaces.clone(),
+            Arc::new(events.clone()),
+            runtime.join("native-processes"),
+        );
+        let inference = inference::open_inference(&paths, &models)?;
+        let updates = open_updates(&paths, &events, updater);
         Ok(Self {
             drive_root: drive_root.to_path_buf(),
             paths,
@@ -89,8 +150,17 @@ impl Services {
             started_at: Instant::now(),
             shutdown,
             events,
-            vault: Arc::new(vault),
+            vault,
             workspaces,
+            broker,
+            models,
+            sessions: Arc::new(sessions),
+            session_recovery,
+            context: Arc::new(context),
+            native,
+            inference,
+            updates,
+            update_recovery: Mutex::new(None),
         })
     }
 
@@ -132,6 +202,145 @@ impl Services {
     pub fn workspaces(&self) -> &WorkspaceRegistry {
         &self.workspaces
     }
+
+    /// The execution broker (`aidex-broker`): tool execution for `tool.*`,
+    /// broker approvals, policy settings, model egress, and emergency stop.
+    pub fn broker(&self) -> &Arc<Broker> {
+        &self.broker
+    }
+
+    /// Model providers, the router, and the offline switch
+    /// (`aidex-providers`, `aidex-router`).
+    pub fn models(&self) -> &ModelServices {
+        &self.models
+    }
+    /// Durable sessions, checkpoints, and resume plans (`aidex-sessions`).
+    pub fn sessions(&self) -> &Arc<SessionStore> {
+        &self.sessions
+    }
+
+    /// What startup recovery found (interrupted sessions, lost tool calls, event gaps).
+    pub fn session_recovery(&self) -> &RecoveryReport {
+        &self.session_recovery
+    }
+
+    /// Local index, search, project rules, memory, and context packs
+    /// (`aidex-context`). Dropping the services cancels running index jobs.
+    pub fn context(&self) -> &Arc<ContextService> {
+        &self.context
+    }
+    pub fn native(&self) -> &Arc<aidex_harness::NativeEngine> {
+        &self.native
+    }
+    pub fn inference(&self) -> &Arc<aidex_inference::InferenceService> {
+        &self.inference
+    }
+    /// The drive's updater (`aidex-updater`), or why it is unavailable (a host without
+    /// a bundle target, or an invalid built-in trust configuration).
+    pub fn updates(&self) -> Result<&Arc<Updater>, &str> {
+        self.updates.as_ref().map_err(String::as_str)
+    }
+
+    /// Recover an interrupted update or rollback. The daemon calls this once it owns
+    /// the drive's endpoint and before it serves requests (the daemon is the drive's
+    /// only updater, so no other process can be mid-update).
+    pub fn recover_updates(&self) {
+        let outcome = match &self.updates {
+            Ok(updater) => updater.recover().map_err(|error| error.to_string()),
+            Err(reason) => Err(reason.clone()),
+        };
+        if let Ok(mut slot) = self.update_recovery.lock() {
+            *slot = Some(outcome);
+        }
+    }
+
+    /// What update recovery found at startup (`None` before it ran).
+    pub fn update_recovery(&self) -> Option<Result<UpdateRecovery, String>> {
+        self.update_recovery
+            .lock()
+            .ok()
+            .and_then(|slot| slot.clone())
+    }
+}
+
+/// The updater for this host's bundle target, emitting `update.*` into the drive log.
+fn open_updates(
+    paths: &DrivePaths,
+    events: &EventLog,
+    config: Option<UpdaterConfig>,
+) -> Result<Arc<Updater>, String> {
+    let config = match config {
+        Some(config) => config,
+        None => UpdaterConfig::builtin().map_err(|error| error.to_string())?,
+    };
+    let sink: Arc<dyn EventSink> = Arc::new(events.clone());
+    Updater::for_host(paths.clone(), config)
+        .map(|updater| Arc::new(updater.with_events(sink)))
+        .map_err(|error| error.to_string())
+}
+
+/// How often pending approvals are checked for expiry.
+const APPROVAL_EXPIRY_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Compose the execution broker over the drive: approvals in `private_sessions/`,
+/// settings in `private_config/policy.toml`, policy documents in `policies/`, the
+/// sandbox helper next to the daemon executable, and the drive vault.
+fn open_broker(
+    paths: &DrivePaths,
+    events: &EventLog,
+    workspaces: &Arc<WorkspaceRegistry>,
+    vault: &Arc<VaultService>,
+) -> Result<Arc<Broker>, ServicesError> {
+    let broker_error = |error: aidex_broker::BrokerError| {
+        ServicesError::new("broker", error.code(), error.to_string())
+    };
+    let config = BrokerConfig::for_drive(paths).map_err(broker_error)?;
+    let sink: Arc<dyn EventSink> = Arc::new(events.clone());
+    let broker = Broker::builder(config, Arc::clone(workspaces) as _, sink)
+        .vault(Arc::clone(vault))
+        .open()
+        .map_err(broker_error)?;
+    Ok(Arc::new(broker))
+}
+
+/// Expire due approvals in the background until shutdown (or the broker is gone).
+fn spawn_approval_expiry(broker: &Arc<Broker>, shutdown: &ShutdownSignal) {
+    let broker = Arc::downgrade(broker);
+    let shutdown = shutdown.clone();
+    // Expiry is also enforced when an approval is resolved, so a failed spawn only
+    // delays `approval.expired` events.
+    let _ = std::thread::Builder::new()
+        .name("aidexd-approval-expiry".into())
+        .spawn(move || {
+            while !shutdown.is_requested() {
+                std::thread::sleep(APPROVAL_EXPIRY_INTERVAL);
+                let Some(broker) = broker.upgrade() else {
+                    break;
+                };
+                let _ = broker.expire_due();
+            }
+        });
+}
+
+/// Open the session store with the drive event log as its sink, then recover from an
+/// unclean stop before anything is served: active sessions become `interrupted`,
+/// running tool calls `lost`, and unprovable events explicit gaps.
+fn open_sessions(
+    paths: &DrivePaths,
+    events: &EventLog,
+) -> Result<(SessionStore, RecoveryReport), ServicesError> {
+    let session_error = |error: aidex_sessions::SessionError| {
+        ServicesError::new("sessions", error.code(), error.to_string())
+    };
+    let sink: Arc<dyn EventSink> = Arc::new(events.clone());
+    let store = SessionStore::open(paths, sink).map_err(session_error)?;
+    let latest = events
+        .latest_cursor()
+        .map_err(|error| ServicesError::new("events", error.code(), error.to_string()))?;
+    let report = store
+        .recover_on_startup(store.host(), Some(latest))
+        .map_err(session_error)?;
+    Ok((store, report))
 }
 
 /// Open the drive's event log and import PR #40's superseded log once, if present.

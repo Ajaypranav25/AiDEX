@@ -14,6 +14,7 @@ use std::{
 const USAGE: &str = "aidexd — local AiDEX daemon
 
 Usage: aidexd <command> [--drive <PATH>]
+       aidexd --version
 
 Commands:
   start   launch a detached daemon for the drive and wait until it is ready
@@ -68,6 +69,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
         "stop" => {
             lifecycle::stop(&drive_arg(&args)?, STOP_TIMEOUT).map_err(|e| e.to_string())?;
             println!("stopped");
+            Ok(())
+        }
+        "--version" | "-V" | "version" => {
+            println!("aidexd {}", env!("CARGO_PKG_VERSION"));
             Ok(())
         }
         "--help" | "-h" | "help" => {

@@ -6,11 +6,22 @@
 //! Daemon-backed commands obtain a client with [`daemon::connect`].
 
 pub mod agent;
+pub mod approvals;
+pub mod context;
 pub mod daemon;
 pub mod doctor;
 pub mod drive;
+pub mod emergency;
 pub mod events;
+pub mod inference;
+pub mod model;
+pub mod offline;
 pub mod omp;
+pub mod policy;
+pub mod provider;
+pub mod session;
+pub mod tools;
+pub mod update;
 pub mod vault;
 pub mod workspace;
 
@@ -33,5 +44,23 @@ pub fn dispatch(command: Option<Commands>, output: Output) -> Result<Exit, CliEr
         Some(Commands::Doctor) => doctor::run(output),
         Some(Commands::Vault { command }) => vault::run(command, output),
         Some(Commands::Workspace(args)) => workspace::run(args, output),
+        Some(Commands::Model(args)) => model::run(args, output),
+        Some(Commands::Inference(args)) => inference::run(args, output),
+        Some(Commands::Provider(args)) => provider::run(args, output),
+        Some(Commands::Offline(args)) => offline::run(args, output),
+        Some(Commands::Session(args)) => session::run(args, output),
+        Some(Commands::Approvals(args)) => approvals::run(args, output),
+        Some(Commands::Approve(args)) => approvals::approve(args, output),
+        Some(Commands::Deny(args)) => approvals::deny(args, output),
+        Some(Commands::Policy(args)) => policy::run(args, output),
+        Some(Commands::Tools(args)) => tools::run(args, output),
+        Some(Commands::Stop(args)) => emergency::stop(args, output),
+        Some(Commands::Resume(args)) => emergency::resume(args, output),
+        Some(Commands::Index(args)) => context::index::run(args, output),
+        Some(Commands::Search(args)) => context::search::run(args, output),
+        Some(Commands::Context(args)) => context::pack::run(args, output),
+        Some(Commands::Memory(args)) => context::memory::run(args, output),
+        Some(Commands::Rules(args)) => context::rules::run(args, output),
+        Some(Commands::Update(args)) => update::run(args, output),
     }
 }

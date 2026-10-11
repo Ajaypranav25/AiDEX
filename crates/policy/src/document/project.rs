@@ -16,6 +16,7 @@ pub struct ProjectInfo {
     pub package_manager: Option<String>,
     pub tests: Option<String>,
     pub lint: Option<String>,
+    pub build: Option<String>,
 }
 
 /// Rules a workspace declares about itself.
@@ -50,6 +51,7 @@ impl ProjectRules {
                 package_manager: project.package_manager,
                 tests: project.tests,
                 lint: project.lint,
+                build: project.build,
             },
             never_modify,
             require_approval: agent.require_approval,
@@ -97,6 +99,7 @@ struct ProjectSection {
     package_manager: Option<String>,
     tests: Option<String>,
     lint: Option<String>,
+    build: Option<String>,
 }
 
 #[derive(Default, Deserialize)]

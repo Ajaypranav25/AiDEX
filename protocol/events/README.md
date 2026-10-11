@@ -132,7 +132,14 @@ durable unless marked *ephemeral*.
 | `remote.disconnected` | `device_id: id`, `reason: text?` |
 | `daemon.started` | `pid: u32`, `version: text` |
 | `daemon.stopping` | `reason: requested\|drive_removed` |
+| `emergency.stopped` | `reason: text`, `cancelled_approvals: u64`, `revoked_approvals: u64`, `terminated_processes: u64`, `revoked_handles: u64` |
+| `emergency.resumed` | — |
 | `extension.enabled` / `disabled` | `extension_id: id`, `kind: skill\|mcp\|plugin\|agent` |
+| `update.staged` | `update_id: id`, `version: text`, `target: text` |
+| `update.verified` | `update_id: id`, `version: text`, `signer_key_id: text?` (`null` only for an unsigned bundle accepted by the development opt-in), `unsigned_allowed: bool` |
+| `update.switched` | `update_id: id`, `operation: apply\|rollback`, `from_version: text?`, `to_version: text` (takes effect on next launch) |
+| `update.rolled_back` | `update_id: id`, `from_version: text?`, `to_version: text?`, `reason: text` (explicit rollback, or recovery of an interrupted operation) |
+| `update.failed` | `update_id: id?`, `stage: text`, `code: text` (stable reason, e.g. `bad_signature`), `message: text` |
 | `legacy.v1` | `record` (a PR #40 kind, e.g. `tool_finished`), `subject_id: id?`, `outcome?`, `decision: approved\|denied\|expired?`, `exit_code: i32?` — imported history only |
 
 Domains are the first name segment (`agent` for `agent.subagent.created`). New

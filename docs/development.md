@@ -26,6 +26,8 @@ The drive contract is the root-level schema-v2 JSON `aidex-drive.json` (see `por
 
 Daemon-backed behaviour is tested against an in-process `aidexd::Daemon` on a temporary directory (see `crates/aidexd/tests/common`); the daemon does not need an initialized drive. CI (`.github/workflows/ci.yml`) runs `cargo fmt --all -- --check`, `cargo clippy --workspace --all-targets -- -D warnings`, and `cargo test --workspace` on Windows, Linux, and macOS.
 
+Portable bundles are built with `cargo run --locked -p aidex-packager -- build --target <target> --out dist` (release build into `target/packager/`, then `dist/aidex-<version>-<target>/`, its `.zip`/`.tar.gz`, and `dist/SHA256SUMS`). `aidex-packager install --bundle <archive> --drive <root>` installs one onto an initialized drive (`--init-dev-drive` initializes a non-removable developer folder first), and `aidex-packager smoke --archive <archive> --work <empty dir>` repeats the CI smoke test locally. Build each target on its own OS; Linux bundles use musl (`rustup target add x86_64-unknown-linux-musl` and `musl-tools`), or pass `--triple x86_64-unknown-linux-gnu` for a local glibc build. `.github/workflows/package.yml` builds and smoke-tests the Windows x64, Linux x64, and macOS arm64 bundles. See `portable/packaging/README.md`.
+
 Run the narrowest relevant checks after changing a surface. Do not treat a successful frontend build as proof of drive provisioning, encryption, broker enforcement, or model inference; those behaviors require their own integration scenarios when implemented.
 
 ## Dependency boundaries

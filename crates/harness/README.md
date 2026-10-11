@@ -1,3 +1,15 @@
-# Agent harness
+# Native execution
 
-Planned task graph, model loop, tool routing, checkpoints, budgets, and verification. Agent actions must use the broker, not execute around it.
+`NativeEngine` composes the encrypted `SessionStore`, real `ProviderRegistry`, selected `WorkspaceRegistry`, typed tool registry and `aidex-policy` with sandbox-managed process trees. Chat/plan turns offer no tools. Agent turns offer confined read/list/search/write/patch, Git and shell functions, plus bounded `agent_spawn`/`agent_result` child execution.
+
+Runs have explicit pending/running/waiting_approval/completed/failed/cancelled/interrupted states. Message command IDs are durable and bound to their inputs. Approvals bind to a sealed plan fingerprint and include the planned diff. Decisions are saved before effects and duplicate decisions do not repeat execution. Restart never replays a non-idempotent effect: it marks active runs interrupted, invalidates old executable approval plans, and requires explicit continuation.
+
+Drive policies and workspace project rules are evaluated before invocation/planning. Policy changes invalidate existing tool plans. Model invocation/child creation that needs a policy approval or rate-limit gate currently fails closed; tool approvals are implemented. Tool arguments and outputs, messages, instructions, checkpoints and memory remain encrypted in the session database. Durable events contain metadata; live text deltas are ephemeral and assistant text is coalesced into encrypted history.
+
+Selected provider/model capabilities and output limits are checked. One explicitly configured `provider/model` fallback can run after a retryable inference failure; cancelled, unauthorized, malformed or denied requests do not fall back. No tool effect is retried by fallback. The turn/operation step cap is 128 and the configured output cap is 32768 tokens; defaults are 16 steps and 4096 tokens. Children share their parent's scope, with four immediate children and depth two. Child completion never completes the root.
+
+Windows brokered processes have cleared environments, tracked Job Object trees and watchdog limits. Filesystem and network confinement are unsupported. Supervised shell requests restricted confinement and fails closed; explicit `full_access` opts into brokered same-user execution. Hard policy restrictions still apply. `auto` has no automatic reviewer and uses supervised approvals. Ship `aidex-sandbox-exec` beside `aidexd`.
+
+File-tool writes record encrypted before-content and expected after-digests. Restoring an existing UTF-8 file uses the atomic typed write tool and refuses conflicting user edits or active execution. File deletion/new-file removal and checkpointing arbitrary shell mutations are not implemented. Read/search/context walks are bounded; semantic/vector indexing is not implemented. Very large conversation/memory RPC pagination remains a follow-up; durable records remain on the drive.
+
+The desktop's typed conversation/run/approval/checkpoint contracts are in `packages/client/src/dto/sessions.ts`, with RPC bindings in `packages/client/src/rpc.ts`. Tests use deterministic FakeProvider turns through the real service, plus a real Windows sandbox-helper shell process. Resuming an interrupted root appends matching tool results to both the run transcript and conversation history; later turns therefore retain complete tool-call pairs without repeating effects.

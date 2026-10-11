@@ -262,12 +262,13 @@ impl Subscription {
             // A live ephemeral event carries the latest durable cursor. Emit the
             // independently consumed durable prefix first, without acknowledging
             // the ephemeral event itself or dropping ephemeral events at equality.
-            if let Some((envelope, _)) = queue.items.front() {
-                if !envelope.is_durable() && envelope.cursor > self.scanned {
-                    self.scanned = envelope.cursor;
-                    self.consumed = self.scanned;
-                    return Ok(Some(SubscriptionItem::watermark(self.consumed)));
-                }
+            if let Some((envelope, _)) = queue.items.front()
+                && !envelope.is_durable()
+                && envelope.cursor > self.scanned
+            {
+                self.scanned = envelope.cursor;
+                self.consumed = self.scanned;
+                return Ok(Some(SubscriptionItem::watermark(self.consumed)));
             }
             if let Some((envelope, bytes)) = queue.items.pop_front() {
                 queue.bytes -= bytes;

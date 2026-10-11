@@ -74,10 +74,10 @@ fn exit_result(
 ) -> Result<ExitStatusInfo, SandboxError> {
     let status = status.map_err(|error| SandboxError::io("waiting for sandbox helper", &error))?;
     let code = status.code();
-    if code == Some(HELPER_FAILURE_EXIT) {
-        if let Some((stage, message)) = shared.setup_failure() {
-            return Err(SandboxError::EnforcementFailed { stage, message });
-        }
+    if code == Some(HELPER_FAILURE_EXIT)
+        && let Some((stage, message)) = shared.setup_failure()
+    {
+        return Err(SandboxError::EnforcementFailed { stage, message });
     }
     Ok(ExitStatusInfo {
         code,
@@ -122,11 +122,11 @@ pub(crate) fn run_supervisor(
         if shared.wait_finished(Some(wait)).is_some() {
             return;
         }
-        if let (Some(watchdog), Some(tree)) = (watchdog.as_mut(), shared.tree.get()) {
-            if let Some(requirement) = watchdog.check(tree) {
-                let _ = shared.kill(KillReason::LimitExceeded(requirement));
-                return;
-            }
+        if let (Some(watchdog), Some(tree)) = (watchdog.as_mut(), shared.tree.get())
+            && let Some(requirement) = watchdog.check(tree)
+        {
+            let _ = shared.kill(KillReason::LimitExceeded(requirement));
+            return;
         }
     }
 }
