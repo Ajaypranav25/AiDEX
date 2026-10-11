@@ -17,6 +17,7 @@ use crate::commands::{
     offline::OfflineArgs,
     policy::PolicyArgs,
     provider::ProviderArgs,
+    skills::SkillsArgs,
     tools::ToolsArgs,
 };
 use clap::{Parser, Subcommand};
@@ -99,6 +100,9 @@ pub enum Commands {
     /// Inspect durable sessions, checkpoints, and resume plans.
     #[command(alias = "sessions")]
     Session(SessionArgs),
+    /// List, inspect, enable, and disable skills (drive, workspace, and plugin).
+    #[command(alias = "skill")]
+    Skills(SkillsArgs),
     /// List and inspect the broker's approval requests (default: list).
     #[command(alias = "approval")]
     Approvals(ApprovalsArgs),
@@ -152,6 +156,7 @@ impl Commands {
             Some(Self::Provider(args)) => args.command.label(),
             Some(Self::Offline(args)) => args.command.label(),
             Some(Self::Session(args)) => args.command.label(),
+            Some(Self::Skills(args)) => args.command.label(),
             Some(Self::Approvals(args)) => ApprovalsCommand::label(args.command.as_ref()),
             Some(Self::Approve(_)) => "aidex approve",
             Some(Self::Deny(_)) => "aidex deny",
