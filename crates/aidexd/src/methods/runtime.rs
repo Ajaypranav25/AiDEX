@@ -430,6 +430,39 @@ mod tests {
     }
 
     #[test]
+    fn the_reserved_native_id_is_refused_before_anything_is_saved() {
+        let (drive, services, router, context) = fixture();
+        services
+            .vault()
+            .init(&SecretString::new(PASSPHRASE.into()), false)
+            .unwrap();
+        services.models().offline().set_offline(true).unwrap();
+        let executable = drive.path().join("missing").join("codex.exe");
+        let config = |id: &str| {
+            json!({
+                "id":id,
+                "driver":"codex",
+                "executable":executable.to_string_lossy(),
+            })
+        };
+        for method in [RUNTIME_ADD, RUNTIME_CONFIG_SAVE] {
+            let refused = router.call(&context, method, config("native")).unwrap_err();
+            assert_eq!(refused.kind(), Some(ErrorCode::InvalidArgument));
+            assert_eq!(refused.data.unwrap()["reason"], "invalid_config");
+        }
+        assert!(services.runtime().unwrap().list().unwrap().is_empty());
+        assert_eq!(sync_runtimes(&services), Ok(()));
+
+        // Runtime changes and syncs keep working afterwards.
+        router
+            .call(&context, RUNTIME_ADD, config("codex-fixture"))
+            .unwrap();
+        services.native().synchronize_runtimes(Vec::new()).unwrap();
+        assert_eq!(sync_runtimes(&services), Ok(()));
+        assert_eq!(engine_runtimes(&services), ["codex-fixture"]);
+    }
+
+    #[test]
     fn unlocking_a_vault_without_runtimes_adds_no_secret() {
         let (_drive, services, mut router, context) = fixture();
         crate::methods::vault::register(&mut router, &services).unwrap();
