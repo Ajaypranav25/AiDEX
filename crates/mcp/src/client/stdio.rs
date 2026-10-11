@@ -72,7 +72,12 @@ impl StdioChannel {
         Arc::clone(&self.process)
     }
 
+    /// Why the connection is unusable: stopped by AiDEX (`cancelled`), or the
+    /// server's own failure.
     fn disconnected(&self) -> McpError {
+        if self.shared.is_closed() {
+            return McpError::new(McpErrorKind::Cancelled, "the MCP server was stopped");
+        }
         self.shared.ended().unwrap_or_else(|| {
             McpError::new(McpErrorKind::Disconnected, "the MCP server is not running")
         })

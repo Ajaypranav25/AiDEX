@@ -25,7 +25,9 @@ mod redact;
 mod store;
 mod supervisor;
 
-pub use client::{EgressCheck, HttpEndpoint, MAX_FRAME, McpClient, ServerIdentity, Timeouts};
+pub use client::{
+    EgressCheck, HttpEndpoint, MAX_FRAME, McpClient, ServerIdentity, Timeouts, ToolListing,
+};
 pub use config::{
     CONFIG_VERSION, EndpointUrl, EnvSecret, HeaderSecret, ImportedServer, MAX_ID_LEN,
     MAX_MCP_JSON_BYTES, McpSource, McpSourceKind, ServerConfig, ServerSpec, TransportKind,
