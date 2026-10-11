@@ -18,12 +18,23 @@ import type {
   WorkspaceList,
 } from "./dto/workspace";
 import type {
+  DefaultModel,
   ModelList,
-  ModelRef,
+  ModelListParams,
   ProviderAccount,
   ProviderAddParams,
+  ProviderHealth,
+  ProviderPatchParams,
   ProviderPreset,
 } from "./dto/models";
+import type {
+  RuntimeConfig,
+  RuntimeDriver,
+  RuntimeDriverInfo,
+  RuntimeHealth,
+  RuntimeInstallResult,
+  RuntimeModel,
+} from "./dto/runtime";
 import type {
   Approval,
   Run,
@@ -35,7 +46,7 @@ import type {
   HistoryScope,
   Checkpoint,
 } from "./dto/sessions";
-import type { AppPreferences } from "./dto/preferences";
+import type { AppPreferences, ModelPreferences } from "./dto/preferences";
 import type {
   InferenceCatalog,
   InferenceOptions,
@@ -89,6 +100,11 @@ export type RpcMethods = {
   "auth.cancel": { params: { flow_id: string }; result: unknown };
   "auth.disconnect": { params: { provider_id: string }; result: unknown };
   "settings.get": { params: undefined; result: AppPreferences };
+  "model.preferences.get": { params: undefined; result: ModelPreferences };
+  "model.preferences.set": {
+    params: Partial<ModelPreferences>;
+    result: ModelPreferences;
+  };
   "settings.set": {
     params: { patch: Partial<AppPreferences> };
     result: AppPreferences;
@@ -183,25 +199,63 @@ export type RpcMethods = {
     params: { session_id: string; configuration: SessionConfig };
     result: SessionConfig;
   };
-  "model.list": { params: undefined; result: ModelList };
+  "model.list": { params: ModelListParams | undefined; result: ModelList };
   "model.providers": {
     params: undefined;
     result: { providers: ProviderAccount[] };
   };
   "model.use": {
     params: { provider_id: string; model_id: string };
-    result: { default_model: ModelRef | null };
+    result: DefaultModel;
   };
+  "model.default": { params: undefined; result: DefaultModel };
   "provider.presets": {
     params: undefined;
     result: { presets: ProviderPreset[] };
   };
   "provider.add": { params: ProviderAddParams; result: ProviderAccount };
   "provider.update": { params: ProviderAddParams; result: ProviderAccount };
-  "provider.remove": { params: { id: string }; result: { removed: boolean } };
-  "provider.health": {
+  "provider.patch": { params: ProviderPatchParams; result: ProviderAccount };
+  "provider.remove": { params: { id: string }; result: { removed: string } };
+  "provider.health": { params: { id: string }; result: ProviderHealth };
+  /** Opens a preset's own API-key or docs page in the system browser; never takes a URL. */
+  "provider.open_link": {
+    params: { preset_id: string; link: "api_key" | "docs" };
+    result: { opened: true };
+  };
+  "runtime.catalog": { params: undefined; result: RuntimeDriverInfo[] };
+  "runtime.list": { params: undefined; result: { runtimes: RuntimeConfig[] } };
+  "runtime.add": { params: RuntimeConfig; result: RuntimeConfig };
+  "runtime.update": { params: RuntimeConfig; result: RuntimeConfig };
+  "runtime.remove": { params: { id: string }; result: { removed: boolean } };
+  "runtime.config.get": { params: { id: string }; result: RuntimeConfig };
+  "runtime.health": { params: { id: string }; result: RuntimeHealth };
+  "runtime.models": { params: { id: string }; result: { models: RuntimeModel[] } };
+  "runtime.install": {
+    params: { driver: RuntimeDriver; source?: string };
+    result: RuntimeInstallResult;
+  };
+  "runtime.auth.start": {
     params: { id: string };
-    result: { provider_id: string; status: string; message?: string };
+    result: {
+      flow_id: string;
+      provider_id: string;
+      authorization_url: string;
+      expires_at: number;
+    };
+  };
+  "runtime.auth.status": {
+    params: { id: string; flow_id?: string };
+    result: {
+      state: string;
+      provider_id: string;
+      account_label?: string | null;
+      error?: string | null;
+    };
+  };
+  "runtime.auth.cancel": {
+    params: { id: string; flow_id: string };
+    result: unknown;
   };
   "vault.secret.set": {
     params: { name: string; value: string; consumers: string[]; kind?: string };
