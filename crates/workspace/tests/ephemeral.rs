@@ -682,6 +682,35 @@ fn mutable_review_enforces_file_count_and_byte_limits_before_apply() {
 }
 
 #[test]
+fn review_bounds_the_aggregate_source_bytes_before_apply() {
+    let fixture = Fixture::new(&[("a", "12"), ("b", "34")]);
+    let registry = fixture.drive.registry().with_limits(EphemeralLimits {
+        max_bytes: 4,
+        ..EphemeralLimits::default()
+    });
+    let copy = registry
+        .create_ephemeral(&fixture.source_ws.id)
+        .unwrap()
+        .workspace;
+    let tree = fixture.tree(&copy);
+    write(&tree, "a", "ab");
+    write(&tree, "b", "cd");
+    // Each source file fits the cap; their aggregate no longer does.
+    write(fixture.source.path(), "a", "123");
+    write(fixture.source.path(), "b", "345");
+    assert!(matches!(
+        registry.review(&copy.id),
+        Err(WorkspaceError::TooLarge(_))
+    ));
+    assert!(matches!(
+        registry.apply(&copy.id, &ApplySelection::All, None),
+        Err(WorkspaceError::TooLarge(_))
+    ));
+    assert_eq!(fixture.source_text("a").as_deref(), Some("123"));
+    assert_eq!(fixture.source_text("b").as_deref(), Some("345"));
+}
+
+#[test]
 fn newly_ignored_baseline_files_still_count_toward_review_limits() {
     let drive = Drive::new();
     let source = project(&[(".gitignore", ""), ("tracked", "x")]);

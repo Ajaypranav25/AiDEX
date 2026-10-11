@@ -10,7 +10,8 @@ use crate::{SkippedEntry, Workspace};
 pub struct EphemeralLimits {
     /// Maximum regular files copied from the source or examined in a review.
     pub max_files: u64,
-    /// Maximum total bytes copied from the source or examined in a review.
+    /// Maximum total bytes copied, or actually hashed per side in a review.
+    /// The ephemeral tree and source conflict checks have separate budgets.
     pub max_bytes: u64,
     /// Files larger than this (either side) get no unified diff.
     pub max_diff_input_bytes: u64,

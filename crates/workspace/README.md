@@ -48,8 +48,12 @@ workspaces/ephemeral/<id>/tree/            ephemeral workspace root
   and linked worktrees' `commondir` metadata, matched against the repository root.
 - **Review before apply.** Review compares every baseline entry explicitly (even if now ignored) and lists new non-ignored files; links, special files, and `.git`/`.aidex` content in the copy are never reviewable or applied. A change conflicts when the source no longer matches the baseline (unless it already equals the result) or its path is now unsafe. Diffs are bounded (1 MiB input, 64 KiB per file, 256 KiB per review).
   File-count and aggregate-byte limits also bound the mutable review tree, including
-  baseline files newly ignored by the copy. Oversized review/apply returns `TooLarge`
-  before any selected change is applied.
+  baseline files newly ignored by the copy. The byte cap is enforced while hashing
+  actual contents, even when files grow after the directory scan; source conflict
+  checks have a separate aggregate cap of the same size. Inputs used to generate
+  text diffs are reread with bounded reads and checked against their recorded sizes
+  and hashes; changes detected during those reads refuse the review. Oversized
+  review/apply returns `TooLarge` before any selected change is applied.
 - **Selective, atomic apply.** Only selected, non-conflicting changes are written; a selected path that is not a change rejects the whole request before anything is written, and a `digest` that no longer matches refuses the apply (`ReviewChanged`). Each file is re-verified (ephemeral hash, source state, confinement after creating parents and again just before rename), written to an exclusive temporary file, fsynced, and renamed into place. Applied changes are folded into the baseline; rejected and unselected changes are never applied.
 - **Deletion only of AiDEX-created data.** `remove` only unregisters. `delete_data`/`discard` refuse host workspaces, delete only `workspaces/<id>/` or `workspaces/ephemeral/<id>/` after verifying the ownership marker names that workspace, refuse when the directory or its parents are links, remove links inside the tree without following them, and never touch anything else. A workspace with ephemeral copies cannot be removed until they are discarded.
   Ephemeral creation and source data deletion share the operation lock: a completed
