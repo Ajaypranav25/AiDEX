@@ -1,11 +1,10 @@
 import { useCallback, useState } from "react";
 import { HomePage } from "../features/home/HomePage";
 import { ProviderCatalogProvider } from "../features/model-manager/catalog/ProviderCatalog";
-import { useCommandShortcut } from "../hooks/useCommandShortcut";
 import { useKeyChord } from "../hooks/useKeyChord";
 import { MainLayout } from "../layouts/MainLayout";
 import { screenKeyOf } from "../lib/routes";
-import { DEFAULT_PROVIDERS_SHORTCUT } from "../lib/shortcuts";
+import { DEFAULT_NEW_SESSION_SHORTCUT, DEFAULT_PROVIDERS_SHORTCUT } from "../lib/shortcuts";
 import { NavigationProvider, useNavigation } from "./providers/navigation";
 import { PreferencesProvider, usePreferences } from "./providers/preferences";
 import { ToastProvider } from "./providers/toast";
@@ -44,7 +43,8 @@ function WorkspaceScreens() {
     [navigate],
   );
 
-  useCommandShortcut("k", startNewSession);
+  // Bound from the same preferences Settings → Shortcuts lists.
+  useKeyChord(settings.shortcuts?.new_session || DEFAULT_NEW_SESSION_SHORTCUT, startNewSession);
   useKeyChord(settings.shortcuts?.providers || DEFAULT_PROVIDERS_SHORTCUT, openProviders);
 
   if (route.page === "home") {
