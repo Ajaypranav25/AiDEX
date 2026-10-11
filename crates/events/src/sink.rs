@@ -29,13 +29,16 @@ impl<S: EventSink + ?Sized> EventSink for &S {
 }
 
 /// Validates and discards events.
+///
+/// Reserves the largest possible cursor when checking the encoded-envelope limit,
+/// and returns [`Cursor::ZERO`] because no event is recorded.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct NullEventSink;
 
 impl EventSink for NullEventSink {
     fn emit(&self, scope: EventScope, event: EventKind) -> Result<Cursor, EventError> {
         let event = sanitize::prepare(&scope, event)?;
-        let envelope = EventEnvelope::new(Cursor::ZERO, scope, Timestamp::now(), event);
+        let envelope = EventEnvelope::new(Cursor::new(u64::MAX), scope, Timestamp::now(), event);
         sanitize::encode(&envelope)?;
         Ok(Cursor::ZERO)
     }

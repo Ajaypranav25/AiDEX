@@ -99,8 +99,10 @@ session_id, kinds }`, `RetentionPolicy { max_events, max_age }`, `ReplayPage`,
   like a credential refuses the event (`SensitiveIdentifier`), since rewriting it
   would change what it names. Encoded events are limited to 256 KiB. `Debug` of an
   `EventKind` shows only redacted data.
-  `NullEventSink` enforces the same encoded-envelope limit even though it discards
-  events; oversized aggregate payloads fail before success is reported.
+  `NullEventSink` enforces the encoded-envelope limit conservatively by reserving
+  space for the largest possible `u64` cursor, while still returning `Cursor::ZERO`.
+  Oversized aggregate payloads fail before success is reported, even if their
+  envelope would fit with a smaller cursor.
 - **Closed, versioned wire format.** Unknown event types, unknown payload fields,
   and unknown envelope versions are rejected. Envelope version 2 (PR #40's `Event`
   record was version 1).
