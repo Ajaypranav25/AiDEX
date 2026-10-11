@@ -424,14 +424,14 @@ fn approved_file_plan_detects_changes_after_approval_was_requested() {
 #[cfg(windows)]
 #[test]
 fn approved_shell_returns_promptly_and_cancel_terminates_the_real_process() {
-    // Cold Windows shells can take longer than five seconds to become ready.
-    // Delaying the first marker reproduces that independently of runner load;
-    // the approval RPC must still return promptly and cancellation must kill it.
+    // Delay the first marker so approval must return before a workspace effect.
+    // Use .NET methods: a fresh sandbox profile has no PowerShell module cache,
+    // and cmdlet discovery can scan the runner's large installed-module catalog.
     let (drive, ws, e, s, _p, _events) = fixture(
         vec![
             FakeTurn::tool_call(
                 "shell_exec",
-                r#"{"shell":true,"command":"Start-Sleep -Seconds 6; Set-Content -LiteralPath started.txt -Value started; Start-Sleep -Seconds 10; Set-Content -LiteralPath finished.txt -Value finished"}"#,
+                r#"{"shell":true,"command":"[System.Threading.Thread]::Sleep(6000); [System.IO.File]::WriteAllText('started.txt', 'started'); [System.Threading.Thread]::Sleep(10000); [System.IO.File]::WriteAllText('finished.txt', 'finished')"}"#,
             ),
             FakeTurn::text("done"),
         ],
