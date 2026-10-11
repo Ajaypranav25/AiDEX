@@ -8,6 +8,7 @@ members = [
     "crates/broker",
     "crates/bundle",
     "crates/launcher",
+    "crates/mcp",
     "crates/packager",
     "crates/core",
     "crates/context",
