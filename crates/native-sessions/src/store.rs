@@ -20,6 +20,7 @@ pub type StoreError = String;
 pub struct SessionStore {
     pub(crate) db: Mutex<Connection>,
     vault: Arc<VaultService>,
+    pub(crate) blobs: crate::artifacts::BlobDir,
 }
 pub fn now() -> u64 {
     SystemTime::now()
@@ -43,9 +44,21 @@ impl SessionStore {
         }
         let db = Connection::open(path).map_err(|e| e.to_string())?;
         db.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,status TEXT NOT NULL,payload BLOB NOT NULL); CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, session_id TEXT NOT NULL,status TEXT NOT NULL); CREATE TABLE IF NOT EXISTS memory(id TEXT PRIMARY KEY,workspace TEXT NOT NULL,payload BLOB NOT NULL); UPDATE runs SET status='interrupted' WHERE status IN ('pending','running','waiting_approval'); UPDATE sessions SET status='interrupted' WHERE status IN ('pending','running','waiting_approval');").map_err(|e|e.to_string())?;
+        db.execute_batch(crate::artifacts::SCHEMA)
+            .map_err(|e| e.to_string())?;
+        let blobs = crate::artifacts::BlobDir::beside(path);
+        blobs.sweep(|address| {
+            db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM artifacts WHERE blob=?)",
+                [address],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())
+        });
         Ok(Self {
             db: Mutex::new(db),
             vault,
+            blobs,
         })
     }
     pub(crate) fn key(&self) -> Result<SecretBytes, StoreError> {
@@ -362,10 +375,15 @@ impl SessionStore {
         let tx = db.transaction().map_err(|e| e.to_string())?;
         tx.execute("DELETE FROM runs WHERE session_id=?", [id])
             .map_err(|e| e.to_string())?;
+        let blobs = Self::delete_session_artifacts(&tx, id)?;
         let n = tx
             .execute("DELETE FROM sessions WHERE id=?", [id])
             .map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())?;
+        drop(db);
+        for blob in blobs {
+            self.blobs.remove(&blob);
+        }
         Ok(n > 0)
     }
 }

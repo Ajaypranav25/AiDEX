@@ -31,6 +31,7 @@ aidex-updater = { path = "../updater" }
 aidex-vault = { path = "../vault" }
 aidex-web = { path = "../web" }
 aidex-workspace = { path = "../workspace" }
+base64 = "0.22"
 getrandom = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

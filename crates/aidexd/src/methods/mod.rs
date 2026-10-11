@@ -7,6 +7,7 @@
 //! Add one `pub mod` line and one `register` line below per domain.
 
 pub mod approvals;
+pub mod artifacts;
 pub mod auth;
 pub mod context;
 pub mod daemon;
@@ -74,6 +75,7 @@ pub(crate) fn register_all(
     services: &Arc<Services>,
 ) -> Result<(), RouterError> {
     approvals::register(router, services)?;
+    artifacts::register(router, services)?;
     context::register(router, services)?;
     auth::register(router, services)?;
     inference::register(router, services)?;
