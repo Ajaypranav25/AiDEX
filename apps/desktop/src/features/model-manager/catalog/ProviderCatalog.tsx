@@ -152,6 +152,9 @@ export function ProviderCatalogProvider({ children }: { children: ReactNode }) {
 
   const refetchModels = models.refetch;
   const reloadRuntimes = runtime.reload;
+  // Favorites and hidden models are read again too, so a read that failed while the vault was
+  // locked recovers once it is unlocked.
+  const reloadModelPreferences = modelPreferences.reload;
   const refresh = useCallback(
     async (providerId?: string): Promise<ModelList> => {
       refreshesInFlight.current += 1;
@@ -168,12 +171,15 @@ export function ProviderCatalogProvider({ children }: { children: ReactNode }) {
       } finally {
         refetchModels();
         refetchAccounts();
-        if (!providerId) reloadRuntimes();
+        if (!providerId) {
+          reloadRuntimes();
+          reloadModelPreferences();
+        }
         refreshesInFlight.current -= 1;
         setRefreshing(refreshesInFlight.current > 0);
       }
     },
-    [refetchModels, refetchAccounts, reloadRuntimes],
+    [refetchModels, refetchAccounts, reloadRuntimes, reloadModelPreferences],
   );
 
   const refetchPresets = presets.refetch;
@@ -182,7 +188,8 @@ export function ProviderCatalogProvider({ children }: { children: ReactNode }) {
     refetchAccounts();
     refetchPresets();
     reloadRuntimes();
-  }, [refetchModels, refetchAccounts, refetchPresets, reloadRuntimes]);
+    reloadModelPreferences();
+  }, [refetchModels, refetchAccounts, refetchPresets, reloadRuntimes, reloadModelPreferences]);
 
   const loadRuntimeModels = runtime.loadModels;
   const runtimeList = runtime.runtimes;
