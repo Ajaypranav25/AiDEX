@@ -76,7 +76,7 @@ The native harness now routes typed tool plans through this decision engine, per
 - Secrets are evaluated as `secret.use`, released as short-lived handles only after the permit, resolved inside the broker, and injected only into the child's environment (git: a URL-scoped `http.extraHeader`, helpers reset, system config ignored) or the provider request header. Tests grep every event, card, record, and outcome for the injected token.
 - Emergency stop freezes submissions and continuations, cancels running calls, terminates every managed process tree, revokes every vault handle and unused approval or grant, cancels pending approvals, and optionally locks the vault; daemon shutdown also terminates managed processes.
 - A tool process at `brokered` level runs as the same OS user and can read the daemon's endpoint capability, so it could call IPC methods as the local user (including resolving approvals); `restricted` confinement (Linux, macOS) keeps the drive's runtime directory out of reach, and Windows denies `restricted` commands. Binding approval decisions to a channel tool processes cannot reach is follow-up work.
-- Not yet: authenticated remote approvals (#29), pushed approval prompts in the CLI, credential injection for MCP servers and other process consumers, an enforcing egress proxy, and an independent review of the broker.
+- Not yet: authenticated remote approvals (#29), pushed approval prompts in the CLI, credential injection for process consumers other than MCP servers (which receive their `mcp:<id>` secrets at launch, see `crates/mcp/README.md`), an enforcing egress proxy, and an independent review of the broker.
 
 ## Native private history
 

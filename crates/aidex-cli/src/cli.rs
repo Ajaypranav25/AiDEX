@@ -13,6 +13,7 @@ use crate::commands::{
     },
     emergency::{ResumeArgs, StopArgs},
     inference::InferenceArgs,
+    mcp::McpArgs,
     model::ModelArgs,
     offline::OfflineArgs,
     plugins::PluginsArgs,
@@ -119,6 +120,8 @@ pub enum Commands {
     /// Install, review, trust, and enable plugin bundles of skills and MCP servers.
     #[command(alias = "plugin")]
     Plugins(PluginsArgs),
+    /// List, start, and stop MCP servers and inspect their tools and logs.
+    Mcp(McpArgs),
     /// Emergency stop: freeze tools, cancel approvals, kill managed processes.
     Stop(StopArgs),
     /// Resume tool execution after an emergency stop.
@@ -167,6 +170,7 @@ impl Commands {
             Some(Self::Policy(args)) => args.command.label(),
             Some(Self::Tools(args)) => args.command.label(),
             Some(Self::Plugins(args)) => args.command.label(),
+            Some(Self::Mcp(args)) => args.command.label(),
             Some(Self::Stop(_)) => "aidex stop",
             Some(Self::Resume(_)) => "aidex resume",
             Some(Self::Index(args)) => args.command.label(),

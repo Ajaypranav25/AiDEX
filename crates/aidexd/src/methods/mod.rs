@@ -13,6 +13,7 @@ pub mod daemon;
 pub mod emergency;
 pub mod events;
 pub mod inference;
+pub mod mcp;
 pub mod memory;
 pub mod models;
 pub mod native;
@@ -82,6 +83,7 @@ pub(crate) fn register_all(
     daemon::register(router, services)?;
     emergency::register(router, services)?;
     events::register(router, services)?;
+    mcp::register(router, services)?;
     memory::register(router, services)?;
     models::register(router, services)?;
     policy::register(router, services)?;

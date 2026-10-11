@@ -14,6 +14,7 @@ aidex-adapters = { path = "../adapters" }
 aidex-sandbox = { path = "../sandbox" }
 aidex-preferences = { path = "../preferences" }
 aidex-inference = { path = "../inference" }
+aidex-mcp = { path = "../mcp" }
 aidex-auth = { path = "../auth" }
 aidex-core = { path = "../core" }
 aidex-sessions = { path = "../sessions" }

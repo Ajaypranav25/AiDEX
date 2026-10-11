@@ -259,6 +259,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "aidex-mcp"
+version = "0.1.0"
+dependencies = [
+ "aidex-core",
+ "aidex-drive",
+ "aidex-events",
+ "aidex-sandbox",
+ "aidex-vault",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+ "ureq",
+ "zeroize",
+]
+
+[[package]]
 name = "aidex-native-sessions"
 version = "0.1.0"
 dependencies = [
@@ -501,6 +518,7 @@ dependencies = [
  "aidex-harness",
  "aidex-host",
  "aidex-inference",
+ "aidex-mcp",
  "aidex-native-sessions",
  "aidex-plugins",
  "aidex-policy",

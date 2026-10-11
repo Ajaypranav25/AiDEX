@@ -14,6 +14,7 @@ pub mod drive;
 pub mod emergency;
 pub mod events;
 pub mod inference;
+pub mod mcp;
 pub mod model;
 pub mod offline;
 pub mod omp;
@@ -58,6 +59,7 @@ pub fn dispatch(command: Option<Commands>, output: Output) -> Result<Exit, CliEr
         Some(Commands::Policy(args)) => policy::run(args, output),
         Some(Commands::Tools(args)) => tools::run(args, output),
         Some(Commands::Plugins(args)) => plugins::run(args, output),
+        Some(Commands::Mcp(args)) => mcp::run(args, output),
         Some(Commands::Stop(args)) => emergency::stop(args, output),
         Some(Commands::Resume(args)) => emergency::resume(args, output),
         Some(Commands::Index(args)) => context::index::run(args, output),

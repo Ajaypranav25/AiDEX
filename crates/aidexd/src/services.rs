@@ -6,6 +6,7 @@
 //! adapters live in `methods/<domain>.rs`.
 
 mod inference;
+mod mcp;
 mod models;
 mod runtime;
 
@@ -71,6 +72,7 @@ pub struct Services {
     inference: Arc<aidex_inference::InferenceService>,
     plugins: Arc<aidex_plugins::PluginStore>,
     runtime: Result<Arc<aidex_adapters::RuntimeManager>, String>,
+    mcp: Result<Arc<aidex_mcp::McpSupervisor>, String>,
     updates: Result<Arc<Updater>, String>,
     update_recovery: Mutex<Option<Result<UpdateRecovery, String>>>,
 }
@@ -158,6 +160,15 @@ impl Services {
         // `runtime.*` reports why they are unavailable.
         let runtime = runtime::open_runtime(&paths, Arc::clone(&vault), &models)
             .map_err(|error| error.to_string());
+        // MCP servers are optional too: `mcp.*` reports why they are unavailable.
+        let mcp = mcp::open_mcp(
+            &paths,
+            &broker,
+            &vault,
+            models.offline(),
+            Arc::new(events.clone()),
+            &shutdown,
+        );
         let updates = open_updates(&paths, &events, updater);
         Ok(Self {
             drive_root: drive_root.to_path_buf(),
@@ -178,6 +189,7 @@ impl Services {
             inference,
             plugins: Arc::new(plugins),
             runtime,
+            mcp,
             updates,
             update_recovery: Mutex::new(None),
         })
@@ -266,6 +278,10 @@ impl Services {
     /// opened at startup.
     pub fn runtime(&self) -> Result<&Arc<aidex_adapters::RuntimeManager>, &str> {
         self.runtime.as_ref().map_err(String::as_str)
+    }
+    /// MCP server supervision (`aidex-mcp`), or why it could not be opened at startup.
+    pub fn mcp(&self) -> Result<&Arc<aidex_mcp::McpSupervisor>, &str> {
+        self.mcp.as_ref().map_err(String::as_str)
     }
     /// The drive's updater (`aidex-updater`), or why it is unavailable (a host without
     /// a bundle target, or an invalid built-in trust configuration).
