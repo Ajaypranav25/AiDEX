@@ -13,7 +13,7 @@ export type WebResult = {
   published?: string;
 };
 
-export type WebResultListProps = Omit<ComponentPropsWithRef<"ol">, "children"> & {
+export type WebResultListProps = Omit<ComponentPropsWithRef<"ol">, "children" | "results"> & {
   results: readonly WebResult[];
   /**
    * Called with the result's normalized http(s) URL; the list never navigates itself. Results whose
