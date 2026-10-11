@@ -15,8 +15,8 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 
 use super::{
-    CONFIG_VERSION, EnvSecret, HeaderSecret, MAX_ID_LEN, McpSource, RESERVED_HEADERS, ServerConfig,
-    TransportKind,
+    CONFIG_VERSION, EnvSecret, HeaderSecret, MAX_ID_LEN, McpSource, McpSourceKind,
+    RESERVED_HEADERS, ServerConfig, TransportKind,
 };
 use crate::{McpError, McpErrorKind, redact::bounded_redacted};
 
@@ -168,6 +168,12 @@ fn build(
         env_from_secrets: Vec::new(),
         source: source.clone(),
     };
+    // A workspace's servers are offered in that workspace only.
+    if source.kind == McpSourceKind::Workspace
+        && let Some(owner) = &source.owner
+    {
+        config.workspaces = vec![owner.clone()];
+    }
     for key in entry.keys() {
         if !matches!(
             key.as_str(),
@@ -353,6 +359,7 @@ mod tests {
         let config = github.config.as_ref().unwrap();
         assert!(!config.enabled);
         assert_eq!(config.source, McpSource::workspace("ws_1"));
+        assert_eq!(config.workspaces, ["ws_1"]);
         assert_eq!(github.dropped_env, ["GITHUB_TOKEN"]);
         assert_eq!(
             config.env_from_secrets[0].secret_name,

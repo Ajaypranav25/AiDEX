@@ -303,6 +303,12 @@ impl ServerConfig {
         {
             return bad("each argument must be at most 8192 bytes without NUL");
         }
+        if looks_like_credential(command) || self.args.iter().any(|arg| looks_like_credential(arg))
+        {
+            return bad(
+                "the command line looks like it contains a credential; store it in the vault and map it with env_from_secrets",
+            );
+        }
         if self.env_allowlist.len() > MAX_ENV {
             return bad("at most 64 allowlisted environment variables");
         }
@@ -339,6 +345,11 @@ impl ServerConfig {
             return bad("an http server needs a url");
         };
         EndpointUrl::parse(url).map_err(McpError::invalid_config)?;
+        if looks_like_credential(url) {
+            return bad(
+                "the URL looks like it contains a credential; map it to a header from the vault",
+            );
+        }
         if self.command.is_some()
             || !self.args.is_empty()
             || !self.env_allowlist.is_empty()
@@ -486,6 +497,11 @@ fn validate_secret_name(name: &str) -> Result<(), McpError> {
     })
 }
 
+/// Whether `text` holds something the credential redactor would hide.
+fn looks_like_credential(text: &str) -> bool {
+    aidex_events::redact_text(text).as_ref() != text
+}
+
 fn valid_tool_name(name: &str) -> bool {
     !name.is_empty()
         && name.chars().count() <= MAX_TOOL_NAME_CHARS
@@ -622,6 +638,13 @@ mod tests {
                 }),
             ),
             ("nul arg", Box::new(|c| c.args.push("a\0b".into()))),
+            (
+                "credential arg",
+                Box::new(|c| {
+                    c.args
+                        .push("--api-key=sk-proj-abcdefghijklmnopqrstuvwxyz0123".into())
+                }),
+            ),
         ];
         for (label, mutate) in cases {
             let mut config = stdio();

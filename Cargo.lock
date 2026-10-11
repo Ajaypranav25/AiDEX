@@ -487,6 +487,7 @@ dependencies = [
  "aidex-harness",
  "aidex-host",
  "aidex-inference",
+ "aidex-mcp",
  "aidex-native-sessions",
  "aidex-policy",
  "aidex-preferences",
