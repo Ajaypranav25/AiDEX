@@ -282,8 +282,21 @@ fn cancel() -> CancelToken {
     CancelToken::new()
 }
 
+/// Bring plugin-contributed servers in line with the enabled, trusted plugins
+/// (best effort: a plugin store that cannot be read changes nothing).
+pub(crate) fn sync_plugins(services: &Services) {
+    if let Ok(supervisor) = services.mcp() {
+        let _ = crate::services::contributions::sync_plugin_servers(
+            services.plugins(),
+            supervisor,
+            services.events(),
+        );
+    }
+}
+
 fn list(services: &Services, params: ListParams) -> Result<ListResult, RpcError> {
     let supervisor = supervisor(services)?;
+    sync_plugins(services);
     let workspace = match params.workspace_id.as_deref().map(str::trim) {
         Some(reference) if !reference.is_empty() => {
             Some(resolve_workspace(services, Some(reference))?.id)

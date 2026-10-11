@@ -93,6 +93,8 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
             .plugins()
             .install(Path::new(params.source_path.trim()), params.replace)
             .map_err(plugin_error)?;
+        // A replaced plugin installs disabled: drop the servers it contributed.
+        super::mcp::sync_plugins(&shared);
         to_result(&outcome)
     })?;
     let shared = Arc::clone(services);
@@ -102,6 +104,7 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
             .plugins()
             .trust(&params.name, &params.tree_sha256, params.enable)
             .map_err(plugin_error)?;
+        super::mcp::sync_plugins(&shared);
         to_result(&summary)
     })?;
     let shared = Arc::clone(services);
@@ -111,17 +114,19 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
             .plugins()
             .set_enabled(&params.name, params.enabled)
             .map_err(plugin_error)?;
+        // Enabled plugins contribute DISABLED MCP entries; disabled ones none.
+        super::mcp::sync_plugins(&shared);
         to_result(&summary)
     })?;
     let shared = Arc::clone(services);
     router.register(UNINSTALL, move |_context, params| {
         let params: NameParams = parse_params(params)?;
-        to_result(
-            &shared
-                .plugins()
-                .uninstall(&params.name)
-                .map_err(plugin_error)?,
-        )
+        let removed = shared
+            .plugins()
+            .uninstall(&params.name)
+            .map_err(plugin_error)?;
+        super::mcp::sync_plugins(&shared);
+        to_result(&removed)
     })?;
     Ok(())
 }
@@ -364,6 +369,70 @@ mod tests {
         assert_eq!(data["reason"], "executable_refused");
         let listed: PluginList = fixture.call(LIST, Value::Null);
         assert!(listed.plugins.is_empty());
+    }
+
+    #[test]
+    fn enabled_plugins_contribute_skills_and_disabled_mcp_servers() {
+        let fixture = fixture();
+        let mut router = Router::new();
+        register(&mut router, &fixture.services).unwrap();
+        crate::methods::skills::register(&mut router, &fixture.services).unwrap();
+        crate::methods::mcp::register(&mut router, &fixture.services).unwrap();
+        let call =
+            |method: &str, params: Value| router.call(&fixture.context, method, params).unwrap();
+        let plugin_servers = |listing: &Value| -> Vec<Value> {
+            listing["servers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|server| server["source"] == "plugin")
+                .cloned()
+                .collect()
+        };
+        let skill_ids = |listing: &Value| -> Vec<String> {
+            listing["skills"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|skill| skill["id"].as_str().unwrap().to_owned())
+                .collect()
+        };
+
+        let installed: InstallOutcome =
+            serde_json::from_value(call(INSTALL, json!({"source_path": fixture.plugin_path()})))
+                .unwrap();
+        let hash = installed.plugin.summary.tree_sha256.unwrap();
+        // Installed but untrusted: nothing is contributed.
+        assert!(skill_ids(&call("skill.list", json!({}))).is_empty());
+        assert!(plugin_servers(&call("mcp.list", json!({}))).is_empty());
+
+        call(
+            TRUST,
+            json!({"name": "review", "tree_sha256": hash, "enable": true}),
+        );
+        let skills = call("skill.list", json!({}));
+        assert_eq!(skill_ids(&skills), ["plugin:review"]);
+        assert_eq!(skills["skills"][0]["plugin"], "review");
+        assert_eq!(skills["skills"][0]["enabled"], true);
+        let servers = plugin_servers(&call("mcp.list", json!({})));
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0]["id"], "review-github");
+        assert_eq!(servers[0]["enabled"], false);
+        assert_eq!(servers[0]["source_owner"], "review");
+        assert!(!servers.iter().any(|s| s.to_string().contains(SECRET)));
+
+        // Disabling the plugin withdraws both; enabling brings the server back disabled.
+        call(SET_ENABLED, json!({"name": "review", "enabled": false}));
+        assert!(skill_ids(&call("skill.list", json!({}))).is_empty());
+        assert!(plugin_servers(&call("mcp.list", json!({}))).is_empty());
+        call(SET_ENABLED, json!({"name": "review", "enabled": true}));
+        let servers = plugin_servers(&call("mcp.list", json!({})));
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0]["enabled"], false);
+
+        call(UNINSTALL, json!({"name": "review"}));
+        assert!(plugin_servers(&call("mcp.list", json!({}))).is_empty());
+        assert!(skill_ids(&call("skill.list", json!({}))).is_empty());
     }
 
     #[test]

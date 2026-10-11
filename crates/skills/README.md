@@ -71,4 +71,4 @@ Without a decision, drive and plugin skills are enabled and project and repo ski
 
 ## Daemon and CLI
 
-`aidexd` serves `skill.list`, `skill.show`, `skill.set_enabled`, `skill.save`, and `skill.delete` (`crates/aidexd/src/methods/skills.rs`, see `protocol/commands/README.md`); the CLI exposes `aidex skills list|show|enable|disable [--workspace ID|NAME]`. Invocation from the composer (`$name`), model-invocable skill catalogs, and plugin roots are wired by the native harness and `aidex-plugins`.
+`aidexd` serves `skill.list`, `skill.show`, `skill.set_enabled`, `skill.save`, and `skill.delete` (`crates/aidexd/src/methods/skills.rs`, see `protocol/commands/README.md`); the CLI exposes `aidex skills list|show|enable|disable [--workspace ID|NAME]`. The daemon passes enabled, trusted plugins' `skills/` directories as `extra_roots` on every call. Invocation (`message.send`/`agent.start` `skills`) and the model-invocable catalog with its `skill_load` tool are served by the native harness (`crates/harness/README.md`).

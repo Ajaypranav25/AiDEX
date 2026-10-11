@@ -4,7 +4,11 @@ MCP (Model Context Protocol) server management for AiDEX (issue #24): per-server
 configuration on the drive, `.mcp.json` import, an MCP client over stdio and
 Streamable HTTP, and a supervisor that launches servers in the sandbox. The
 daemon serves it as `mcp.*` (see `protocol/commands/README.md`) and the CLI as
-`aidex mcp`. Harness tools (`mcp__<server>__<tool>`) are not wired yet.
+`aidex mcp`. Native Agent runs offer the tools of enabled servers (started on
+demand) as `mcp__<server>__<tool>` (see `crates/harness/README.md`); enabled,
+trusted plugins contribute their `.mcp.json` servers as DISABLED entries with id
+`<plugin>-<server>` and `source = { kind = "plugin", owner = "<plugin>" }`,
+removed again when the plugin is disabled, uninstalled, or loses its trust.
 
 ## Configuration
 

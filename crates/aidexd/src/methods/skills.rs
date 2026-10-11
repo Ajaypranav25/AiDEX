@@ -130,12 +130,10 @@ pub fn skill_workspace(
     }))
 }
 
-/// Skill roots contributed by enabled, trusted plugins (scope `plugin`).
-///
-/// Plugins are wired in by `aidex-plugins` (`PluginStore::enabled_contributions`);
-/// until then no plugin contributes skills.
-pub fn plugin_skill_roots(_services: &Services) -> Vec<ExtraSkillRoot> {
-    Vec::new()
+/// Skill roots contributed by enabled, trusted plugins (scope `plugin`),
+/// re-verified against each plugin's trusted tree hash on every call.
+pub fn plugin_skill_roots(services: &Services) -> Vec<ExtraSkillRoot> {
+    crate::services::contributions::plugin_skill_roots(services.plugins())
 }
 
 fn skill_id(id: &str) -> Result<SkillId, RpcError> {

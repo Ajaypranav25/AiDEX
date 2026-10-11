@@ -28,6 +28,32 @@ pub struct SendParams {
     pub command_id: String,
     #[serde(default)]
     pub parent_run_id: Option<String>,
+    /// Skill ids (`<scope>:<name>`) the user invoked for this message, at most
+    /// [`aidex_harness::MAX_INVOKED_SKILLS`]. The stored message keeps `content`
+    /// exactly as typed; the skills are injected for this run only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skills: Option<Vec<String>>,
+    /// Offer web search and fetch in Chat mode for this run (Agent and Plan
+    /// modes follow the web settings). Never stored in the configuration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_search: Option<bool>,
+}
+/// Map a start failure: invoked skills that cannot be used are
+/// `invalid_params` with `data.reason = "skill_unavailable"`, a web switch
+/// that cannot be honoured is `unavailable` with `"web_unavailable"`.
+fn start_error(message: String) -> RpcError {
+    if let Some(detail) = message.strip_prefix("skill_unavailable: ") {
+        return RpcError::invalid_params(aidex_events::redact_text(detail).into_owned())
+            .with_data(json!({"reason": "skill_unavailable"}));
+    }
+    if let Some(detail) = message.strip_prefix("web_unavailable: ") {
+        return RpcError::new(
+            ErrorCode::Unavailable,
+            aidex_events::redact_text(detail).into_owned(),
+        )
+        .with_data(json!({"reason": "web_unavailable"}));
+    }
+    native_error(message)
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -160,11 +186,29 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
             if method == "agent.start" && config.mode != Mode::Agent {
                 return Err(RpcError::invalid_params("agent.start requires agent mode"));
             }
+            let skills = p.skills.unwrap_or_default();
+            if skills.len() > aidex_harness::MAX_INVOKED_SKILLS {
+                return Err(RpcError::invalid_params(format!(
+                    "at most {} skills can be invoked at once",
+                    aidex_harness::MAX_INVOKED_SKILLS
+                ))
+                .with_data(json!({"reason": "skill_unavailable"})));
+            }
             super::runtime::ensure_session_runtime(&s, &config);
+            let options = aidex_harness::RunOptions {
+                skills,
+                web_search: p.web_search.unwrap_or(false),
+            };
             to_result(&view::run(
                 &s.native()
-                    .start(&p.session_id, &p.content, &p.command_id, p.parent_run_id)
-                    .map_err(native_error)?,
+                    .start_with(
+                        &p.session_id,
+                        &p.content,
+                        &p.command_id,
+                        p.parent_run_id,
+                        options,
+                    )
+                    .map_err(start_error)?,
             ))
         })?;
     }
@@ -444,6 +488,114 @@ mod tests {
             .call(&ctx, "conversation.get", json!({"id":id}))
             .unwrap_err();
         assert_eq!(e.code, -32020);
+    }
+    #[test]
+    fn send_params_invoke_skills_and_gate_the_web_switch() {
+        use aidex_providers::{
+            FakeProvider, FakeScript, FakeTurn, Locality, ModelDescriptor, ModelId, ModelRef,
+            ProviderId,
+        };
+        use std::time::{Duration, Instant};
+        let drive = crate::services::testing::temp_drive();
+        let shutdown = ShutdownSignal::new();
+        let services = Arc::new(Services::open(drive.path(), shutdown.clone()).unwrap());
+        services
+            .vault()
+            .init(&SecretString::from("fixture-passphrase".to_owned()), false)
+            .unwrap();
+        let skill = services.paths().skills().join("review");
+        std::fs::create_dir_all(&skill).unwrap();
+        std::fs::write(
+            skill.join("SKILL.md"),
+            "---\nname: review\ndescription: Reviews diffs\n---\nCheck every hunk.\n",
+        )
+        .unwrap();
+        let fake = Arc::new(
+            FakeProvider::new(ProviderId::new("fixture").unwrap(), Locality::Local)
+                .with_model(ModelDescriptor::new(
+                    ModelRef::new(
+                        ProviderId::new("fixture").unwrap(),
+                        ModelId::new("small").unwrap(),
+                    ),
+                    Locality::Local,
+                    8192,
+                ))
+                .with_script(FakeScript::new().then(FakeTurn::text("reviewed"))),
+        );
+        services
+            .models()
+            .registry()
+            .register_shared(fake.clone())
+            .unwrap();
+        let mut router = Router::new();
+        register(&mut router, &services).unwrap();
+        let ctx = CallContext::detached(ClientInfo::new("test", "1"), shutdown);
+        let created = router
+            .call(
+                &ctx,
+                "conversation.create",
+                json!({"title":"skills","mode":"chat","provider_id":"fixture","model_id":"small"}),
+            )
+            .unwrap();
+        let id = created["id"].as_str().unwrap().to_owned();
+        let send = |params: Value| router.call(&ctx, "message.send", params);
+        let base = json!({"session_id": id, "content": "$review go", "command_id": "c1"});
+        let with = |key: &str, value: Value| {
+            let mut params = base.clone();
+            params[key] = value;
+            params
+        };
+
+        let error = send(with("skills", json!(["drive:missing"]))).unwrap_err();
+        assert_eq!(error.kind(), Some(ErrorCode::InvalidParams));
+        assert_eq!(error.data.as_ref().unwrap()["reason"], "skill_unavailable");
+        let many: Vec<String> = (0..9).map(|n| format!("drive:s{n}")).collect();
+        let error = send(with("skills", json!(many))).unwrap_err();
+        assert_eq!(error.data.as_ref().unwrap()["reason"], "skill_unavailable");
+        let error = send(with("web_search", json!(true))).unwrap_err();
+        assert_eq!(error.kind(), Some(ErrorCode::Unavailable));
+        assert_eq!(error.data.as_ref().unwrap()["reason"], "web_unavailable");
+        assert!(send(with("skill", json!(["drive:review"]))).is_err());
+        assert!(fake.requests().is_empty());
+
+        let run = send(with("skills", json!(["drive:review"]))).unwrap();
+        let run_id = run["id"].as_str().unwrap().to_owned();
+        let until = Instant::now() + Duration::from_secs(10);
+        while services
+            .native()
+            .store()
+            .run(&run_id)
+            .unwrap()
+            .status
+            .active()
+        {
+            assert!(Instant::now() < until);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let request = &fake.requests()[0];
+        assert!(request.messages.iter().any(|m| {
+            m.content
+                .starts_with("The user invoked the skill \"review\".")
+                && m.content.contains("Check every hunk.")
+                && m.content.contains("trust=user>>>")
+        }));
+        let view = router
+            .call(&ctx, "conversation.get", json!({"id": id}))
+            .unwrap();
+        assert_eq!(view["messages"][0]["content"], "$review go");
+        assert_eq!(view["messages"][0]["skills"], json!(["drive:review"]));
+        assert!(view["messages"][1].get("skills").is_none());
+        let history = router
+            .call(&ctx, "history.list", json!({"session_id": id}))
+            .unwrap();
+        assert_eq!(history["messages"][0]["skills"], json!(["drive:review"]));
+        // The same command id with different skills is a different request.
+        let error = send(base.clone()).unwrap_err();
+        assert!(
+            error.message.contains("command id reused"),
+            "{}",
+            error.message
+        );
     }
     #[test]
     fn vault_lock_cancels_native_work_before_private_history_becomes_unavailable() {

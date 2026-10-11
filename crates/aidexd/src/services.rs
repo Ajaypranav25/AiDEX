@@ -5,12 +5,15 @@
 //! are added here as fields constructed in [`Services::open`]; their JSON-RPC
 //! adapters live in `methods/<domain>.rs`.
 
+pub mod contributions;
+mod extensions;
 mod inference;
 mod mcp;
 mod models;
 mod runtime;
 mod web;
 
+pub use extensions::DaemonExtensions;
 pub use models::{EventsModelObserver, ModelServices, VaultCredentials, model_event_kind};
 pub use web::WebServices;
 
@@ -156,23 +159,13 @@ impl Services {
             )
             .map_err(|e| ServicesError::new("native", ServiceErrorCode::Unavailable, e))?,
         );
-        let native = aidex_harness::NativeEngine::new(
-            private_sessions,
-            models.registry().clone(),
-            workspaces.clone(),
-            Arc::new(events.clone()),
-            runtime.join("native-processes"),
-        );
-        let inference = inference::open_inference(&paths, &models)?;
         // Installed plugin bundles; `extension.*` events go to the drive log.
-        let plugins = aidex_plugins::PluginStore::open(&paths)
-            .map_err(|error| ServicesError::new("plugins", error.code(), error.to_string()))?
-            .with_events(Arc::new(events.clone()));
-        // External runtimes are optional: the daemon starts without them and
-        // `runtime.*` reports why they are unavailable.
-        let runtime = runtime::open_runtime(&paths, Arc::clone(&vault), &models)
-            .map_err(|error| error.to_string());
-        // MCP servers are optional too: `mcp.*` reports why they are unavailable.
+        let plugins = Arc::new(
+            aidex_plugins::PluginStore::open(&paths)
+                .map_err(|error| ServicesError::new("plugins", error.code(), error.to_string()))?
+                .with_events(Arc::new(events.clone())),
+        );
+        // MCP servers are optional: `mcp.*` reports why they are unavailable.
         let mcp = mcp::open_mcp(
             &paths,
             &broker,
@@ -181,6 +174,31 @@ impl Services {
             Arc::new(events.clone()),
             &shutdown,
         );
+        // Native runs reach skills, web search and fetch, and MCP tools through
+        // these hooks; network tools see the drive's policy and offline switch.
+        let extensions = Arc::new(DaemonExtensions {
+            skills: Arc::clone(&skills),
+            plugins: Arc::clone(&plugins),
+            workspaces: Arc::clone(&workspaces),
+            web: Arc::clone(&web),
+            mcp: mcp.as_ref().ok().cloned(),
+            broker: Arc::clone(&broker),
+            offline: Arc::clone(models.offline()),
+            events: Arc::new(events.clone()),
+        });
+        let native = aidex_harness::NativeEngine::with_extensions(
+            private_sessions,
+            models.registry().clone(),
+            workspaces.clone(),
+            Arc::new(events.clone()),
+            runtime.join("native-processes"),
+            extensions,
+        );
+        let inference = inference::open_inference(&paths, &models)?;
+        // External runtimes are optional: the daemon starts without them and
+        // `runtime.*` reports why they are unavailable.
+        let runtime = runtime::open_runtime(&paths, Arc::clone(&vault), &models)
+            .map_err(|error| error.to_string());
         let updates = open_updates(&paths, &events, updater);
         Ok(Self {
             drive_root: drive_root.to_path_buf(),
@@ -200,7 +218,7 @@ impl Services {
             skills,
             native,
             inference,
-            plugins: Arc::new(plugins),
+            plugins,
             runtime,
             mcp,
             updates,

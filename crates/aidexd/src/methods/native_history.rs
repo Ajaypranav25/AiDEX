@@ -14,19 +14,29 @@ fn messages(
     session: Option<&str>,
     run: Option<&str>,
 ) -> Result<Vec<ChatMessage>, RpcError> {
+    scoped(s, session, run).map(|(messages, _)| messages)
+}
+/// The scope's messages and, for session history, the skills invoked by its
+/// user messages.
+fn scoped(
+    s: &Services,
+    session: Option<&str>,
+    run: Option<&str>,
+) -> Result<(Vec<ChatMessage>, view::SkillIndex), RpcError> {
     match (session, run) {
-        (Some(session), None) => Ok(s
-            .native()
-            .store()
-            .get(session)
-            .map_err(native_error)?
-            .messages),
-        (None, Some(run)) => Ok(s
-            .native()
-            .store()
-            .run(run)
-            .map_err(native_error)?
-            .transcript),
+        (Some(session), None) => {
+            let detail = s.native().store().get(session).map_err(native_error)?;
+            let skills = view::skill_index(&detail);
+            Ok((detail.messages, skills))
+        }
+        (None, Some(run)) => Ok((
+            s.native()
+                .store()
+                .run(run)
+                .map_err(native_error)?
+                .transcript,
+            view::SkillIndex::new(),
+        )),
         _ => Err(RpcError::invalid_params(
             "choose exactly one session_id or run_id",
         )),
@@ -36,11 +46,8 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
     let s = services.clone();
     router.register("history.list", move |_, p| {
         let p: view::HistoryParams = parse_params(p)?;
-        view::history(
-            &messages(&s, p.session_id.as_deref(), p.run_id.as_deref())?,
-            p.offset,
-            p.limit,
-        )
+        let (messages, skills) = scoped(&s, p.session_id.as_deref(), p.run_id.as_deref())?;
+        view::history(&messages, p.offset, p.limit, &skills)
     })?;
     let s = services.clone();
     router.register("history.read", move |_, p| {

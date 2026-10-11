@@ -4,6 +4,7 @@ use aidex_native_sessions::{Approval, Checkpoint, Run, SessionConfig, SessionDet
 use aidex_providers::{ChatMessage, Role};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::collections::HashMap;
 pub const WIRE_BUDGET: usize = 900 * 1024;
 pub const CHUNK_LIMIT: usize = 64 * 1024;
 
@@ -55,6 +56,10 @@ pub struct MessageView {
     pub tool_calls_total: usize,
     pub tool_calls_truncated: bool,
     pub tool_call_id: Option<String>,
+    /// Skill ids the user invoked with this message (user messages of runs
+    /// started with `skills`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub skills: Option<Vec<String>>,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct ApprovalView {
@@ -193,6 +198,25 @@ pub fn checkpoint(c: &Checkpoint) -> CheckpointView {
         content_omitted: true,
     }
 }
+/// Invoked skill ids by the session-history index of each root run's user
+/// message.
+pub type SkillIndex = HashMap<usize, Vec<String>>;
+/// The [`SkillIndex`] of a session.
+pub fn skill_index(s: &SessionDetail) -> SkillIndex {
+    s.runs
+        .iter()
+        .filter(|r| r.parent_run_id.is_none() && !r.skills.is_empty())
+        .filter_map(|r| Some((r.message_index?, r.skills.clone())))
+        .collect()
+}
+/// [`message`] with the skills invoked by that message, if any.
+pub fn message_with_skills(m: &ChatMessage, index: usize, skills: &SkillIndex) -> MessageView {
+    let mut view = message(m, index);
+    if m.role == Role::User {
+        view.skills = skills.get(&index).cloned();
+    }
+    view
+}
 pub fn message(m: &ChatMessage, index: usize) -> MessageView {
     MessageView {
         original_index: index,
@@ -216,6 +240,7 @@ pub fn message(m: &ChatMessage, index: usize) -> MessageView {
         tool_calls_total: m.tool_calls.len(),
         tool_calls_truncated: m.tool_calls.len() > 4,
         tool_call_id: m.tool_call_id.as_ref().map(|id| prefix(id, 256)),
+        skills: None,
     }
 }
 pub fn approval(a: &Approval) -> ApprovalView {
@@ -253,6 +278,7 @@ pub fn session(
         .unwrap_or_else(|| s.messages.len().saturating_sub(limit))
         .min(s.messages.len());
     let end = (offset + limit).min(s.messages.len());
+    let skills = skill_index(s);
     let view = SessionView {
         id: s.id.clone(),
         configuration: s.configuration.clone(),
@@ -261,7 +287,7 @@ pub fn session(
         messages: s.messages[offset..end]
             .iter()
             .enumerate()
-            .map(|(n, m)| message(m, offset + n))
+            .map(|(n, m)| message_with_skills(m, offset + n, &skills))
             .collect(),
         messages_offset: offset,
         total_messages: s.messages.len(),
@@ -302,6 +328,7 @@ pub fn history(
     messages: &[ChatMessage],
     offset: usize,
     limit: Option<usize>,
+    skills: &SkillIndex,
 ) -> Result<Value, RpcError> {
     let limit = page_limit(limit)?;
     if offset > messages.len() {
@@ -311,7 +338,7 @@ pub fn history(
     }
     let end = (offset + limit).min(messages.len());
     bounded(
-        json!({"messages":messages[offset..end].iter().enumerate().map(|(n,m)|message(m,offset+n)).collect::<Vec<_>>(),"offset":offset,"total_messages":messages.len(),"next_offset":(end<messages.len()).then_some(end),"truncated":end<messages.len()}),
+        json!({"messages":messages[offset..end].iter().enumerate().map(|(n,m)|message_with_skills(m,offset+n,skills)).collect::<Vec<_>>(),"offset":offset,"total_messages":messages.len(),"next_offset":(end<messages.len()).then_some(end),"truncated":end<messages.len()}),
         false,
     )
 }
