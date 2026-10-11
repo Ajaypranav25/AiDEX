@@ -46,7 +46,7 @@
 /* The field's own outline is replaced by a stronger underline, so focus stays visible. */
 .search:focus-within {
   border-bottom-color: var(--aidex-color-focus);
-  box-shadow: 0 1px 0 0 var(--aidex-color-focus);
+  box-shadow: inset 0 -1px 0 var(--aidex-color-focus);
 }
 
 .searchIcon {
