@@ -32,9 +32,8 @@ mod target;
 
 pub use catalog::{ProviderInfo, SearchProvider, catalog};
 pub use client::{
-    CredentialRequest, CredentialResolver, EgressCheck, EgressPurpose, EgressRequest,
-    FetchedPage, MAX_RAW_BYTES, MAX_REDIRECTS, MAX_TEXT_BYTES, SearchResult, Secret, WebClient,
-    WebOptions,
+    CredentialRequest, CredentialResolver, EgressCheck, EgressPurpose, EgressRequest, FetchedPage,
+    MAX_RAW_BYTES, MAX_REDIRECTS, MAX_TEXT_BYTES, SearchResult, Secret, WebClient, WebOptions,
 };
 pub use error::{CredentialProblem, WebError};
 pub use open::validate_open_url;
@@ -43,9 +42,7 @@ pub use settings::{
     DEFAULT_MAX_RESULTS, MAX_RESULTS, SETTINGS_FILE, SETTINGS_VERSION, WebSettings,
     WebSettingsPatch, validate_endpoint, validate_secret_name,
 };
-pub use target::{
-    AddressClass, DnsResolver, LocalTargets, MAX_URL_BYTES, classify_ip, system_dns,
-};
+pub use target::{AddressClass, DnsResolver, LocalTargets, MAX_URL_BYTES, classify_ip, system_dns};
 
 /// The vault consumer kind and tool id under which provider keys are stored
 /// (`process:web`).

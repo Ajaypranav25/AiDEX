@@ -17,8 +17,8 @@ const DROPPED: &[&str] = &[
 ];
 /// Inline elements that do not separate words in [`plain_text`].
 const INLINE: &[&str] = &[
-    "a", "abbr", "b", "bdi", "bdo", "cite", "code", "data", "dfn", "em", "i", "kbd", "mark",
-    "q", "s", "samp", "small", "span", "strong", "sub", "sup", "time", "u", "var", "wbr",
+    "a", "abbr", "b", "bdi", "bdo", "cite", "code", "data", "dfn", "em", "i", "kbd", "mark", "q",
+    "s", "samp", "small", "span", "strong", "sub", "sup", "time", "u", "var", "wbr",
 ];
 /// Raw-text elements whose content is dropped (`title` is captured instead).
 const RAW_DROPPED: &[&str] = &[
@@ -26,14 +26,34 @@ const RAW_DROPPED: &[&str] = &[
 ];
 /// Elements that never have content or an end tag.
 const VOID: &[&str] = &[
-    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param",
-    "source", "track", "wbr",
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source",
+    "track", "wbr",
 ];
 /// Elements that start and end a block (a blank line around them).
 const BLOCKS: &[&str] = &[
-    "p", "div", "section", "article", "main", "header", "footer", "nav", "aside",
-    "blockquote", "figure", "figcaption", "table", "form", "fieldset", "address", "details",
-    "summary", "dl", "body", "center", "caption", "legend",
+    "p",
+    "div",
+    "section",
+    "article",
+    "main",
+    "header",
+    "footer",
+    "nav",
+    "aside",
+    "blockquote",
+    "figure",
+    "figcaption",
+    "table",
+    "form",
+    "fieldset",
+    "address",
+    "details",
+    "summary",
+    "dl",
+    "body",
+    "center",
+    "caption",
+    "legend",
 ];
 /// Longest title kept, in characters.
 const MAX_TITLE_CHARS: usize = 512;
@@ -467,7 +487,12 @@ mod tests {
     use super::*;
 
     fn text(html: &str) -> String {
-        extract(html, Url::parse("https://example.com/docs/page").ok().as_ref(), 1 << 20).text
+        extract(
+            html,
+            Url::parse("https://example.com/docs/page").ok().as_ref(),
+            1 << 20,
+        )
+        .text
     }
 
     #[test]

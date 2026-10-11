@@ -21,10 +21,7 @@ pub(super) fn request(
         },
     });
     Ok(ProviderRequest {
-        post: Some((
-            "application/json",
-            json_body(&body, 256 + query.len() * 6)?,
-        )),
+        post: Some(("application/json", json_body(&body, 256 + query.len() * 6)?)),
         headers: vec![("x-api-key", Zeroizing::new(key.expose().to_owned()))],
         accept: "application/json",
     })

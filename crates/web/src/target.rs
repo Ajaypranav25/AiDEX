@@ -171,18 +171,19 @@ impl HostKind {
         match url.host() {
             Some(Host::Ipv4(ip)) => Ok(Self::Ip(IpAddr::V4(ip))),
             Some(Host::Ipv6(ip)) => Ok(Self::Ip(IpAddr::V6(ip))),
-            Some(Host::Domain(name)) if name.is_empty() => {
+            Some(Host::Domain("")) | None => {
                 Err(WebError::InvalidUrl("the URL has no host".into()))
             }
             Some(Host::Domain(name)) => {
                 let name = name.trim_end_matches('.').to_ascii_lowercase();
-                if name == "localhost" || name.ends_with(".localhost") {
+                if name.is_empty() {
+                    Err(WebError::InvalidUrl("the URL has no host".into()))
+                } else if name == "localhost" || name.ends_with(".localhost") {
                     Ok(Self::Localhost)
                 } else {
                     Ok(Self::Name(name))
                 }
             }
-            None => Err(WebError::InvalidUrl("the URL has no host".into())),
         }
     }
 
@@ -222,8 +223,8 @@ pub(crate) fn parse_http_url(text: &str) -> Result<Url, WebError> {
             "the URL contains control characters".into(),
         ));
     }
-    let mut url = Url::parse(text)
-        .map_err(|_| WebError::InvalidUrl("not an absolute http(s) URL".into()))?;
+    let mut url =
+        Url::parse(text).map_err(|_| WebError::InvalidUrl("not an absolute http(s) URL".into()))?;
     check_url(&url)?;
     url.set_fragment(None);
     Ok(url)
@@ -369,10 +370,16 @@ fn lookup(
         let wait = cancel.remaining().map_or(POLL, |left| left.min(POLL));
         match receiver.recv_timeout(wait) {
             Ok(Ok(addrs)) => return Ok(addrs.into_iter().take(16).collect()),
-            Ok(Err(_)) => return Err(WebError::Unavailable(format!("{name} could not be resolved"))),
+            Ok(Err(_)) => {
+                return Err(WebError::Unavailable(format!(
+                    "{name} could not be resolved"
+                )));
+            }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
             Err(mpsc::RecvTimeoutError::Disconnected) => {
-                return Err(WebError::Unavailable(format!("{name} could not be resolved")));
+                return Err(WebError::Unavailable(format!(
+                    "{name} could not be resolved"
+                )));
             }
         }
     }

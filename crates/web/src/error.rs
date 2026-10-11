@@ -153,11 +153,17 @@ impl fmt::Display for WebError {
             Self::InvalidUrl(message) => write!(f, "URL refused: {message}"),
             Self::TargetRefused(message) => write!(f, "destination refused: {message}"),
             Self::Offline => f.write_str("offline mode is on, so web requests are refused"),
-            Self::EgressDenied(message) => write!(f, "network policy refused the request: {message}"),
+            Self::EgressDenied(message) => {
+                write!(f, "network policy refused the request: {message}")
+            }
             Self::InvalidSettings(message) => write!(f, "invalid web settings: {message}"),
             Self::NotConfigured(message) => write!(f, "web search is not configured: {message}"),
-            Self::Credential { message, .. } => write!(f, "search provider key unavailable: {message}"),
-            Self::Unauthorized(message) => write!(f, "the provider rejected the request: {message}"),
+            Self::Credential { message, .. } => {
+                write!(f, "search provider key unavailable: {message}")
+            }
+            Self::Unauthorized(message) => {
+                write!(f, "the provider rejected the request: {message}")
+            }
             Self::RateLimited(message) => write!(f, "rate limited: {message}"),
             Self::Http { status, message } => write!(f, "HTTP {status}: {message}"),
             Self::UnsupportedContentType(kind) => {

@@ -354,10 +354,20 @@ mod tests {
             (Some("application/json".into()), None)
         );
         assert_eq!(parse_content_type(""), (None, None));
-        for readable in ["text/html", "text/plain", "application/json", "application/xhtml+xml"] {
+        for readable in [
+            "text/html",
+            "text/plain",
+            "application/json",
+            "application/xhtml+xml",
+        ] {
             assert!(is_readable(readable));
         }
-        for binary in ["image/png", "application/pdf", "application/octet-stream", ""] {
+        for binary in [
+            "image/png",
+            "application/pdf",
+            "application/octet-stream",
+            "",
+        ] {
             assert!(!is_readable(binary));
         }
     }

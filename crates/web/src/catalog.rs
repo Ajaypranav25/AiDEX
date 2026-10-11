@@ -149,7 +149,10 @@ pub struct ProviderInfo {
 
 /// Every provider in presentation order.
 pub fn catalog() -> Vec<ProviderInfo> {
-    SearchProvider::ALL.into_iter().map(SearchProvider::info).collect()
+    SearchProvider::ALL
+        .into_iter()
+        .map(SearchProvider::info)
+        .collect()
 }
 
 #[cfg(test)]

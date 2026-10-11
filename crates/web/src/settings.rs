@@ -297,23 +297,27 @@ pub struct WebSettingsPatch {
 }
 
 /// Distinguish an absent field (`None`) from an explicit `null` (`Some(None)`).
-fn nullable<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<Option<String>>, D::Error> {
+fn nullable<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Option<String>>, D::Error> {
     Option::<String>::deserialize(deserializer).map(Some)
 }
 
 impl WebSettingsPatch {
-    /// The patched settings, validated. Switching to a provider that takes no
-    /// key clears `secret_name`; empty strings clear optional fields.
+    /// The patched settings, validated. Switching to another provider clears
+    /// `secret_name` unless the patch names one (a key belongs to the
+    /// provider it was issued by, so it never follows a provider change);
+    /// empty strings clear optional fields.
     pub fn apply(&self, current: &WebSettings) -> Result<WebSettings, WebError> {
         let mut next = current.clone();
         if let Some(enabled) = self.enabled {
             next.enabled = enabled;
         }
         if let Some(provider) = self.provider {
-            next.provider = provider;
-            if !provider.accepts_key() && self.secret_name.is_none() {
+            if provider != current.provider && self.secret_name.is_none() {
                 next.secret_name = None;
             }
+            next.provider = provider;
         }
         if let Some(endpoint) = &self.endpoint {
             next.endpoint = endpoint
@@ -348,7 +352,10 @@ mod tests {
     fn missing_files_load_defaults_and_saves_round_trip() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(SETTINGS_FILE);
-        assert_eq!(WebSettings::load_from(&path).unwrap(), WebSettings::default());
+        assert_eq!(
+            WebSettings::load_from(&path).unwrap(),
+            WebSettings::default()
+        );
         let settings = WebSettings {
             enabled: true,
             provider: SearchProvider::Searxng,
@@ -365,7 +372,10 @@ mod tests {
         // Defaults omit the optional fields entirely.
         WebSettings::default().save_to(&path).unwrap();
         let text = fs::read_to_string(&path).unwrap();
-        assert!(!text.contains("endpoint") && !text.contains("secret_name"), "{text}");
+        assert!(
+            !text.contains("endpoint") && !text.contains("secret_name"),
+            "{text}"
+        );
         let leftovers: Vec<_> = fs::read_dir(dir.path())
             .unwrap()
             .map(|entry| entry.unwrap().file_name())
@@ -427,15 +437,33 @@ mod tests {
             serde_json::json!({"provider": "searxng", "endpoint": "http://localhost:8888/"}),
         )
         .unwrap();
+        let next = patch.apply(&current).unwrap();
+        assert_eq!(next.endpoint.as_deref(), Some("http://localhost:8888"));
         assert_eq!(
-            patch.apply(&current).unwrap().endpoint.as_deref(),
-            Some("http://localhost:8888")
+            next.secret_name, None,
+            "a key never follows a provider change"
         );
 
-        assert!(serde_json::from_value::<WebSettingsPatch>(
-            serde_json::json!({"api_key": "sk-123"})
+        // Re-selecting the same provider, or naming a key, keeps or sets it.
+        let patch: WebSettingsPatch =
+            serde_json::from_value(serde_json::json!({"provider": "brave"})).unwrap();
+        assert_eq!(
+            patch.apply(&current).unwrap().secret_name.as_deref(),
+            Some("brave-key")
+        );
+        let patch: WebSettingsPatch = serde_json::from_value(
+            serde_json::json!({"provider": "exa", "secret_name": "exa-key"}),
         )
-        .is_err());
+        .unwrap();
+        assert_eq!(
+            patch.apply(&current).unwrap().secret_name.as_deref(),
+            Some("exa-key")
+        );
+
+        assert!(
+            serde_json::from_value::<WebSettingsPatch>(serde_json::json!({"api_key": "sk-123"}))
+                .is_err()
+        );
         let patch: WebSettingsPatch =
             serde_json::from_value(serde_json::json!({"max_results": 42})).unwrap();
         assert!(patch.apply(&current).is_err());
@@ -447,7 +475,10 @@ mod tests {
             provider: SearchProvider::Tavily,
             ..WebSettings::default()
         };
-        assert!(matches!(settings.missing(), Some(WebError::NotConfigured(_))));
+        assert!(matches!(
+            settings.missing(),
+            Some(WebError::NotConfigured(_))
+        ));
         settings.secret_name = Some("tavily".into());
         assert_eq!(settings.missing(), None);
         settings.provider = SearchProvider::Searxng;

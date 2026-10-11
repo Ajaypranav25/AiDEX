@@ -107,7 +107,10 @@ pub(crate) fn run(
 /// Trim and collapse whitespace; refuse empty, overlong, or control-laden
 /// queries.
 fn normalize_query(query: &str) -> Result<String, WebError> {
-    if query.chars().any(|ch| ch.is_control() && !ch.is_whitespace()) {
+    if query
+        .chars()
+        .any(|ch| ch.is_control() && !ch.is_whitespace())
+    {
         return Err(WebError::InvalidRequest(
             "the query contains control characters".into(),
         ));
@@ -324,7 +327,10 @@ mod tests {
 
     #[test]
     fn queries_are_trimmed_bounded_and_printable() {
-        assert_eq!(normalize_query("  rust \n  web\tsearch ").unwrap(), "rust web search");
+        assert_eq!(
+            normalize_query("  rust \n  web\tsearch ").unwrap(),
+            "rust web search"
+        );
         for bad in ["", "   ", "a\u{0}b", "bell\u{7}"] {
             assert!(matches!(
                 normalize_query(bad),

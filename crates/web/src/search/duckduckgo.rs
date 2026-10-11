@@ -11,7 +11,7 @@ use url::Url;
 use super::{ProviderRequest, RawResult};
 use crate::{
     WebError,
-    html::{decode_entities, tokenizer::{Token, Tokenizer}},
+    html::tokenizer::{Token, Tokenizer},
 };
 
 /// Most results read from one page (more than any caller keeps).
@@ -112,7 +112,9 @@ pub(super) fn parse(body: &[u8]) -> Result<Vec<RawResult>, WebError> {
                 if let Some(open) = capture.as_mut()
                     && open.text.len() < MAX_FIELD_BYTES
                 {
-                    open.text.push_str(&decode_entities(text));
+                    // Raw text: entities are decoded once, when results are
+                    // sanitized.
+                    open.text.push_str(text);
                 }
             }
             Token::End { name } => {
@@ -147,7 +149,11 @@ fn finish(capture: Capture, position: &mut Position, results: &mut Vec<RawResult
     if position.in_ad {
         return;
     }
-    let text = capture.text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let text = capture
+        .text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     match capture.field {
         Field::Title => {
             let Some(url) = capture.href.as_deref().and_then(target_url) else {
@@ -197,7 +203,9 @@ fn target_url(href: &str) -> Option<String> {
 
 fn looks_like_bot_check(html: &str) -> bool {
     let lower = html.to_ascii_lowercase();
-    lower.contains("anomaly-modal") || lower.contains("challenge-form") || lower.contains("bots use duckduckgo")
+    lower.contains("anomaly-modal")
+        || lower.contains("challenge-form")
+        || lower.contains("bots use duckduckgo")
 }
 
 #[cfg(test)]
@@ -207,8 +215,10 @@ mod tests {
     #[test]
     fn redirect_links_unwrap_and_internal_links_drop() {
         assert_eq!(
-            target_url("//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.rust-lang.org%2Flearn%3Fa%3D1&rut=abc")
-                .as_deref(),
+            target_url(
+                "//duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.rust-lang.org%2Flearn%3Fa%3D1&rut=abc"
+            )
+            .as_deref(),
             Some("https://www.rust-lang.org/learn?a=1")
         );
         assert_eq!(
@@ -223,7 +233,12 @@ mod tests {
     #[test]
     fn garbage_and_challenges_never_panic() {
         assert!(parse(b"").unwrap().is_empty());
-        assert!(parse(b"<a class=\"result__a\" href=\"https://x.example/\"").unwrap().len() <= 1);
+        assert!(
+            parse(b"<a class=\"result__a\" href=\"https://x.example/\"")
+                .unwrap()
+                .len()
+                <= 1
+        );
         assert!(parse(&[0xff, 0xfe, b'<', b'a']).unwrap().is_empty());
         assert!(matches!(
             parse(b"<html><div class=\"anomaly-modal__title\">Unfortunately, bots use DuckDuckGo too.</div></html>"),

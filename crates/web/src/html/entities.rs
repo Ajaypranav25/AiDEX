@@ -258,7 +258,10 @@ mod tests {
         );
         assert_eq!(decode("&copy 2024 &amp more"), "\u{a9} 2024 & more");
         assert_eq!(decode("&#x1F600;"), "\u{1F600}");
-        assert_eq!(decode("&#0; &#xD800; &#99999999;"), "\u{fffd} \u{fffd} \u{fffd}");
+        assert_eq!(
+            decode("&#0; &#xD800; &#99999999;"),
+            "\u{fffd} \u{fffd} \u{fffd}"
+        );
         assert_eq!(decode("&unknown; & &;"), "&unknown; & &;");
         assert_eq!(decode("AT&T"), "AT&T");
         assert_eq!(decode("&nbsp;x"), "\u{a0}x");

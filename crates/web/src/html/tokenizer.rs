@@ -128,10 +128,9 @@ impl<'a> Tokenizer<'a> {
                 Some(_) => {}
             }
             let attribute_start = index;
-            while bytes
-                .get(index)
-                .is_some_and(|byte| !byte.is_ascii_whitespace() && !matches!(byte, b'=' | b'>' | b'/'))
-            {
+            while bytes.get(index).is_some_and(|byte| {
+                !byte.is_ascii_whitespace() && !matches!(byte, b'=' | b'>' | b'/')
+            }) {
                 index += 1;
             }
             let attribute = rest[attribute_start..index].to_ascii_lowercase();
@@ -274,7 +273,12 @@ mod tests {
     fn raw_text_elements_hide_markup_until_their_end_tag() {
         let found = tokens("<script>if (a < b) { x = '</div>'; }</SCRIPT ><p>after</p>");
         assert_eq!(found[1], Token::Text("if (a < b) { x = '</div>'; }"));
-        assert_eq!(found[2], Token::End { name: "script".into() });
+        assert_eq!(
+            found[2],
+            Token::End {
+                name: "script".into()
+            }
+        );
         assert_eq!(found[4], Token::Text("after"));
         // An unterminated script swallows the rest instead of leaking it.
         let found = tokens("<style>body{}<p>never");

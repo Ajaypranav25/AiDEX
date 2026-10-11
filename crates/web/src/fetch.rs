@@ -15,18 +15,21 @@ use crate::{
 const ACCEPT_PAGE: &str =
     "text/html,application/xhtml+xml,text/plain;q=0.9,application/json;q=0.8,text/*;q=0.7";
 
-pub(crate) fn run(client: &WebClient, url: &str, cancel: &CancelToken) -> Result<FetchedPage, WebError> {
+pub(crate) fn run(
+    client: &WebClient,
+    url: &str,
+    cancel: &CancelToken,
+) -> Result<FetchedPage, WebError> {
     let requested = target::parse_http_url(url)?;
     let options = *client.options();
     let mut origin = Origin::Requested(options.local_targets);
     let mut current = requested.clone();
     let mut hop = 0;
     loop {
-        let approved = client.approve(EgressPurpose::Fetch, current.clone(), origin, hop, cancel)?;
-        if hop == 0 && !approved.is_explicitly_local() {
-            // A public page may not redirect into the local network: only a
-            // URL that names a local address itself may stay local.
-            origin = Origin::Requested(LocalTargets::Refuse);
+        let approved =
+            client.approve(EgressPurpose::Fetch, current.clone(), origin, hop, cancel)?;
+        if hop == 0 {
+            origin = redirect_origin(origin, approved.is_explicitly_local());
         }
         let response = client.exchange(
             approved,
@@ -50,6 +53,17 @@ pub(crate) fn run(client: &WebClient, url: &str, cancel: &CancelToken) -> Result
         }
         current = next_hop(&current, response.location.as_deref())?;
         hop += 1;
+    }
+}
+
+/// The origin redirect hops are checked with. A public page may not redirect
+/// into the local network: only a URL that itself names a local address keeps
+/// the client's allowance for local destinations.
+fn redirect_origin(first: Origin, first_is_explicitly_local: bool) -> Origin {
+    if first_is_explicitly_local {
+        first
+    } else {
+        Origin::Requested(LocalTargets::Refuse)
     }
 }
 
@@ -121,7 +135,9 @@ fn sniff_charset(body: &[u8]) -> Option<String> {
 fn decode(body: &[u8], charset: Option<&str>) -> String {
     let latin = matches!(
         charset,
-        Some("iso-8859-1" | "latin1" | "latin-1" | "windows-1252" | "cp1252" | "us-ascii" | "ascii")
+        Some(
+            "iso-8859-1" | "latin1" | "latin-1" | "windows-1252" | "cp1252" | "us-ascii" | "ascii"
+        )
     );
     if latin {
         return body.iter().map(|&byte| windows_1252(byte)).collect();
@@ -133,10 +149,10 @@ fn decode(body: &[u8], charset: Option<&str>) -> String {
 fn windows_1252(byte: u8) -> char {
     const HIGH: [char; 32] = [
         '\u{20ac}', '\u{fffd}', '\u{201a}', '\u{192}', '\u{201e}', '\u{2026}', '\u{2020}',
-        '\u{2021}', '\u{2c6}', '\u{2030}', '\u{160}', '\u{2039}', '\u{152}', '\u{fffd}',
-        '\u{17d}', '\u{fffd}', '\u{fffd}', '\u{2018}', '\u{2019}', '\u{201c}', '\u{201d}',
-        '\u{2022}', '\u{2013}', '\u{2014}', '\u{2dc}', '\u{2122}', '\u{161}', '\u{203a}',
-        '\u{153}', '\u{fffd}', '\u{17e}', '\u{178}',
+        '\u{2021}', '\u{2c6}', '\u{2030}', '\u{160}', '\u{2039}', '\u{152}', '\u{fffd}', '\u{17d}',
+        '\u{fffd}', '\u{fffd}', '\u{2018}', '\u{2019}', '\u{201c}', '\u{201d}', '\u{2022}',
+        '\u{2013}', '\u{2014}', '\u{2dc}', '\u{2122}', '\u{161}', '\u{203a}', '\u{153}',
+        '\u{fffd}', '\u{17e}', '\u{178}',
     ];
     match byte {
         0x80..=0x9f => HIGH[usize::from(byte - 0x80)],
@@ -156,7 +172,9 @@ mod tests {
             "https://example.com/c?d=1"
         );
         assert_eq!(
-            next_hop(&current, Some("//cdn.example.org/x")).unwrap().as_str(),
+            next_hop(&current, Some("//cdn.example.org/x"))
+                .unwrap()
+                .as_str(),
             "https://cdn.example.org/x"
         );
         for bad in [
@@ -182,17 +200,32 @@ mod tests {
     }
 
     #[test]
+    fn only_explicitly_local_pages_may_redirect_to_local_addresses() {
+        let allowance = Origin::Requested(LocalTargets::LoopbackAndPrivate);
+        assert_eq!(redirect_origin(allowance, true), allowance);
+        assert_eq!(
+            redirect_origin(allowance, false),
+            Origin::Requested(LocalTargets::Refuse)
+        );
+    }
+
+    #[test]
     fn bodies_decode_by_charset() {
         assert_eq!(decode(b"\xef\xbb\xbfcaf\xc3\xa9", None), "caf\u{e9}");
-        assert_eq!(decode(b"caf\xe9 \x80 \x96", Some("iso-8859-1")), "caf\u{e9} \u{20ac} \u{2013}");
+        assert_eq!(
+            decode(b"caf\xe9 \x80 \x96", Some("iso-8859-1")),
+            "caf\u{e9} \u{20ac} \u{2013}"
+        );
         assert_eq!(decode(b"bad \xff", Some("utf-8")), "bad \u{fffd}");
         assert_eq!(
             sniff_charset(b"<html><head><meta charset=\"Windows-1252\">").as_deref(),
             Some("windows-1252")
         );
         assert_eq!(
-            sniff_charset(b"<meta http-equiv=Content-Type content='text/html; charset=ISO-8859-1'>")
-                .as_deref(),
+            sniff_charset(
+                b"<meta http-equiv=Content-Type content='text/html; charset=ISO-8859-1'>"
+            )
+            .as_deref(),
             Some("iso-8859-1")
         );
         assert_eq!(sniff_charset(b"<p>no declaration</p>"), None);
