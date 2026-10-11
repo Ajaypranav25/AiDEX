@@ -98,7 +98,7 @@ Pagination follows at most 10 pages within one list timeout; cursors are percent
 | `text-embedding*` | embeddings, not chat |
 | `dall-e*`, `whisper*`, `tts*`, `omni-moderation*`, `text-moderation*`, `babbage*`, `davinci*`, `sora*`, `gpt-image*`, and any `*-realtime*`, `*-audio*`, `*-transcribe*`, `*-tts*`, `*-search*` | not chat |
 
-A descriptor whose context window was reported is `Discovered`; one whose context window came only from this table is `Catalog` (router-eligible like discovered metadata, ranked after it); otherwise it is `Assumed` with a 4,096-token window.
+A descriptor whose context window was reported is `Discovered`; one whose context window came only from this table is `Catalog` (router-eligible like discovered metadata, ranked after it); otherwise it is `Assumed` with a 4,096-token window. Only `Configured` and `Discovered` windows are ceilings: the harness rejects or clamps a request against them, but never against a `Catalog` minimum or an `Assumed` guess.
 
 ## Caching and refresh
 

@@ -227,7 +227,15 @@ fn bound_request(
     let mut budget = configuration
         .max_tokens
         .min(model.max_output_tokens.unwrap_or(configuration.max_tokens));
-    if model.source != CapabilitySource::Assumed && model.context_window > 0 {
+    // Only a declared or reported window is a real ceiling. Catalog windows are
+    // conservative lower bounds and Assumed ones are guesses, so neither may
+    // reject or truncate a request the model would accept; the provider's own
+    // context error covers a real overflow.
+    let exact_window = matches!(
+        model.source,
+        CapabilitySource::Configured | CapabilitySource::Discovered
+    );
+    if exact_window && model.context_window > 0 {
         let input = request.estimated_input_tokens();
         let remaining = model.context_window.saturating_sub(input);
         if remaining == 0 {

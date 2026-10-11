@@ -151,7 +151,9 @@ pub enum CapabilitySource {
     Discovered,
     /// The provider listed the model without limits, and the built-in table of
     /// well-known model families supplied conservative ones. Eligible for
-    /// automatic routing like discovered metadata, but ranked after it.
+    /// automatic routing like discovered metadata, but ranked after it. The
+    /// values are lower bounds, so the harness does not enforce a Catalog
+    /// context window as a hard limit.
     Catalog,
     /// Defaults for a listed model without metadata. The router does not select
     /// such models automatically; only an explicit user override can.

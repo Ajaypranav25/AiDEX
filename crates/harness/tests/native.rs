@@ -2,8 +2,8 @@ use aidex_events::MemoryEventSink;
 use aidex_harness::NativeEngine;
 use aidex_native_sessions::{Mode, RunStatus, SessionStore};
 use aidex_providers::{
-    FakeProvider, FakeScript, FakeTurn, Locality, ModelDescriptor, ModelId, ModelRef, NoVault,
-    OfflineMode, ProviderId, ProviderRegistry,
+    CapabilitySource, FakeProvider, FakeScript, FakeTurn, Locality, ModelDescriptor, ModelId,
+    ModelRef, NoVault, OfflineMode, ProviderId, ProviderRegistry,
 };
 use aidex_vault::{KdfParams, SecretString, VaultService, VaultServiceConfig};
 use std::{
@@ -29,6 +29,22 @@ fn fixture_with_limits(
     mode: Mode,
     context: u32,
     output: Option<u32>,
+) -> (
+    tempfile::TempDir,
+    tempfile::TempDir,
+    Arc<NativeEngine>,
+    String,
+    Arc<FakeProvider>,
+    Arc<MemoryEventSink>,
+) {
+    fixture_with_source(turns, mode, context, output, CapabilitySource::Configured)
+}
+fn fixture_with_source(
+    turns: Vec<FakeTurn>,
+    mode: Mode,
+    context: u32,
+    output: Option<u32>,
+    source: CapabilitySource,
 ) -> (
     tempfile::TempDir,
     tempfile::TempDir,
@@ -88,7 +104,8 @@ fn fixture_with_limits(
         Locality::Local,
         context,
     )
-    .with_tool_calls(aidex_providers::ToolCallSupport::Native);
+    .with_tool_calls(aidex_providers::ToolCallSupport::Native)
+    .with_source(source);
     descriptor.max_output_tokens = output;
     let provider = Arc::new(
         FakeProvider::new(ProviderId::new("fixture").unwrap(), Locality::Local)
@@ -600,4 +617,59 @@ fn known_model_output_and_remaining_context_clamp_the_user_upper_bound() {
     assert_eq!(wait(&e2, &r.id).status, RunStatus::Completed);
     let request = &p2.requests()[0];
     assert!(request.estimated_input_tokens() + request.max_tokens.unwrap() <= 512);
+}
+
+#[test]
+fn catalog_context_minimums_neither_clamp_nor_refuse_a_request() {
+    // About 1,100 estimated input tokens.
+    let long = "x".repeat(4000);
+    // Below a catalog minimum the output budget is not cut to what remains.
+    let (_d, _ws, e, s, p, _events) = fixture_with_source(
+        vec![FakeTurn::text("catalog result")],
+        Mode::Chat,
+        2048,
+        None,
+        CapabilitySource::Catalog,
+    );
+    let r = e.start(&s, &long, "once", None).unwrap();
+    let done = wait(&e, &r.id);
+    assert_eq!(done.status, RunStatus::Completed, "{:?}", done.error);
+    let request = &p.requests()[0];
+    let configured = e.store().get(&s).unwrap().configuration.max_tokens;
+    assert!(request.estimated_input_tokens() + configured > 2048);
+    assert_eq!(request.max_tokens, Some(configured));
+
+    // Above it the harness still sends the request; only the provider (here a
+    // fake whose real limit is that minimum) may refuse it.
+    let (_d1, _ws1, e1, s1, p1, _events1) = fixture_with_source(
+        vec![FakeTurn::text("over the minimum")],
+        Mode::Chat,
+        512,
+        None,
+        CapabilitySource::Catalog,
+    );
+    let r = e1.start(&s1, &long, "once", None).unwrap();
+    assert_eq!(wait(&e1, &r.id).status, RunStatus::Failed);
+    let sent = p1.requests();
+    assert_eq!(sent.len(), 1);
+    assert!(sent[0].estimated_input_tokens() > 512);
+    assert_eq!(sent[0].max_tokens, Some(configured));
+
+    // A reported window is a real ceiling: the same request is refused unsent.
+    let (_d2, _ws2, e2, s2, p2, _events2) = fixture_with_source(
+        vec![FakeTurn::text("never sent")],
+        Mode::Chat,
+        512,
+        None,
+        CapabilitySource::Discovered,
+    );
+    let r = e2.start(&s2, &long, "once", None).unwrap();
+    let run = wait(&e2, &r.id);
+    assert_eq!(run.status, RunStatus::Failed);
+    assert!(
+        run.error
+            .as_deref()
+            .is_some_and(|error| error.contains("context window"))
+    );
+    assert!(p2.requests().is_empty());
 }
