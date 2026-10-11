@@ -16,6 +16,7 @@ mod credentials;
 mod egress;
 mod error;
 mod fake;
+mod hints;
 mod ids;
 mod model;
 mod observer;
@@ -50,7 +51,10 @@ pub use openai::{
     BaseUrl, DiscoveredModel, HttpOptions, InvalidProvider, InvalidUrl, OpenAiClient,
     OpenAiCompatibleProvider, Scheme,
 };
-pub use presets::{ProviderPreset, provider_presets};
+pub use presets::{
+    AuthMethod, PresetCategory, PresetLink, PresetLinkError, ProviderPreset, preset, preset_link,
+    provider_presets,
+};
 pub use provider::{HealthStatus, ModelProvider, ProviderDescriptor, ProviderHealth};
 pub use registry::{
     ModelListing, ProviderEntry, ProviderFailure, ProviderOrigin, ProviderRegistry, RegistryError,
