@@ -126,7 +126,12 @@ function WizardSteps({
           onSaved={(saved) => {
             setSavedAccount(saved);
             catalog.reload();
-            setResult({ kind: "provider", id: saved.id, title: choice.preset.display_name });
+            setResult({
+              kind: "provider",
+              id: saved.id,
+              title: choice.preset.display_name,
+              providerKind: choice.preset.kind,
+            });
             setStep(3);
           }}
         />

@@ -1,8 +1,9 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { Notice } from "@aidex/ui/components";
 import { DownloadIcon } from "@aidex/ui/icons";
 import {
   Button,
+  PasswordField,
   SegmentedControl,
   Select,
   Stack,
@@ -14,6 +15,7 @@ import { call } from "@aidex/client/rpc";
 import { toAidexError } from "@aidex/client/errors";
 import type { RuntimeAuth, RuntimeConfig, RuntimeDriverInfo } from "@aidex/client/dto/runtime";
 import { parseArgv, RUNTIME_VAULT_ENV, runtimeDriverName } from "../../catalog/runtimes";
+import { storeRuntimeKey } from "../runtimeSecret";
 import { RUNTIME_ID, slugify, uniqueId } from "./wizardLogic";
 
 type AuthChoice = RuntimeAuth["kind"];
@@ -29,7 +31,7 @@ type Props = {
   onSaved: (runtime: RuntimeConfig) => void;
 };
 
-type Errors = { id?: string; executable?: string; secret?: string; env?: string };
+type Errors = { id?: string; executable?: string; secret?: string; env?: string; key?: string };
 
 /** Step 2 for an agent runtime: id, executable, arguments, and how it signs in. */
 export function RuntimeConnectStep({ driver, takenIds, chatGptAccounts, existing, onSaved }: Props) {
@@ -51,8 +53,11 @@ export function RuntimeConnectStep({ driver, takenIds, chatGptAccounts, existing
       ? existing.auth.provider_id
       : (chatGptAccounts[0]?.id ?? "openai"),
   );
+  const [apiKey, setApiKey] = useState("");
   const [errors, setErrors] = useState<Errors>({});
   const [busy, setBusy] = useState<"save" | "install" | null>(null);
+  // `<runtime id>/<secret name>` this step already stored a key for, so a retry need not ask again.
+  const storedKey = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [installed, setInstalled] = useState<string | null>(null);
 
@@ -62,15 +67,25 @@ export function RuntimeConnectStep({ driver, takenIds, chatGptAccounts, existing
     { value: "none", label: "None" },
   ];
 
+  const runtimeId = existing?.id ?? id.trim();
+  // A key already in the vault for this runtime and secret: saved earlier by this wizard.
+  const haveKey =
+    storedKey.current === `${runtimeId}/${secretName.trim()}` ||
+    (existing?.auth.kind === "vault" && existing.auth.secret_name === secretName.trim());
+
   const validate = (): Errors => ({
-    id: !RUNTIME_ID.test(id.trim())
-      ? "Use 1-64 letters, digits, dashes, or underscores."
-      : !existing && takenIds.has(id.trim())
-        ? "A runtime with this ID already exists."
-        : undefined,
+    // Only new ids are checked; a saved runtime keeps its id.
+    id: existing
+      ? undefined
+      : !RUNTIME_ID.test(id.trim())
+        ? "Use 1-64 lowercase letters, digits, dashes, or underscores, starting with a letter or digit."
+        : takenIds.has(id.trim())
+          ? "A runtime with this ID already exists."
+          : undefined,
     executable: executable.trim() ? undefined : "Enter the executable path, or install the bundled runtime.",
     secret: auth === "vault" && !secretName.trim() ? "Enter the vault secret name." : undefined,
     env: auth === "vault" && !/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(envName.trim()) ? "Enter an environment variable name." : undefined,
+    key: auth === "vault" && !apiKey && !haveKey ? "Paste the API key." : undefined,
   });
 
   const runtimeAuth = (): RuntimeAuth =>
@@ -87,9 +102,16 @@ export function RuntimeConnectStep({ driver, takenIds, chatGptAccounts, existing
     if (Object.values(found).some(Boolean)) return;
     setBusy("save");
     setError(null);
+    const value = auth === "vault" ? apiKey : "";
+    // The key leaves React state as soon as it is sent.
+    setApiKey("");
     try {
+      if (value) {
+        await storeRuntimeKey(runtimeId, secretName.trim(), value);
+        storedKey.current = `${runtimeId}/${secretName.trim()}`;
+      }
       const config: RuntimeConfig = {
-        id: existing?.id ?? id.trim(),
+        id: runtimeId,
         driver: driver.driver,
         executable: executable.trim(),
         argv: parseArgv(argv),
@@ -181,8 +203,18 @@ export function RuntimeConnectStep({ driver, takenIds, chatGptAccounts, existing
               spellCheck={false}
               value={secretName}
               error={errors.secret}
-              hint="Store the key under this name in Security → Vault."
+              hint="AiDEX stores the key in the drive vault under this name and releases it only to this runtime."
               onChange={(event) => setSecretName(event.target.value)}
+            />
+            <PasswordField
+              label={haveKey ? "API key (leave empty to keep the saved key)" : "API key"}
+              revealLabel="Show key"
+              size="md"
+              autoComplete="off"
+              hint="Encrypted in the drive vault and never shown again."
+              error={errors.key}
+              value={apiKey}
+              onChange={(event) => setApiKey(event.target.value)}
             />
             <TextField
               label="Environment variable"

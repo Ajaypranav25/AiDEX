@@ -45,9 +45,10 @@ Mirrors t3code's Settings → Providers. The selected row lives in the route id 
 | `ConnectionSection.tsx` | Endpoint facts, "Discover models automatically", and "Check connection" (`provider.health`). |
 | `ModelsSection.tsx` | Favorites, Shown in picker, and Hidden groups; star, picker switch, Set as default, capability and source tags. |
 | `CustomModelsEditor.tsx` | Declared models saved through `provider.update` with the full account. |
-| `RuntimeEditor.tsx`, `RuntimeConnectionSection.tsx` | Runtime sign-in, executable, arguments, profile, health, install, and models. |
+| `RuntimeEditor.tsx`, `RuntimeConnectionSection.tsx` | Runtime sign-in (including Replace API key for vault auth), executable, arguments, profile, health, install, and models. |
+| `runtimeSecret.ts` | Stores a runtime's vault key for its `process:runtime-<id>` consumer, keeping the secret's other consumers. |
 | `AddProviderWizard.tsx`, `wizard/` | Provider → Connect → Models. Presets by category and search, ChatGPT sign-in or API key, advanced endpoint settings, agent runtimes, and the first model listing. |
 | `useProviderActions.ts` | Mutations with per-section busy and error state. |
-| `useAuthFlow.ts` | Browser sign-in: start, open, poll every second, cancel. |
+| `useAuthFlow.ts` | Browser sign-in: start, open, poll every second, cancel. A start that resolves after a cancel or unmount cancels its flow instead of opening the browser. |
 
-API keys go to the vault (`vault.secret.set` with the account's secret name and `provider:<id>` consumer) and leave React state as soon as they are sent. Removing an account or runtime that holds the default for new chats clears that default.
+API keys go to the vault (`vault.secret.set` with the account's secret name and `provider:<id>` consumer, or `process:runtime-<id>` for a runtime) and leave React state as soon as they are sent. Removing an account or runtime that holds the default for new chats clears that default.

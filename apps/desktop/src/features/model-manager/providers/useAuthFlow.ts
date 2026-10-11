@@ -50,6 +50,10 @@ export function useAuthFlow(adapter: AuthFlowAdapter, onConnected?: (providerId:
   const flowId = state.phase === "waiting" ? state.flowId : null;
   const pendingRef = useRef<string | null>(null);
   pendingRef.current = flowId;
+  // Bumped by every start, cancel, and unmount, so a start that resolves after it was abandoned
+  // cancels its own flow instead of opening the browser.
+  const attemptRef = useRef(0);
+  const mountedRef = useRef(true);
 
   useEffect(() => {
     if (!flowId) return;
@@ -71,7 +75,12 @@ export function useAuthFlow(adapter: AuthFlowAdapter, onConnected?: (providerId:
           setState({ phase: "failed", message: status.error ?? `Sign-in ${status.state}.` });
         }
       } catch (caught) {
-        if (live) setState({ phase: "failed", message: toAidexError(caught).message });
+        if (!live) return;
+        // Polling stops here, so end the daemon's flow too; a pending one blocks the next sign-in.
+        live = false;
+        pendingRef.current = null;
+        void adapterRef.current.cancel(flowId).catch(() => undefined);
+        setState({ phase: "failed", message: toAidexError(caught).message });
       }
     };
     void check();
@@ -82,18 +91,31 @@ export function useAuthFlow(adapter: AuthFlowAdapter, onConnected?: (providerId:
     };
   }, [flowId]);
 
-  // Leaving the screen mid-sign-in cancels the flow rather than leaving it open.
-  useEffect(
-    () => () => {
+  // Leaving the screen mid-sign-in cancels the flow rather than leaving it open, including one
+  // whose start is still in flight.
+  useEffect(() => {
+    mountedRef.current = true; // StrictMode runs this effect twice
+    return () => {
+      mountedRef.current = false;
+      attemptRef.current += 1;
       if (pendingRef.current) void adapterRef.current.cancel(pendingRef.current).catch(() => undefined);
-    },
-    [],
-  );
+    };
+  }, []);
 
   const start = useCallback(async (begin: () => Promise<FlowStart>) => {
+    attemptRef.current += 1;
+    const attempt = attemptRef.current;
+    const current = () => attempt === attemptRef.current && mountedRef.current;
     setState({ phase: "starting" });
     try {
       const flow = await begin();
+      if (!current()) {
+        // Cancelled, restarted, or unmounted while starting: drop the flow and never open the browser.
+        await adapterRef.current.cancel(flow.flow_id).catch(() => undefined);
+        return;
+      }
+      // An unmount before the next render still cancels it.
+      pendingRef.current = flow.flow_id;
       setState({ phase: "waiting", flowId: flow.flow_id, providerId: flow.provider_id });
       try {
         await call("auth.open", { authorization_url: flow.authorization_url });
@@ -102,11 +124,13 @@ export function useAuthFlow(adapter: AuthFlowAdapter, onConnected?: (providerId:
         throw caught;
       }
     } catch (caught) {
-      setState({ phase: "failed", message: toAidexError(caught).message });
+      if (current()) setState({ phase: "failed", message: toAidexError(caught).message });
     }
   }, []);
 
   const cancel = useCallback(async () => {
+    // A start still waiting on `begin()` cancels its own flow when it resolves.
+    attemptRef.current += 1;
     const pending = pendingRef.current;
     setState({ phase: "cancelled" });
     if (pending) await adapterRef.current.cancel(pending).catch(() => undefined);

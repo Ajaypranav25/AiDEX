@@ -33,6 +33,9 @@ export function ConnectionSection({ item }: { item: AccountItem }) {
   const discoverId = useId();
   const managed = isRuntimeAccount(account);
   const declaredOnly = DECLARED_ONLY.has(descriptor.kind);
+  // The daemon refuses an account that neither discovers nor declares models, so discovery stays on
+  // until a custom model exists. Turning it back on is always allowed.
+  const needsCustomModel = account.discover_models && account.declared_models.length === 0;
   const check = async () => {
     const result = await actions.run("health", () => call("provider.health", { id: descriptor.id }));
     if (result) setHealth(result);
@@ -73,7 +76,9 @@ export function ConnectionSection({ item }: { item: AccountItem }) {
           description={
             declaredOnly
               ? "This provider does not list its models. Declare deployments under Custom models."
-              : "List the models the provider serves. When off, only custom models are offered."
+              : needsCustomModel
+                ? "List the models the provider serves. Add a custom model before turning discovery off."
+                : "List the models the provider serves. When off, only custom models are offered."
           }
           controlId={discoverId}
           control={
@@ -81,7 +86,7 @@ export function ConnectionSection({ item }: { item: AccountItem }) {
               id={discoverId}
               aria-describedby={`${discoverId}-description`}
               checked={account.discover_models}
-              disabled={declaredOnly || actions.busy !== null}
+              disabled={declaredOnly || needsCustomModel || actions.busy !== null}
               onCheckedChange={(checked) => void actions.updateAccount(account, { discover_models: checked })}
             />
           }

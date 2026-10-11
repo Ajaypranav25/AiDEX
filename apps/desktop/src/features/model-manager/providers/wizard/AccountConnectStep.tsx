@@ -17,6 +17,8 @@ import { accountAuthAdapter, authFlowText, useAuthFlow } from "../useAuthFlow";
 import {
   ACCOUNT_ID,
   declaresModels,
+  endpointHint,
+  endpointPlaceholder,
   keyMode,
   requiresEndpoint,
   slugify,
@@ -47,7 +49,12 @@ export function AccountConnectStep({ preset, takenIds, existing, onSaved }: Prop
     <Stack gap={4}>
       {preset.description && <Text tone="muted">{preset.description}</Text>}
       {method === "chatgpt" ? (
-        <ChatGptConnect takenIds={takenIds} onSaved={onSaved} onUseKey={() => setMethod("key")} />
+        <ChatGptConnect
+          takenIds={takenIds}
+          existing={existing && !existing.secretName ? existing : null}
+          onSaved={onSaved}
+          onUseKey={() => setMethod("key")}
+        />
       ) : (
         <>
           {chatGpt && (
@@ -70,9 +77,10 @@ function freshChatGptId(): string {
 
 function ChatGptConnect({
   takenIds,
+  existing,
   onSaved,
   onUseKey,
-}: Pick<Props, "takenIds" | "onSaved"> & { onUseKey: () => void }) {
+}: Pick<Props, "takenIds" | "existing" | "onSaved"> & { onUseKey: () => void }) {
   const flow = useAuthFlow(accountAuthAdapter, (providerId) => onSaved({ id: providerId, secretName: null }));
   const pending = flow.state.phase === "waiting" || flow.state.phase === "starting";
   const begin = (providerId: string) =>
@@ -95,9 +103,14 @@ function ChatGptConnect({
           <>
             <Button
               variant="primary"
-              onClick={() => begin(takenIds.has("openai") ? freshChatGptId() : "openai")}
+              onClick={() =>
+                begin(
+                  // Coming back to fix the account this wizard signed in reconnects it in place.
+                  existing ? existing.id : takenIds.has("openai") ? freshChatGptId() : "openai",
+                )
+              }
             >
-              Continue with ChatGPT
+              {existing ? "Sign in again" : "Continue with ChatGPT"}
             </Button>
             <Button variant="outline" onClick={onUseKey}>
               Use an API key
@@ -141,6 +154,8 @@ function KeyForm({ preset, takenIds, existing, onSaved }: Props) {
   const id = existingId ?? accountId.trim();
   const secretName = `provider-${id}`;
   const haveSecret = storedSecret.current === secretName;
+  // An account without discovery must declare a model; the daemon refuses one that lists nothing.
+  const needsModel = declared || !discover;
 
   const validate = (): Errors => ({
     id:
@@ -149,16 +164,21 @@ function KeyForm({ preset, takenIds, existing, onSaved }: Props) {
         : !existingId && takenIds.has(id)
           ? "An account with this ID already exists."
           : undefined,
-    endpoint: requiresEndpoint(preset) && !endpoint.trim() ? "Enter the endpoint URL." : undefined,
+    endpoint:
+      requiresEndpoint(preset) && !endpoint.trim()
+        ? "Enter the endpoint URL."
+        : endpoint.trim() && !/^https?:\/\//i.test(endpoint.trim())
+          ? "Use an https:// URL, or http:// for a server on this computer."
+          : undefined,
     key:
       mode === "required" && !key && !haveSecret
         ? bedrock
           ? "Paste the AWS credentials JSON."
           : "Paste the API key."
         : undefined,
-    model: declared && !modelId.trim() ? "Enter a deployment or model ID." : undefined,
+    model: needsModel && !modelId.trim() ? "Enter a deployment or model ID." : undefined,
     context:
-      declared && (!Number.isSafeInteger(Number(context)) || Number(context) < 1)
+      needsModel && (!Number.isSafeInteger(Number(context)) || Number(context) < 1)
         ? "Enter the model's context limit in tokens."
         : undefined,
   });
@@ -193,7 +213,7 @@ function KeyForm({ preset, takenIds, existing, onSaved }: Props) {
         base_url: endpoint.trim() || preset.base_url || "",
         secret_name: value || storedSecret.current === secretName ? secretName : undefined,
         discover_models: declared ? false : discover,
-        models: declared
+        models: needsModel
           ? [
               {
                 id: modelId.trim(),
@@ -228,7 +248,9 @@ function KeyForm({ preset, takenIds, existing, onSaved }: Props) {
           onChange={(event) => setName(event.target.value)}
         />
         {mode === "none" ? (
-          <Notice>Make sure {preset.display_name} is running on this computer.</Notice>
+          preset.category === "local" ? (
+            <Notice>Make sure {preset.display_name} is running on this computer.</Notice>
+          ) : null
         ) : (
           <Stack gap={2}>
             <PasswordField
@@ -254,7 +276,7 @@ function KeyForm({ preset, takenIds, existing, onSaved }: Props) {
               value={key}
               onChange={(event) => setKey(event.target.value)}
             />
-            {mode === "optional" && (
+            {mode === "optional" && preset.category === "local" && (
               <Text tone="muted">Make sure {preset.display_name} is running on this computer.</Text>
             )}
             {preset.api_key_url && (
@@ -304,14 +326,26 @@ function KeyForm({ preset, takenIds, existing, onSaved }: Props) {
               inputMode="url"
               value={endpoint}
               error={errors.endpoint}
-              hint={
-                preset.kind === "azure-openai"
-                  ? "Include the deployment path and a supported API version."
-                  : "HTTPS, or http:// for a server on this computer."
-              }
+              placeholder={endpointPlaceholder(preset)}
+              hint={endpointHint(preset)}
               onChange={(event) => setEndpoint(event.target.value)}
             />
-            {declared ? (
+            {!declared && (
+              <SettingRow
+                title="Discover models automatically"
+                description="List the models this provider serves. When off, only the model you declare here is offered."
+                controlId={discoverId}
+                control={
+                  <Switch
+                    id={discoverId}
+                    aria-describedby={`${discoverId}-description`}
+                    checked={discover}
+                    onCheckedChange={setDiscover}
+                  />
+                }
+              />
+            )}
+            {needsModel && (
               <Grid columns={2} gap={3}>
                 <TextField
                   label={preset.kind === "azure-openai" ? "Deployment name" : "Model ID"}
@@ -330,20 +364,6 @@ function KeyForm({ preset, takenIds, existing, onSaved }: Props) {
                   onChange={(event) => setContext(event.target.value)}
                 />
               </Grid>
-            ) : (
-              <SettingRow
-                title="Discover models automatically"
-                description="List the models this provider serves. When off, add models in Custom models."
-                controlId={discoverId}
-                control={
-                  <Switch
-                    id={discoverId}
-                    aria-describedby={`${discoverId}-description`}
-                    checked={discover}
-                    onCheckedChange={setDiscover}
-                  />
-                }
-              />
             )}
           </Stack>
         )}

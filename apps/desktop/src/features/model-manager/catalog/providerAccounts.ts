@@ -112,15 +112,6 @@ export function accountTitles(
   );
 }
 
-function isLoopbackUrl(url: string): boolean {
-  try {
-    const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
-    return host === "localhost" || host === "::1" || host.startsWith("127.");
-  } catch {
-    return false;
-  }
-}
-
 /**
  * `provider.update` params that keep everything the account has today. `provider.update` replaces the
  * whole account, so every edit starts from this and overrides only what changes.
@@ -136,8 +127,9 @@ export function accountUpdateParams(
     kind: descriptor.kind,
     base_url: baseUrl,
     secret_name: descriptor.auth.type === "vault_secret" ? descriptor.auth.secret_name : undefined,
-    // Only `remote` can be forced, and only matters for a loopback endpoint (e.g. a tunnel).
-    locality: descriptor.locality === "remote" && isLoopbackUrl(baseUrl) ? "remote" : undefined,
+    // Keep a remote classification (e.g. a loopback tunnel to a cloud service). The daemon accepts
+    // `remote` for any host and decides loopback itself, so the client never re-derives it.
+    locality: descriptor.locality === "remote" ? "remote" : undefined,
     discover_models: account.discover_models,
     models: account.declared_models,
     display_name: account.display_name,

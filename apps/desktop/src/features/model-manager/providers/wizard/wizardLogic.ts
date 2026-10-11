@@ -15,8 +15,11 @@ export const CATEGORY_OPTIONS: readonly { value: WizardCategory; label: string }
 
 /** Account ids the daemon accepts (`ProviderId`, kept to lowercase here). */
 export const ACCOUNT_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
-/** Runtime ids the daemon accepts. */
-export const RUNTIME_ID = /^[A-Za-z0-9_-]{1,64}$/;
+/**
+ * Runtime ids for new runtimes. Kept lowercase so the vault consumer `process:runtime-<id>` that
+ * releases a runtime's key is always valid (the daemon itself also accepts capitals).
+ */
+export const RUNTIME_ID = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 /** Lowercase slug of `text` that fits an account or runtime id. */
 export function slugify(text: string, fallback = "provider"): string {
@@ -48,9 +51,25 @@ export function keyMode(preset: ProviderPreset): KeyMode {
   return "required";
 }
 
-/** Endpoints that must be typed in: Azure deployments and custom servers have no default. */
+/** Endpoints that must be typed in: Azure resources, Bedrock regions, and custom servers have no default. */
 export function requiresEndpoint(preset: ProviderPreset): boolean {
-  return !preset.base_url && preset.kind !== "bedrock";
+  return !preset.base_url;
+}
+
+/** Example endpoint for presets the user must type one for. */
+export function endpointPlaceholder(preset: ProviderPreset): string | undefined {
+  if (preset.kind === "azure-openai") return "https://<resource>.openai.azure.com/openai";
+  if (preset.kind === "bedrock") return "https://bedrock-runtime.us-east-1.amazonaws.com";
+  return undefined;
+}
+
+/** What the endpoint field expects, matching the daemon's URL contract for each kind. */
+export function endpointHint(preset: ProviderPreset): string {
+  if (preset.kind === "azure-openai")
+    return "Your resource's API root, for example https://<resource>.openai.azure.com/openai. AiDEX adds the deployment path and API version.";
+  if (preset.kind === "bedrock")
+    return "The Bedrock runtime endpoint for your region, for example https://bedrock-runtime.us-east-1.amazonaws.com.";
+  return "HTTPS, or http:// for a server on this computer.";
 }
 
 /** Kinds that cannot list their models, so the wizard asks for one deployment or model id. */

@@ -3,6 +3,7 @@ import { List, ListRow, Notice } from "@aidex/ui/components";
 import { Button, Stack, Text } from "@aidex/ui/primitives";
 import { call } from "@aidex/client/rpc";
 import { toAidexError } from "@aidex/client/errors";
+import type { ProviderKind } from "@aidex/client/dto/models";
 import type { RuntimeConfig } from "@aidex/client/dto/runtime";
 import { useProviderCatalog } from "../../catalog/ProviderCatalog";
 import { supportsModelDiscovery } from "../../catalog/runtimes";
@@ -11,7 +12,7 @@ import { runtimeSummary } from "../providerItems";
 const PREVIEW_COUNT = 6;
 
 export type WizardResultTarget =
-  | { kind: "provider"; id: string; title: string }
+  | { kind: "provider"; id: string; title: string; providerKind: ProviderKind }
   | { kind: "runtime"; runtime: RuntimeConfig; title: string };
 
 type Outcome =
@@ -43,6 +44,16 @@ export function ResultStep({
         const listing = await refresh(target.id);
         const failure = listing.failures.find((entry) => entry.provider_id === target.id);
         if (failure) return { state: "failed", message: failure.message };
+        // Azure lists only its declared deployments without contacting the server, so ask the
+        // server directly. (Bedrock has no free liveness check; its health is always unavailable.)
+        if (target.providerKind === "azure-openai") {
+          const health = await call("provider.health", { id: target.id });
+          if (health.status !== "ready")
+            return {
+              state: "failed",
+              message: health.message || "Azure OpenAI did not answer at this endpoint with this key.",
+            };
+        }
         const models = listing.models.filter((model) => model.model.provider_id === target.id);
         return {
           state: "connected",

@@ -1,13 +1,14 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { InlineCode, KeyValueList, List, ListRow, Notice, SettingsSection } from "@aidex/ui/components";
 import { KeyIcon, LayersIcon, RefreshIcon } from "@aidex/ui/icons";
-import { Button, Stack, Text } from "@aidex/ui/primitives";
+import { Button, PasswordField, Stack, Text } from "@aidex/ui/primitives";
 import { call } from "@aidex/client/rpc";
 import { useProviderCatalog } from "../catalog/ProviderCatalog";
 import { supportsModelDiscovery } from "../catalog/runtimes";
 import { EditorHeader } from "./EditorHeader";
 import type { RuntimeItem } from "./providerItems";
 import { RuntimeConnectionSection } from "./RuntimeConnectionSection";
+import { runtimeConsumerValid } from "./runtimeSecret";
 import { authFlowText, runtimeAuthAdapter, useAuthFlow } from "./useAuthFlow";
 import { useProviderActions } from "./useProviderActions";
 
@@ -66,22 +67,81 @@ function RuntimeSetupSection({ item }: { item: RuntimeItem }) {
           </Stack>
         </>
       ) : auth.kind === "vault" ? (
-        <>
-          <Text>
-            AiDEX passes a vault secret to the runtime as an environment variable. Store or replace the key in
-            Security → Vault.
-          </Text>
-          <KeyValueList
-            items={[
-              { label: "Vault secret", value: <InlineCode>{auth.secret_name}</InlineCode> },
-              { label: "Environment variable", value: <InlineCode>{auth.env_name}</InlineCode> },
-            ]}
-          />
-        </>
+        <RuntimeKeySetup item={item} secretName={auth.secret_name} envName={auth.env_name} />
       ) : (
         <Text>This runtime uses its own sign-in on this computer; AiDEX passes it no credentials.</Text>
       )}
     </SettingsSection>
+  );
+}
+
+function RuntimeKeySetup({
+  item,
+  secretName,
+  envName,
+}: {
+  item: RuntimeItem;
+  secretName: string;
+  envName: string;
+}) {
+  const actions = useProviderActions();
+  const [key, setKey] = useState("");
+  const { runtime } = item;
+  const usable = runtimeConsumerValid(runtime.id);
+  const save = async () => {
+    const value = key;
+    // The key leaves React state as soon as it is sent.
+    setKey("");
+    await actions.replaceRuntimeKey(runtime, value);
+  };
+  return (
+    <>
+      <Text>
+        AiDEX passes the key to the runtime as an environment variable. It is encrypted in the drive vault and
+        released only to this runtime.
+      </Text>
+      <KeyValueList
+        items={[
+          { label: "Vault secret", value: <InlineCode>{secretName}</InlineCode> },
+          { label: "Environment variable", value: <InlineCode>{envName}</InlineCode> },
+        ]}
+      />
+      {usable ? (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (key) void save();
+          }}
+        >
+          <Stack gap={3}>
+            <PasswordField
+              label="Replace API key"
+              revealLabel="Show key"
+              size="md"
+              autoComplete="off"
+              hint="Saving checks the runtime again."
+              value={key}
+              onChange={(event) => setKey(event.target.value)}
+            />
+            <Stack direction="row" gap={2}>
+              <Button type="submit" variant="primary" disabled={!key || actions.busy !== null}>
+                {actions.busy === "key" ? "Saving…" : "Save key"}
+              </Button>
+            </Stack>
+          </Stack>
+        </form>
+      ) : (
+        <Notice tone="warning">
+          The vault cannot release a key to a runtime whose ID has capital letters or other unsupported
+          characters. Remove this runtime and add it again with a lowercase ID.
+        </Notice>
+      )}
+      {actions.error && (
+        <Notice tone="danger" role="alert">
+          {actions.error}
+        </Notice>
+      )}
+    </>
   );
 }
 

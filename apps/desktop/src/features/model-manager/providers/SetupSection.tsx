@@ -134,6 +134,8 @@ function KeySetup({ item }: { item: AccountItem }) {
   const keyOptional = !hasKey || !!preset?.auth_methods.includes("none");
   const keyless = !hasKey && !!preset && !preset.auth_methods.includes("api_key");
   const bedrock = account.descriptor.kind === "bedrock";
+  // Only a server on this computer can be started by the user; remote endpoints get no such hint.
+  const runsHere = account.descriptor.locality === "local";
   const save = async () => {
     const value = key;
     // The key leaves React state as soon as it is sent.
@@ -147,7 +149,7 @@ function KeySetup({ item }: { item: AccountItem }) {
       description={
         hasKey
           ? "The key is encrypted in the drive vault and never shown again."
-          : keyOptional
+          : keyOptional && runsHere
             ? `Make sure ${item.title} is running on this computer.`
             : undefined
       }

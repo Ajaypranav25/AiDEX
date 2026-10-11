@@ -8,6 +8,7 @@ import { useToast } from "../../../app/providers/toast";
 import { useProviderCatalog } from "../catalog/ProviderCatalog";
 import { nativeModelKey, parseModelKey } from "../catalog/modelKeys";
 import { accountUpdateParams } from "../catalog/providerAccounts";
+import { storeRuntimeKey } from "./runtimeSecret";
 
 export type ProviderActions = {
   /** Label of the action in flight, if any. */
@@ -26,6 +27,8 @@ export type ProviderActions = {
   openPresetLink: (presetId: string, link: "api_key" | "docs") => Promise<void>;
   setRuntimeEnabled: (runtime: RuntimeConfig, enabled: boolean) => Promise<void>;
   updateRuntime: (runtime: RuntimeConfig) => Promise<boolean>;
+  /** Stores a vault-auth runtime's key for that runtime's consumer, then checks the runtime again. */
+  replaceRuntimeKey: (runtime: RuntimeConfig, value: string) => Promise<boolean>;
   removeRuntime: (runtime: RuntimeConfig) => Promise<boolean>;
 };
 
@@ -144,6 +147,16 @@ export function useProviderActions(): ProviderActions {
         await run("update", async () => {
           await call("runtime.update", runtime);
           catalog.reload();
+          return true;
+        }),
+      ),
+    replaceRuntimeKey: async (runtime, value) =>
+      succeeded(
+        await run("key", async () => {
+          if (runtime.auth.kind !== "vault") throw new Error("This runtime does not use a vault key.");
+          await storeRuntimeKey(runtime.id, runtime.auth.secret_name, value);
+          await catalog.checkRuntime(runtime.id);
+          notify("API key saved.", "success");
           return true;
         }),
       ),
