@@ -16,8 +16,13 @@ pub use host::{
 use std::{
     collections::BTreeMap,
     fmt,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, TryLockError},
+    thread,
+    time::{Duration, Instant},
 };
+
+/// How long `stop` waits for a busy connection before killing the server.
+const BUSY_GRACE: Duration = Duration::from_secs(3);
 
 use aidex_core::{CancelToken, Timestamp};
 use serde::Serialize;
@@ -186,10 +191,15 @@ impl Slot {
         state.snapshot()
     }
 
-    fn is_running(&self) -> bool {
+    /// The status, after noticing a connection that died on its own.
+    fn status(&self) -> McpStatus {
         let mut state = lock(&self.state);
         state.refresh(&self.logs);
-        state.status == McpStatus::Running
+        state.status
+    }
+
+    fn is_running(&self) -> bool {
+        self.status() == McpStatus::Running
     }
 }
 
@@ -255,12 +265,9 @@ impl McpSupervisor {
     /// Whether any server is starting or running.
     pub fn has_active(&self) -> bool {
         let slots: Vec<Arc<Slot>> = lock(&self.slots).values().cloned().collect();
-        slots.iter().any(|slot| {
-            matches!(
-                slot.snapshot().status,
-                McpStatus::Running | McpStatus::Starting
-            )
-        })
+        slots
+            .iter()
+            .any(|slot| matches!(slot.status(), McpStatus::Running | McpStatus::Starting))
     }
 
     /// The newest `limit` log lines of `id`.
@@ -412,21 +419,45 @@ impl McpSupervisor {
         }
     }
 
+    /// [`Self::teardown`] after an interrupt. A request blocked writing to a
+    /// server that stopped reading its input cannot notice the interrupt, so
+    /// the process tree is killed when the connection stays busy.
+    fn teardown_interrupted(&self, slot: &Slot, interrupter: Option<&Interrupter>) {
+        let deadline = Instant::now() + BUSY_GRACE;
+        let client = loop {
+            match slot.client.try_lock() {
+                Ok(mut guard) => break guard.take(),
+                Err(TryLockError::Poisoned(poisoned)) => break poisoned.into_inner().take(),
+                Err(TryLockError::WouldBlock) if Instant::now() >= deadline => {
+                    if let Some(process) = interrupter.and_then(Interrupter::process) {
+                        let _ = process.kill_tree();
+                    }
+                    break lock(&slot.client).take();
+                }
+                Err(TryLockError::WouldBlock) => thread::sleep(Duration::from_millis(10)),
+            }
+        };
+        if let Some(client) = client {
+            self.close_client(client);
+        }
+    }
+
     /// Stop `id` (a no-op when it is not running).
     pub fn stop(&self, id: &str) -> ServerState {
         let Some(slot) = self.existing(id) else {
             return ServerState::default();
         };
-        let was_active = {
+        let (was_active, interrupter) = {
             let mut state = lock(&slot.state);
             state.generation += 1;
-            if let Some(interrupter) = state.interrupter.take() {
+            let interrupter = state.interrupter.take();
+            if let Some(interrupter) = &interrupter {
                 interrupter.interrupt();
             }
-            state.status != McpStatus::Stopped
+            (state.status != McpStatus::Stopped, interrupter)
         };
         let _lifecycle = lock(&slot.lifecycle);
-        self.teardown(&slot);
+        self.teardown_interrupted(&slot, interrupter.as_ref());
         let mut state = lock(&slot.state);
         let generation = state.generation;
         *state = SlotState {

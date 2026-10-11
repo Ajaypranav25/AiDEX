@@ -276,7 +276,10 @@ pub(crate) fn tool_result(result: &Value, max_text: usize) -> Result<McpToolResu
     {
         parts.push(structured.to_string());
     }
-    let text = parts.join("\n");
+    // Credential patterns are redacted before the text can reach a model, a
+    // transcript, or a log.
+    let joined = parts.join("\n");
+    let text = aidex_events::redact_text(&joined);
     let (kept, truncated) = truncate_utf8(&text, max_text);
     Ok(McpToolResult {
         content_text: kept.to_owned(),
@@ -440,6 +443,13 @@ mod tests {
         )
         .unwrap();
         assert!(big.truncated && big.content_text.len() == 10);
+        let token = "ghp_abcdefghijklmnopqrstuvwxyz0123456789";
+        let leaked = tool_result(
+            &json!({"content":[{"type":"text","text":format!("key {token}")}]}),
+            100,
+        )
+        .unwrap();
+        assert!(!leaked.content_text.contains(token));
         let structured = tool_result(&json!({"structuredContent":{"a":1}}), 100).unwrap();
         assert_eq!(structured.content_text, r#"{"a":1}"#);
     }
