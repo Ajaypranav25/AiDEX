@@ -103,8 +103,8 @@ handlers without sockets.
 
 - Methods: `daemon.status|ping|stop`, `events.replay|latest|subscribe`, `workspace.*`,
   `vault.*`, `model.*`, `provider.*`, `network.*`, `runtime.*`, `settings.get|set`,
-  `model.preferences.get|set`, and `update.status|check|apply|rollback`
-  exist, plus the broker's
+  `model.preferences.get|set`, `web.settings.get|set`, `web.providers|test|open`,
+  and `update.status|check|apply|rollback` exist, plus the broker's
   `tool.list|invoke|continue`, `broker.approval.list|show|resolve|revoke`,
   `policy.show|profile.set|reload|explain`, and `emergency.stop|resume`; additional
   domains are future work.
@@ -194,6 +194,23 @@ Model picker favorites and hidden models are a separate vault record
 (`aidex_preferences::ModelPreferencesService`, secret `aidex-model-preferences`),
 registered next to `settings.*` in `methods/settings.rs`; `AppPreferences` is
 unchanged so an older daemon still reads `aidex-preferences`.
+
+### Web search
+
+`Services::web()` returns `WebServices` (`services/web.rs`): the drive's
+`private_config/web.toml` (`aidex-web`, a new closed-schema file, so older
+daemons are unaffected) and `WebClient`s whose egress check refuses when the
+offline switch is on or an emergency stop is in effect, then evaluates a
+`network.request` intent for the destination host under the broker's settings
+and policy documents (approval verdicts refuse; every decision is a
+`policy.decision` event). Provider keys are released only after that check,
+through a `secret.use` evaluation and a 30-second vault handle for
+`process:web` (`secret.granted`/`secret.revoked`). `methods/web.rs` serves
+`web.settings.get|set`, `web.providers`, `web.test` (one search with the stored
+or an unsaved patched configuration), and `web.open` (strict URL validation,
+then `aidex_auth::open_in_browser`). Handler tests use a loopback SearXNG
+fixture and never open a browser. Harness tools (`web.search`, `web.fetch`)
+are not wired yet.
 
 ### External runtimes
 

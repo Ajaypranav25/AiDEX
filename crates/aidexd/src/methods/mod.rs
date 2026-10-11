@@ -28,6 +28,7 @@ pub mod skills;
 pub mod tools;
 pub mod update;
 pub mod vault;
+pub mod web;
 pub mod workspace;
 pub mod workspace_live;
 
@@ -92,6 +93,7 @@ pub(crate) fn register_all(
     tools::register(router, services)?;
     update::register(router, services)?;
     vault::register(router, services)?;
+    web::register(router, services)?;
     workspace::register(router, services)?;
     Ok(())
 }

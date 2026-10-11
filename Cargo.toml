@@ -30,6 +30,7 @@ members = [
     "crates/storage",
     "crates/updater",
     "crates/vault",
+    "crates/web",
     "crates/workspace",
 ]
 
