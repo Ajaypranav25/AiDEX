@@ -54,6 +54,12 @@ function jumpDigit(event: globalThis.KeyboardEvent): number | null {
   return digit ? Number(digit) : null;
 }
 
+function sameMembers(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const entry of a) if (!b.has(entry)) return false;
+  return true;
+}
+
 /** Picker body: provider rail, search, model listbox, status footer, and the manage bar. */
 export function ModelPickerPanel({
   providers,
@@ -87,6 +93,25 @@ export function ModelPickerPanel({
   const [frozenHeight, setFrozenHeight] = useState<number | null>(null);
   // Scroll the active option into view after keyboard moves and view changes, not after hovering.
   const scrollPendingRef = useRef(true);
+  // Set once the user acts in the panel; until then the start view follows data that is still arriving.
+  const viewTouchedRef = useRef(false);
+  const touchView = () => {
+    viewTouchedRef.current = true;
+  };
+
+  // The panel can open while the catalog, lazily listed runtime models, or favorites are still
+  // loading. Re-derive the start view as they arrive, until the user has interacted.
+  useEffect(() => {
+    if (viewTouchedRef.current) return;
+    const nextRail = initialRailSelection({ providers, models, favorites, value });
+    if (nextRail !== rail) {
+      setRail(nextRail);
+      scrollPendingRef.current = true;
+      if (listRef.current) listRef.current.scrollTop = 0;
+    }
+    const nextLegacy = initialExpandedLegacy(models, favorites, value);
+    setExpandedLegacy((current) => (sameMembers(current, nextLegacy) ? current : nextLegacy));
+  }, [providers, models, favorites, value, rail]);
 
   const view = useMemo(
     () => buildPickerView({ providers, models, favorites, value, query, rail, expandedLegacy }),
@@ -141,6 +166,7 @@ export function ModelPickerPanel({
 
   const selectRail = useCallback(
     (next: RailSelection) => {
+      viewTouchedRef.current = true;
       setRail(next);
       setActiveId(null);
       scrollPendingRef.current = true;
@@ -151,6 +177,7 @@ export function ModelPickerPanel({
   );
 
   const toggleLegacy = useCallback((providerId: string) => {
+    viewTouchedRef.current = true;
     setExpandedLegacy((current) => {
       const next = new Set(current);
       if (next.has(providerId)) next.delete(providerId);
@@ -168,6 +195,7 @@ export function ModelPickerPanel({
   };
 
   const moveActive = (step: number) => {
+    touchView();
     if (enabledIds.length === 0) return;
     const index = effectiveActiveId ? enabledIds.indexOf(effectiveActiveId) : -1;
     const next = index === -1 ? (step > 0 ? 0 : enabledIds.length - 1) : (index + step + enabledIds.length) % enabledIds.length;
@@ -176,9 +204,9 @@ export function ModelPickerPanel({
   };
 
   useLayoutEffect(() => {
-    if (!scrollPendingRef.current) return;
+    // Stay pending while nothing is highlighted (e.g. still loading), so the row scrolls in once listed.
+    if (!scrollPendingRef.current || !effectiveActiveId) return;
     scrollPendingRef.current = false;
-    if (!effectiveActiveId) return;
     const element = document.getElementById(optionId(effectiveActiveId));
     element?.scrollIntoView({ block: "nearest" });
   }, [effectiveActiveId, optionId]);
@@ -218,6 +246,7 @@ export function ModelPickerPanel({
   const handleQueryChange = (event: ChangeEvent<HTMLInputElement>) => {
     const next = event.target.value;
     const nextSearching = next.trim().length > 0;
+    if (nextSearching) touchView();
     if (nextSearching && !searching) setFrozenHeight(panelRef.current?.offsetHeight ?? null);
     if (!nextSearching) setFrozenHeight(null);
     setQuery(next);
@@ -245,6 +274,7 @@ export function ModelPickerPanel({
         ((event.key === "ArrowLeft" && !event.shiftKey && query.length === 0) || (event.key === "Tab" && event.shiftKey));
       if (toRail) {
         event.preventDefault();
+        touchView();
         railRef.current?.focus();
         return;
       }
@@ -254,6 +284,8 @@ export function ModelPickerPanel({
   };
 
   const handleToggleFavorite = (key: string, removesRow: boolean) => {
+    // Starring must not move the view to Favorites.
+    touchView();
     onToggleFavorite(key);
     // The row (and its focused star) disappears from the Favorites view; keep focus usable.
     if (removesRow) focusSearch();
@@ -322,7 +354,10 @@ export function ModelPickerPanel({
             jumpModifierLabel={jumpModifierLabel}
             emptyText={listEmptyText}
             favoritesView={!searching && rail === null}
-            onActivate={setActiveId}
+            onActivate={(rowId) => {
+              touchView();
+              setActiveId(rowId);
+            }}
             onSelectModel={selectModel}
             onToggleLegacy={toggleLegacy}
             onToggleFavorite={handleToggleFavorite}

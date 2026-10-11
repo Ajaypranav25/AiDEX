@@ -78,6 +78,7 @@
 }
 
 .title {
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   color: var(--aidex-color-text);
@@ -88,8 +89,10 @@
   white-space: nowrap;
 }
 
+/* The tag gives up its space long before the title is truncated. */
 .version {
-  flex: none;
+  flex: 0 1000 auto;
+  min-width: 0;
   max-width: 40%;
   overflow: hidden;
   color: var(--aidex-color-text-muted);

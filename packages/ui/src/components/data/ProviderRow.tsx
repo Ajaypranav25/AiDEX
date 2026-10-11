@@ -1,5 +1,5 @@
 import { useId, type ComponentPropsWithRef, type ReactNode } from "react";
-import { BrandIcon, hasBrandIcon } from "../../icons/brands/BrandIcon";
+import { BrandIcon } from "../../icons/brands/BrandIcon";
 import { StatusDot } from "../../primitives/StatusDot";
 import { cx } from "../../utils/cx";
 import styles from "./ProviderRow.module.css";
@@ -60,7 +60,7 @@ export function ProviderRow({
       >
         <span className={styles.tile}>
           {/* Unknown brands show a monogram of the row title; the button's own label names the row. */}
-          <BrandIcon brand={brand} title={hasBrandIcon(brand) ? undefined : title} size={20} aria-hidden />
+          <BrandIcon brand={brand} monogramLabel={title} size={20} aria-hidden />
         </span>
         <span className={styles.body}>
           <span className={styles.titleLine}>

@@ -9,7 +9,7 @@ import {
   type KeyboardEvent,
   type Ref,
 } from "react";
-import { BrandIcon, hasBrandIcon } from "../../icons/brands/BrandIcon";
+import { BrandIcon } from "../../icons/brands/BrandIcon";
 import { StarFilledIcon } from "../../icons/interface";
 import { StatusDot } from "../../primitives/StatusDot";
 import { cx } from "../../utils/cx";
@@ -137,7 +137,7 @@ export function ModelPickerRail({ providers, selected, onSelect, onFocusSearch, 
                     <span className={styles.glyph}>
                       <BrandIcon
                         brand={provider.brand}
-                        title={hasBrandIcon(provider.brand) ? undefined : provider.name}
+                        monogramLabel={provider.name}
                         size={20}
                         aria-hidden
                       />

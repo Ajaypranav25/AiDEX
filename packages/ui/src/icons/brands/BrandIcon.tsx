@@ -11,8 +11,13 @@ export type BrandIconProps = Omit<SVGProps<SVGSVGElement>, "children"> & {
   size?: number | string;
   /** `brand` (default) uses the brand color when the glyph has one; `mono` inherits `currentColor`. */
   tone?: "brand" | "mono";
-  /** Accessible name. Omit for decorative icons next to a visible name. Also feeds the monogram. */
+  /**
+   * Accessible name and tooltip. Omit for decorative icons next to a visible name. Ignored as a name
+   * when the icon is `aria-hidden`, so it never covers the enclosing control's tooltip.
+   */
   title?: string;
+  /** Text the monogram initials come from when there is no glyph (defaults to `title`, then the brand). */
+  monogramLabel?: string;
 };
 
 function glyphFor(brand: string): BrandGlyph | undefined {
@@ -47,14 +52,25 @@ export function monogram(label: string): string {
 }
 
 /** Provider or runtime logo from the bundled brand glyphs, with a monogram fallback. */
-export function BrandIcon({ brand, size = 20, tone = "brand", title, className, style, ...props }: BrandIconProps) {
+export function BrandIcon({
+  brand,
+  size = 20,
+  tone = "brand",
+  title,
+  monogramLabel,
+  className,
+  style,
+  ...props
+}: BrandIconProps) {
   const glyph = glyphFor(brand);
-  const a11y = title
-    ? ({ role: "img", "aria-label": title } as const)
-    : ({ "aria-hidden": true } as const);
+  const hidden = props["aria-hidden"] === true || props["aria-hidden"] === "true";
+  // A decorative icon gets no <title>: browsers show the innermost title, which would replace the
+  // tooltip of the button or row around it while the pointer is over the glyph.
+  const label = hidden ? undefined : title;
+  const a11y = label ? ({ role: "img", "aria-label": label } as const) : ({ "aria-hidden": true } as const);
 
   if (!glyph) {
-    const letters = monogram(title ?? brandTitle(brand));
+    const letters = monogram(monogramLabel ?? title ?? brandTitle(brand));
     return (
       <svg
         width={size}
@@ -66,7 +82,7 @@ export function BrandIcon({ brand, size = 20, tone = "brand", title, className, 
         {...a11y}
         {...props}
       >
-        {title ? <title>{title}</title> : null}
+        {label ? <title>{label}</title> : null}
         <rect className={styles.monogramTile} x="1" y="1" width="22" height="22" rx="6" />
         <text
           className={styles.monogramText}
@@ -96,7 +112,7 @@ export function BrandIcon({ brand, size = 20, tone = "brand", title, className, 
       {...a11y}
       {...props}
     >
-      {title ? <title>{title}</title> : null}
+      {label ? <title>{label}</title> : null}
       {glyph.paths.map((path, index) => (
         <path
           // Paths are fixed generated data; their order is their identity.

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, type MouseEvent, type Ref } from "react";
-import { BrandIcon, hasBrandIcon } from "../../icons/brands/BrandIcon";
+import { BrandIcon } from "../../icons/brands/BrandIcon";
 import { CheckIcon, ChevronRightIcon, StarFilledIcon, StarIcon } from "../../icons/interface";
 import { Badge, type BadgeTone } from "../../primitives/Badge";
 import { Kbd } from "../../primitives/Kbd";
@@ -194,7 +194,7 @@ function ModelOption({
           {provider ? (
             <BrandIcon
               brand={provider.brand}
-              title={hasBrandIcon(provider.brand) ? undefined : provider.name}
+              monogramLabel={provider.name}
               size={12}
               className={styles.detailIcon}
               aria-hidden

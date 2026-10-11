@@ -1,5 +1,5 @@
 import { useId, type ComponentPropsWithRef, type ReactNode } from "react";
-import { BrandIcon, hasBrandIcon } from "../../icons/brands/BrandIcon";
+import { BrandIcon } from "../../icons/brands/BrandIcon";
 import { cx } from "../../utils/cx";
 import styles from "./ProviderTile.module.css";
 
@@ -47,7 +47,7 @@ export function ProviderTile({
     >
       <span className={styles.header}>
         <span className={styles.logo}>
-          <BrandIcon brand={brand} title={hasBrandIcon(brand) ? undefined : name} size={28} aria-hidden />
+          <BrandIcon brand={brand} monogramLabel={name} size={28} aria-hidden />
         </span>
         <span className={styles.name}>{name}</span>
       </span>

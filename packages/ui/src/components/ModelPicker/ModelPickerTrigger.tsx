@@ -1,5 +1,5 @@
 import type { ComponentPropsWithRef } from "react";
-import { BrandIcon, hasBrandIcon } from "../../icons/brands/BrandIcon";
+import { BrandIcon } from "../../icons/brands/BrandIcon";
 import { ChevronDownIcon } from "../../icons/interface";
 import { BoxIcon } from "../../icons/navigation";
 import { Badge } from "../../primitives/Badge";
@@ -54,7 +54,7 @@ export function ModelPickerTrigger({
     >
       <span className={styles.icon} aria-hidden="true">
         {provider ? (
-          <BrandIcon brand={provider.brand} title={hasBrandIcon(provider.brand) ? undefined : provider.name} size={16} aria-hidden />
+          <BrandIcon brand={provider.brand} monogramLabel={provider.name} size={16} aria-hidden />
         ) : (
           <BoxIcon size={16} />
         )}
