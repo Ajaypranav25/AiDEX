@@ -24,10 +24,12 @@ import { useToast } from "../../app/providers/toast";
 import { useRpc } from "../../hooks/useRpc";
 import { useProviderCatalog } from "../model-manager/catalog/ProviderCatalog";
 import {
+  isExternalRuntime,
   modelTargetOf,
   parseModelKey,
   type ModelTarget,
 } from "../model-manager/catalog/modelKeys";
+import { LOCAL_PROVIDER_ID } from "../model-manager/catalog/providerAccounts";
 import { LocalInferenceNotice } from "../model-manager/LocalInferenceNotice";
 import { HistoryMessages, MessageContent } from "../sessions/HistoryMessages";
 import { ConversationModelPicker } from "./ConversationModelPicker";
@@ -69,9 +71,6 @@ export function ConversationPage({
   const catalog = useProviderCatalog();
   const notify = useToast();
   const inference = catalog.inference;
-  const localCatalog = useRpc("inference.catalog", undefined, {
-    enabled: inference?.state === "stopped",
-  });
   const workspaces = useRpc("workspace.list");
   const session = useRpc(
     "conversation.get",
@@ -120,6 +119,19 @@ export function ConversationPage({
   const current = describeCurrentModel(resolved, catalog);
   const modelName = current.name;
   const target = parseModelKey(resolved.key);
+  // Installed local models, to name the conversation's own local model while it is not running.
+  const localCatalog = useRpc("inference.catalog", undefined, {
+    enabled:
+      inference?.state === "stopped" || resolved.state === "local-stopped",
+  });
+  const ownLocalModelId =
+    target?.kind === "native" && target.providerId === LOCAL_PROVIDER_ID
+      ? target.modelId
+      : null;
+  const ownLocalName = ownLocalModelId
+    ? (localCatalog.data?.models.find((item) => item.id === ownLocalModelId)
+        ?.name ?? modelName)
+    : undefined;
   const runtimeDriver =
     resolved.runtime &&
     catalog.runtimeDrivers.find(
@@ -163,6 +175,14 @@ export function ConversationPage({
       setPermission(preferences.settings.permission_mode ?? "supervised");
     }
   }, [route.id, preferences.loaded, preferences.settings.permission_mode]);
+  // External runtimes run only as agents with full access, whether a new chat's model came from the
+  // picker, the saved default, or a Home handoff. Declared after the permission sync so it wins.
+  useEffect(() => {
+    if (route.id || target?.kind !== "runtime") return;
+    setMode("agent");
+    permissionTouched.current = true;
+    setPermission("full_access");
+  }, [route.id, resolved.key]);
   useEffect(() => {
     if (!route.id) return;
     const timer = setInterval(session.refetch, running ? 250 : 1500);
@@ -230,16 +250,20 @@ export function ConversationPage({
   ): SessionConfig => {
     if (route.id && !session.data)
       throw new Error("The conversation is still loading.");
+    const nextTarget = changes.target ?? currentTarget();
+    // Every external runtime accepts only agent mode with full access, so no write can carry
+    // another combination (the engine would refuse it on the next run).
+    const external = isExternalRuntime(nextTarget.runtime_id);
     return buildSessionConfig({
       session: session.data,
       defaults: preferences.settings,
       title: draft.trim().slice(0, 72),
-      mode: changes.mode ?? mode,
+      mode: external ? "agent" : (changes.mode ?? mode),
       workspaceId: changes.workspaceId ?? workspaceId,
       isRegisteredWorkspace: (id) =>
         !!workspaces.data?.workspaces.some((w) => w.id === id),
-      target: changes.target ?? currentTarget(),
-      permission: changes.permission ?? permission,
+      target: nextTarget,
+      permission: external ? "full_access" : (changes.permission ?? permission),
     });
   };
   const act = async (operation: () => Promise<unknown>) => {
@@ -332,7 +356,8 @@ export function ConversationPage({
       !preferences.loaded ||
       resolved.state !== "ready" ||
       (workspaceId && !project) ||
-      (mode !== "chat" && !workspaceId)
+      // A runtime target is an agent even before its mode sync has rendered.
+      ((mode !== "chat" || target?.kind === "runtime") && !workspaceId)
     )
       return;
     autoSent.current = true;
@@ -348,7 +373,16 @@ export function ConversationPage({
   ]);
   const selectModel = async (key: string) => {
     const parsed = parseModelKey(key);
-    if (!parsed || key === resolved.key) return;
+    if (!parsed) return;
+    // Re-picking the same runtime still repairs a mode or permission it cannot run with.
+    if (
+      key === resolved.key &&
+      !(
+        parsed.kind === "runtime" &&
+        (mode !== "agent" || permission !== "full_access")
+      )
+    )
+      return;
     const nextTarget = modelTargetOf(parsed);
     const descriptor = catalog.findModel(key);
     const name =
@@ -536,8 +570,13 @@ export function ConversationPage({
       }
     />
   );
+  // `LocalInferenceNotice` explains a starting or failed local model; it does not cover a
+  // conversation bound to a different local model, which still needs its own notice.
   const localNoticeShown =
-    inference?.state === "starting" || inference?.state === "failed";
+    (inference?.state === "starting" || inference?.state === "failed") &&
+    (!ownLocalModelId ||
+      !inference.model_id ||
+      inference.model_id === ownLocalModelId);
   return (
     <DockLayout width="prose" dock={dock}>
       <div className={styles.conversation}>
@@ -569,6 +608,7 @@ export function ConversationPage({
             state={resolved.state}
             name={modelName}
             installedLocalName={installedModel?.name}
+            localName={ownLocalName}
             hasModels={catalog.models.length > 0}
             loading={
               catalog.loading ||

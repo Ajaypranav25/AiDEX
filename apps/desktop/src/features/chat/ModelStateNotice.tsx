@@ -9,6 +9,8 @@ type Props = {
   name: string;
   /** Name of a local model installed on the drive, when one is known. */
   installedLocalName?: string;
+  /** Name of the conversation's own local model, for the "not running" message. */
+  localName?: string;
   /** Whether any model can be chosen at all. */
   hasModels: boolean;
   loading: boolean;
@@ -21,6 +23,7 @@ export function ModelStateNotice({
   state,
   name,
   installedLocalName,
+  localName,
   hasModels,
   loading,
   localNoticeShown,
@@ -59,7 +62,7 @@ export function ModelStateNotice({
       <Notice role="status">
         <Stack gap={3}>
           <Text>
-            {installedLocalName ?? "The local model"} is not running. Start it in Local models to use local chat, or
+            {localName ?? name} is not running. Start it in Local models to use local chat, or
             choose another model.
           </Text>
           <Stack direction="row" gap={2} wrap>

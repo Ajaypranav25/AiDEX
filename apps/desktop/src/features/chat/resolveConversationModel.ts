@@ -69,7 +69,12 @@ function resolveKey(
   if (parsed.providerId === LOCAL_PROVIDER_ID) {
     // Only one local model is registered at a time, and only while it runs.
     if (model && input.inference?.state === "ready") return { key, model, state: "ready", origin };
-    if (input.inference?.state === "starting") return { key, state: "loading-local", origin };
+    // Loading only when it is this key's model that is starting; another local model does not help.
+    if (
+      input.inference?.state === "starting" &&
+      (!input.inference.model_id || input.inference.model_id === parsed.modelId)
+    )
+      return { key, state: "loading-local", origin };
     return { key, state: "local-stopped", origin };
   }
   return model ? { key, model, state: "ready", origin } : { key, state: "unlisted", origin };
