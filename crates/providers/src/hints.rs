@@ -246,7 +246,10 @@ mod tests {
         );
         assert_eq!(family_key("models/gemini-2.5-pro"), "gemini-2.5-pro");
         assert_eq!(family_key("x-ai/grok-4"), "grok-4");
-        assert_eq!(family_key("claude-3-5-sonnet@20240620"), "claude-3-5-sonnet");
+        assert_eq!(
+            family_key("claude-3-5-sonnet@20240620"),
+            "claude-3-5-sonnet"
+        );
     }
 
     #[test]
@@ -268,7 +271,10 @@ mod tests {
         let grok = hint_for("x-ai/grok-4").unwrap();
         assert_eq!(grok.context_window, Some(131_072));
         assert_eq!(grok.json_schema_output, Some(true));
-        assert_eq!(hint_for("grok-3-mini").unwrap().context_window, Some(131_072));
+        assert_eq!(
+            hint_for("grok-3-mini").unwrap().context_window,
+            Some(131_072)
+        );
         assert_eq!(hint_for("grok-beta"), None);
         assert_eq!(hint_for("grok-1"), None);
         let gemini = hint_for("google/gemini-2.5-flash").unwrap();

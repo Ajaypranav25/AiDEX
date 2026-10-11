@@ -225,7 +225,10 @@ mod tests {
     #[test]
     fn default_entries_are_not_written() {
         let mut accounts = BTreeMap::new();
-        accounts.insert(ProviderId::new("plain").unwrap(), AccountMetadata::default());
+        accounts.insert(
+            ProviderId::new("plain").unwrap(),
+            AccountMetadata::default(),
+        );
         accounts.insert(
             ProviderId::new("named").unwrap(),
             AccountMetadata {

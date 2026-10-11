@@ -372,7 +372,10 @@ static ROWS: [Row; 25] = [
         Cloud,
         &[ApiKey],
     )
-    .key("https://modelstudio.console.alibabacloud.com", Some("sk-..."))
+    .key(
+        "https://modelstudio.console.alibabacloud.com",
+        Some("sk-..."),
+    )
     .docs("https://www.alibabacloud.com/help/en/model-studio/")
     .about("Qwen models through Alibaba Cloud Model Studio."),
     row(
@@ -581,12 +584,7 @@ mod tests {
                     p.id
                 );
             }
-            assert_eq!(
-                p.oauth_supported,
-                p.id == "openai",
-                "{}",
-                p.id
-            );
+            assert_eq!(p.oauth_supported, p.id == "openai", "{}", p.id);
             assert_eq!(preset(&p.id).as_ref(), Some(p));
         }
         assert_eq!(presets[0].id, "openai");

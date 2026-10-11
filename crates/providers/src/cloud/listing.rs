@@ -106,4 +106,3 @@ pub(super) fn chatgpt_catalog(value: &Value) -> Result<Vec<DiscoveredModel>, Pro
         })
         .collect())
 }
-

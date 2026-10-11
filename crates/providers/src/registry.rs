@@ -17,13 +17,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     AccountMetadata, ConfigError, CredentialResolver, EgressGate, HealthStatus, HttpOptions,
-    ModelConfig, ModelDescriptor, ModelEvent, ModelObserver, ModelProvider, ModelRef,
-    NoopObserver, OpenAiCompatibleProvider, ProviderAccountsConfig, ProviderConfig,
-    ProviderDescriptor, ProviderError, ProviderErrorKind, ProviderHealth, ProviderId,
-    ProvidersConfig,
-    config::{
-        PROVIDER_ACCOUNTS_FILE, PROVIDERS_FILE, prepare_config_file, write_toml,
-    },
+    ModelConfig, ModelDescriptor, ModelEvent, ModelObserver, ModelProvider, ModelRef, NoopObserver,
+    OpenAiCompatibleProvider, ProviderAccountsConfig, ProviderConfig, ProviderDescriptor,
+    ProviderError, ProviderErrorKind, ProviderHealth, ProviderId, ProvidersConfig,
+    config::{PROVIDER_ACCOUNTS_FILE, PROVIDERS_FILE, prepare_config_file, write_toml},
 };
 
 /// How a provider entered the registry.
@@ -187,7 +184,9 @@ struct Inner {
 
 impl Inner {
     fn is_enabled(&self, id: &ProviderId) -> bool {
-        self.accounts.get(id).is_none_or(|metadata| metadata.enabled)
+        self.accounts
+            .get(id)
+            .is_none_or(|metadata| metadata.enabled)
     }
 
     fn origin(&self, id: &ProviderId) -> Result<ProviderOrigin, RegistryError> {
@@ -222,7 +221,9 @@ impl Inner {
             preset_id: metadata.preset_id,
             enabled: metadata.enabled,
             discover_models: config.is_some_and(|config| config.discover_models),
-            declared_models: config.map(|config| config.models.clone()).unwrap_or_default(),
+            declared_models: config
+                .map(|config| config.models.clone())
+                .unwrap_or_default(),
             catalog: catalog.get(id).cloned(),
         }
     }

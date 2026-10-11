@@ -301,10 +301,7 @@ impl CloudProvider {
             let Some(next) = page.next else {
                 break;
             };
-            endpoint = format!(
-                "{first}&{cursor_param}={}",
-                requests::encode_segment(&next)
-            );
+            endpoint = format!("{first}&{cursor_param}={}", requests::encode_segment(&next));
         }
         Ok(models)
     }
