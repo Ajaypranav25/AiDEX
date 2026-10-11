@@ -289,6 +289,11 @@ impl Channel for HttpChannel {
         let Some(session) = session else {
             return;
         };
+        // Ending the session is a request too: offline or under an emergency
+        // stop the session is simply abandoned.
+        if self.egress.as_ref().is_some_and(|egress| egress().is_err()) {
+            return;
+        }
         let connection = self.connection.clone();
         let (sender, receiver) = sync_channel::<()>(1);
         let started = thread::Builder::new()
