@@ -45,7 +45,51 @@ import type {
   HistoryPage,
   HistoryScope,
   Checkpoint,
+  SendParams,
 } from "./dto/sessions";
+import type {
+  SkillDeleted,
+  SkillDetail,
+  SkillDraft,
+  SkillList,
+  SkillListParams,
+  SkillSetEnabledParams,
+  SkillShowParams,
+  SkillSummary,
+} from "./dto/skills";
+import type {
+  McpImportResult,
+  McpLogsResult,
+  McpServer,
+  McpServerList,
+  McpServerSpec,
+  McpToolsResult,
+} from "./dto/mcp";
+import type {
+  WebProviderInfo,
+  WebSettingsPatch,
+  WebSettingsView,
+  WebTestParams,
+  WebTestResult,
+} from "./dto/web";
+import type {
+  PluginDetail,
+  PluginInstallOutcome,
+  PluginInstallParams,
+  PluginList,
+  PluginSetEnabledParams,
+  PluginSummary,
+  PluginTrustParams,
+  PluginUninstalled,
+} from "./dto/plugins";
+import type {
+  ArtifactContent,
+  ArtifactList,
+  ArtifactListParams,
+  ArtifactMeta,
+  ArtifactPlanUpdateParams,
+  ArtifactReadParams,
+} from "./dto/artifacts";
 import type { AppPreferences, ModelPreferences } from "./dto/preferences";
 import type {
   InferenceCatalog,
@@ -171,14 +215,8 @@ export type RpcMethods = {
     params: { id: string; pinned: boolean };
     result: SessionSummary;
   };
-  "message.send": {
-    params: { session_id: string; content: string; command_id: string };
-    result: Run;
-  };
-  "agent.start": {
-    params: { session_id: string; content: string; command_id: string };
-    result: Run;
-  };
+  "message.send": { params: SendParams; result: Run };
+  "agent.start": { params: SendParams; result: Run };
   "run.get": { params: { id: string }; result: Run };
   "run.cancel": { params: { id: string }; result: Run };
   "run.resume": { params: { id: string }; result: Run };
@@ -271,6 +309,44 @@ export type RpcMethods = {
   "vault.lock": { params: undefined; result: VaultLockResult };
   "workspace.list": { params: undefined; result: WorkspaceList };
   "workspace.selected": { params: undefined; result: SelectedWorkspace };
+  "skill.list": { params: SkillListParams | undefined; result: SkillList };
+  "skill.show": { params: SkillShowParams; result: SkillDetail };
+  "skill.set_enabled": { params: SkillSetEnabledParams; result: SkillSummary };
+  "skill.save": { params: SkillDraft; result: SkillSummary };
+  "skill.delete": { params: { name: string }; result: SkillDeleted };
+  "mcp.list": { params: { workspace_id?: string } | undefined; result: McpServerList };
+  "mcp.add": { params: McpServerSpec; result: McpServer };
+  /** Stops a running server so its next start uses the new configuration. */
+  "mcp.update": { params: McpServerSpec; result: McpServer };
+  "mcp.remove": { params: { id: string }; result: { removed: boolean } };
+  "mcp.set_enabled": { params: { id: string; enabled: boolean }; result: McpServer };
+  "mcp.start": { params: { id: string }; result: McpServer };
+  "mcp.stop": { params: { id: string }; result: McpServer };
+  "mcp.restart": { params: { id: string }; result: McpServer };
+  "mcp.tools": { params: { id: string }; result: McpToolsResult };
+  "mcp.logs": { params: { id: string; limit?: number }; result: McpLogsResult };
+  /** Saves each valid `.mcp.json` entry of the workspace as a DISABLED server (`dry_run` previews). */
+  "mcp.import": {
+    params: { workspace_id?: string; dry_run?: boolean } | undefined;
+    result: McpImportResult;
+  };
+  "plugin.list": { params: undefined; result: PluginList };
+  "plugin.show": { params: { name: string }; result: PluginDetail };
+  "plugin.install": { params: PluginInstallParams; result: PluginInstallOutcome };
+  "plugin.trust": { params: PluginTrustParams; result: PluginSummary };
+  "plugin.set_enabled": { params: PluginSetEnabledParams; result: PluginSummary };
+  "plugin.uninstall": { params: { name: string }; result: PluginUninstalled };
+  "web.settings.get": { params: undefined; result: WebSettingsView };
+  "web.settings.set": { params: WebSettingsPatch; result: WebSettingsView };
+  "web.providers": { params: undefined; result: { providers: WebProviderInfo[] } };
+  "web.test": { params: WebTestParams; result: WebTestResult };
+  /** Opens an https URL from a result in the system browser after strict validation. */
+  "web.open": { params: { url: string }; result: { opened: true } };
+  "artifact.list": { params: ArtifactListParams; result: ArtifactList };
+  "artifact.get": { params: { id: string }; result: ArtifactMeta };
+  "artifact.read": { params: ArtifactReadParams; result: ArtifactContent };
+  "artifact.delete": { params: { id: string }; result: { deleted: boolean } };
+  "artifact.plan.update": { params: ArtifactPlanUpdateParams; result: ArtifactMeta };
 };
 
 export type RpcMethod = keyof RpcMethods;

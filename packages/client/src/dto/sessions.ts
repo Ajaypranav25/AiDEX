@@ -31,7 +31,42 @@ export type Message = {
   tool_calls_total: number;
   tool_calls_truncated: boolean;
   tool_call_id: string | null;
+  /** Skill ids (`<scope>:<name>`) invoked with this user message; absent otherwise. */
+  skills?: string[];
 };
+/**
+ * Params of `message.send` and `agent.start`. `content` is stored exactly as typed
+ * (keep `$name` tokens); `skills` are injected for that run only, and `web_search`
+ * turns on web tools for that run in Chat mode (Agent and Plan follow the web
+ * settings). Neither option is stored in the session configuration. Unknown or
+ * disabled skills fail with `data.reason = "skill_unavailable"`; `web_search` while
+ * web search is off fails with `data.reason = "web_unavailable"`.
+ */
+export type SendParams = {
+  session_id: string;
+  content: string;
+  command_id: string;
+  parent_run_id?: string;
+  /** At most 8 skill ids. */
+  skills?: string[];
+  web_search?: boolean;
+};
+/**
+ * Model-facing names of the native tools the desktop renders specially (the
+ * dotted ids `web.search`, `web.fetch`, `skill.load`, `artifact.create`,
+ * `artifact.update`, `plan.propose` with dots as underscores). MCP tools are
+ * `mcp__<server>__<tool>`. Match tool results to calls by `tool_call_id`.
+ */
+export const NATIVE_TOOL_NAMES = {
+  webSearch: "web_search",
+  webFetch: "web_fetch",
+  skillLoad: "skill_load",
+  artifactCreate: "artifact_create",
+  artifactUpdate: "artifact_update",
+  planPropose: "plan_propose",
+} as const;
+/** Prefix of MCP tool names: `mcp__<server>__<tool>`. */
+export const MCP_TOOL_PREFIX = "mcp__";
 export type SessionConfig = {
   title: string;
   workspace_id: string | null;
