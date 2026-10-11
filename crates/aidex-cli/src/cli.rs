@@ -15,6 +15,7 @@ use crate::commands::{
     inference::InferenceArgs,
     model::ModelArgs,
     offline::OfflineArgs,
+    plugins::PluginsArgs,
     policy::PolicyArgs,
     provider::ProviderArgs,
     tools::ToolsArgs,
@@ -111,6 +112,9 @@ pub enum Commands {
     /// List the tools the broker mediates.
     #[command(alias = "tool")]
     Tools(ToolsArgs),
+    /// Install, review, trust, and enable plugin bundles of skills and MCP servers.
+    #[command(alias = "plugin")]
+    Plugins(PluginsArgs),
     /// Emergency stop: freeze tools, cancel approvals, kill managed processes.
     Stop(StopArgs),
     /// Resume tool execution after an emergency stop.
@@ -157,6 +161,7 @@ impl Commands {
             Some(Self::Deny(_)) => "aidex deny",
             Some(Self::Policy(args)) => args.command.label(),
             Some(Self::Tools(args)) => args.command.label(),
+            Some(Self::Plugins(args)) => args.command.label(),
             Some(Self::Stop(_)) => "aidex stop",
             Some(Self::Resume(_)) => "aidex resume",
             Some(Self::Index(args)) => args.command.label(),

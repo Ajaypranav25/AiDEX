@@ -176,7 +176,7 @@ fn redact_quoted(message: &str) -> String {
     for c in message.chars() {
         match quoted {
             Some(open) if c == open => {
-                out.push_str("…");
+                out.push('…');
                 out.push(c);
                 quoted = None;
             }

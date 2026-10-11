@@ -488,6 +488,7 @@ dependencies = [
  "aidex-host",
  "aidex-inference",
  "aidex-native-sessions",
+ "aidex-plugins",
  "aidex-policy",
  "aidex-preferences",
  "aidex-providers",

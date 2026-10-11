@@ -66,7 +66,7 @@ fn folders_install_disabled_with_reviewable_contents() {
     assert!(drive.events.is_empty());
 
     let list = drive.store.list().unwrap();
-    assert_eq!(list.plugins, [summary.clone()]);
+    assert_eq!(list.plugins, std::slice::from_ref(summary));
     assert!(list.unregistered.is_empty());
     assert_eq!(drive.store.show("code-review").unwrap(), *plugin);
 }

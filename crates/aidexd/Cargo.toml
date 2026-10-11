@@ -9,6 +9,7 @@ license.workspace = true
 aidex-broker = { path = "../broker" }
 aidex-context = { path = "../context" }
 aidex-native-sessions = { path = "../native-sessions" }
+aidex-plugins = { path = "../plugins" }
 aidex-adapters = { path = "../adapters" }
 aidex-sandbox = { path = "../sandbox" }
 aidex-preferences = { path = "../preferences" }
