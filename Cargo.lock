@@ -496,6 +496,7 @@ dependencies = [
  "aidex-tools",
  "aidex-updater",
  "aidex-vault",
+ "aidex-web",
  "aidex-workspace",
  "getrandom 0.3.4",
  "rusqlite",

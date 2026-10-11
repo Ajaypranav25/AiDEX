@@ -26,6 +26,7 @@ aidex-router = { path = "../router" }
 aidex-tools = { path = "../tools" }
 aidex-updater = { path = "../updater" }
 aidex-vault = { path = "../vault" }
+aidex-web = { path = "../web" }
 aidex-workspace = { path = "../workspace" }
 getrandom = "0.3"
 serde = { version = "1", features = ["derive"] }

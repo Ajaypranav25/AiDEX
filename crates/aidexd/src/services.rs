@@ -8,8 +8,10 @@
 mod inference;
 mod models;
 mod runtime;
+mod web;
 
 pub use models::{EventsModelObserver, ModelServices, VaultCredentials, model_event_kind};
+pub use web::WebServices;
 
 use crate::{endpoint, lifecycle::ShutdownSignal};
 use aidex_broker::{Broker, BrokerConfig};
@@ -62,6 +64,7 @@ pub struct Services {
     workspaces: Arc<WorkspaceRegistry>,
     broker: Arc<Broker>,
     models: ModelServices,
+    web: Arc<WebServices>,
     sessions: Arc<SessionStore>,
     session_recovery: RecoveryReport,
     context: Arc<ContextService>,
@@ -126,6 +129,15 @@ impl Services {
             Arc::clone(&broker),
             Arc::new(EventsModelObserver::new(Arc::new(events.clone()))),
         )?;
+        // Web search and fetch pass the offline switch and the broker's network
+        // policy; provider keys come from the vault for `process:web`.
+        let web = Arc::new(WebServices::open(
+            &paths,
+            Arc::clone(&broker),
+            Arc::clone(models.offline()),
+            Arc::clone(&vault),
+            Arc::new(events.clone()),
+        )?);
         let (sessions, session_recovery) = open_sessions(&paths, &events)?;
         let context = ContextService::open(&paths, Arc::new(events.clone()))
             .map_err(|error| ServicesError::new("context", error.code(), error.to_string()))?;
@@ -160,6 +172,7 @@ impl Services {
             workspaces,
             broker,
             models,
+            web,
             sessions: Arc::new(sessions),
             session_recovery,
             context: Arc::new(context),
@@ -220,6 +233,11 @@ impl Services {
     /// (`aidex-providers`, `aidex-router`).
     pub fn models(&self) -> &ModelServices {
         &self.models
+    }
+
+    /// Web search and fetch settings and clients (`aidex-web`).
+    pub fn web(&self) -> &Arc<WebServices> {
+        &self.web
     }
     /// Durable sessions, checkpoints, and resume plans (`aidex-sessions`).
     pub fn sessions(&self) -> &Arc<SessionStore> {
