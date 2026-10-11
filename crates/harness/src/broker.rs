@@ -1,5 +1,5 @@
 //! Native ownership of execution permits and the tool registry.
-use crate::launcher::NativeLauncher;
+use crate::{extensions::Extensions, launcher::NativeLauncher};
 use aidex_core::{EntityId, WorkspacePath};
 use aidex_events::NullEventSink;
 use aidex_native_sessions::{PermissionMode, SessionDetail};
@@ -19,6 +19,9 @@ pub(crate) struct Broker {
     pub sandbox: Sandbox,
     pub workspaces: Arc<WorkspaceRegistry>,
     scratch: PathBuf,
+    /// The offline switch, emergency stop, and drive policy settings that
+    /// planned network access is evaluated under.
+    extensions: Arc<dyn Extensions>,
 }
 pub(crate) struct Prepared {
     pub context: ToolContext,
@@ -28,7 +31,7 @@ pub(crate) struct Prepared {
     policy_fingerprint: String,
 }
 impl Broker {
-    fn policy_state(
+    pub(crate) fn policy_state(
         &self,
         root: Option<&Path>,
         workspace: Option<&EntityId>,
@@ -115,12 +118,17 @@ impl Broker {
         }
         Ok(())
     }
-    pub fn new(workspaces: Arc<WorkspaceRegistry>, scratch: PathBuf) -> Self {
+    pub fn new(
+        workspaces: Arc<WorkspaceRegistry>,
+        scratch: PathBuf,
+        extensions: Arc<dyn Extensions>,
+    ) -> Self {
         Self {
             tools: ToolRegistry::with_builtin_tools(),
             sandbox: Sandbox::locate(),
             workspaces,
             scratch,
+            extensions,
         }
     }
     pub fn prepare(
@@ -189,12 +197,31 @@ impl Broker {
         } else {
             Profile::Balanced
         };
-        let evaluation = EvaluationContext::new(
-            profile,
-            PrivacyMode::Hybrid,
-            HostTrust::Trusted,
-            NetworkMode::Unrestricted,
-        );
+        // A plan that reaches the network (a push, a networked command) is
+        // refused while offline or stopped, and its intents meet the drive's
+        // privacy, host-trust, and network-mode floors; other plans keep the
+        // permission-mode context.
+        let evaluation = if plan.facts().network.is_some() {
+            let network = self.extensions.network();
+            if let Some(reason) = network.blocked {
+                return Err(format!(
+                    "policy denied: network access is unavailable ({reason})"
+                ));
+            }
+            EvaluationContext::new(
+                profile,
+                network.context.privacy,
+                network.context.host_trust,
+                network.context.network_mode,
+            )
+        } else {
+            EvaluationContext::new(
+                profile,
+                PrivacyMode::Hybrid,
+                HostTrust::Trusted,
+                NetworkMode::Unrestricted,
+            )
+        };
         let mut needs_approval = tool.as_str() == "fs.delete";
         let mut level = SandboxLevel::Brokered;
         for intent in plan.intents() {

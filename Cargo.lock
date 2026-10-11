@@ -215,6 +215,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+ "url",
 ]
 
 [[package]]
@@ -555,6 +556,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "url",
 ]
 
 [[package]]
