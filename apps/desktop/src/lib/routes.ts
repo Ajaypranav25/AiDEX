@@ -58,7 +58,7 @@ export const pageTitles: Record<PageId, string> = {
 export const pageTabs = {
   workspace: ["overview", "files", "git", "environment", "sessions", "memory"],
   execution: ["execution", "graph"],
-  models: ["local", "providers"],
+  models: ["providers", "local"],
   extensions: ["skills", "mcp", "plugins"],
   security: ["overview", "vault", "sandbox", "approvals"],
   remote: ["devices", "sessions"],
@@ -79,13 +79,14 @@ export function tabOf<Page extends TabbedPage>(
   ) as PageTab<Page>;
 }
 
-/** Pages whose `id` is an in-page selection (a file, a checkpoint, a filter) rather than the record shown. */
+/** Pages whose `id` is an in-page selection (a file, a checkpoint, a filter, a provider) rather than the record shown. */
 const selectionPages: ReadonlySet<PageId> = new Set([
   "review",
   "checkpoints",
   "history",
   "remote",
   "extensions",
+  "models",
 ]);
 
 /**
