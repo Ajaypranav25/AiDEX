@@ -102,7 +102,8 @@ handlers without sockets.
 ## Limitations
 
 - Methods: `daemon.status|ping|stop`, `events.replay|latest|subscribe`, `workspace.*`,
-  `vault.*`, `model.*`, `provider.*`, `network.*`, and `update.status|check|apply|rollback`
+  `vault.*`, `model.*`, `provider.*`, `network.*`, `runtime.*`, `settings.get|set`,
+  `model.preferences.get|set`, and `update.status|check|apply|rollback`
   exist, plus the broker's
   `tool.list|invoke|continue`, `broker.approval.list|show|resolve|revoke`,
   `policy.show|profile.set|reload|explain`, and `emergency.stop|resume`; additional
@@ -142,20 +143,24 @@ model router, offline switch and vault credential resolver. Model chat stays an
 internal `ModelProvider` API; desktop messages use the separate `conversation.*`
 and `agent.*` services rather than a raw provider-chat RPC.
 
-| Method             | Parameters                                                                                     | Result                                                                                                           |
-| ------------------ | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `provider.presets` | none                                                                                           | `{presets: [ProviderPreset]}`; stable IDs, protocol kind, endpoint defaults, capabilities and auth/OAuth support |
-| `provider.add`     | `{id, kind?, base_url, secret_name?, locality?, discover_models?, models?}`                    | `ProviderEntry`                                                                                                  |
-| `provider.update`  | same full replacement configuration as add                                                     | `ProviderEntry`; validates/persists before replacing the instance                                                |
-| `provider.remove`  | `{id}`                                                                                         | `{removed}`; clears a default pointing at this account                                                           |
-| `provider.health`  | `{id}`                                                                                         | `{provider_id, status, error?, message?, latency_ms?, checked_at}`                                               |
-| `model.providers`  | none                                                                                           | `{providers: [ProviderEntry]}`                                                                                   |
-| `model.list`       | none                                                                                           | `{models, failures, default_model, network}`                                                                     |
-| `model.route`      | `{task, privacy?, required_context?, needs_tools?, needs_json_schema?, secret_heavy?, model?}` | `{decision, model, network, failures}`                                                                           |
-| `model.use`        | `{provider_id, model_id}`                                                                      | `{default_model, model}`; validates then persists                                                                |
-| `model.default`    | none                                                                                           | `{default_model}`                                                                                                |
-| `network.offline`  | `{enabled}`                                                                                    | `{offline, network}`                                                                                             |
-| `network.status`   | none                                                                                           | `{offline, network}`                                                                                             |
+| Method                  | Parameters                                                                                                   | Result                                                                                                                                         |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `provider.presets`      | none                                                                                                         | `{presets: [ProviderPreset]}`; stable IDs, protocol kind, endpoint defaults, capabilities, icon, category, auth methods, and console/docs links |
+| `provider.add`          | `{id, kind?, base_url, secret_name?, locality?, discover_models?, models?, display_name?, preset_id?, enabled?}` | `ProviderEntry`                                                                                                                                |
+| `provider.update`       | same full replacement configuration as add                                                                   | `ProviderEntry`; validates/persists before replacing the instance; absent metadata fields are kept, `null` clears them                         |
+| `provider.patch`        | `{id, display_name?: string\|null, enabled?}`                                                                | `ProviderEntry`; renames or enables/disables a configured account                                                                              |
+| `provider.open_link`    | `{preset_id, link: "api_key"\|"docs"}`                                                                       | `{opened: true}`; opens only the HTTPS link stored in that preset                                                                              |
+| `provider.remove`       | `{id}`                                                                                                       | `{removed}`; clears a default pointing at this account and signs a ChatGPT account out (best effort)                                          |
+| `provider.health`       | `{id}`                                                                                                       | `{provider_id, status, error?, message?, latency_ms?, checked_at}`                                                                             |
+| `model.providers`       | none                                                                                                         | `{providers: [ProviderEntry]}`, disabled accounts included, with account metadata and the last catalog status                                  |
+| `model.list`            | none, or `{refresh?, provider_id?}`                                                                          | `{models, failures, default_model, network}`; `refresh` drops cached listings, `provider_id` lists one provider                                |
+| `model.route`           | `{task, privacy?, required_context?, needs_tools?, needs_json_schema?, secret_heavy?, model?}`               | `{decision, model, network, failures}`                                                                                                         |
+| `model.use`             | `{provider_id, model_id}`                                                                                    | `{default_model, model}`; validates then persists                                                                                              |
+| `model.default`         | none                                                                                                         | `{default_model}`                                                                                                                              |
+| `model.preferences.get` | none                                                                                                         | `{favorite_models, hidden_models}`                                                                                                             |
+| `model.preferences.set` | `{favorite_models?, hidden_models?}`                                                                         | the saved record; omitted lists are unchanged                                                                                                  |
+| `network.offline`       | `{enabled}`                                                                                                  | `{offline, network}`                                                                                                                           |
+| `network.status`        | none                                                                                                         | `{offline, network}`                                                                                                                           |
 
 Provider kinds are `openai-compatible`, `openai-responses`, `anthropic`, `gemini`,
 `azure-openai`, and `bedrock`. Runtime local providers also use `llama-cpp` or
@@ -163,9 +168,46 @@ Provider kinds are `openai-compatible`, `openai-responses`, `anthropic`, `gemini
 vault secret with consumer `provider:<id>`; keys are set through `vault.secret.set`.
 Credential handles are short-lived, resolved and revoked per call. Health reports
 `auth_required` for missing/locked/rejected credentials. API-key provider presets
-retain `oauth_supported: false`; supported ChatGPT account acquisition is owned
-by the shared `aidex-auth` service and exposed through `auth.*`. Its encrypted
-accounts register OpenAI Responses provider instances after identity verification.
+retain `oauth_supported: false` (only `openai` offers ChatGPT sign-in); supported
+ChatGPT account acquisition is owned by the shared `aidex-auth` service and exposed
+through `auth.*`. Its encrypted accounts register OpenAI Responses provider
+instances after identity verification. A new ChatGPT account records the `openai`
+preset; a reconnect reasserts only the kind, endpoint, and credential name, keeping
+the account's declared models, discovery flag, and account metadata.
+
+Account metadata (display name, preset id, enabled flag) lives in the registry's
+`private_config/provider-accounts.toml` sidecar so `providers.toml` keeps the
+schema an older daemon loads after `update.rollback`. Disabled accounts stay in
+`model.providers` but are skipped by `model.list`, cannot hold the default model,
+and are refused when a conversation runs on them. `provider.open_link` resolves its
+URL from the preset table only and opens it through `aidex_auth::open_in_browser`
+(network gate first, HTTPS only, fixed command text with the URL as environment
+data); handler tests exercise `open_link_url` and the offline refusal, never a
+browser.
+
+Model picker favorites and hidden models are a separate vault record
+(`aidex_preferences::ModelPreferencesService`, secret `aidex-model-preferences`),
+registered next to `settings.*` in `methods/settings.rs`; `AppPreferences` is
+unchanged so an older daemon still reads `aidex-preferences`.
+
+### External runtimes
+
+`Services::runtime()` returns the `aidex_adapters::RuntimeManager` (Codex, Claude
+Code, Cursor, Grok, OpenCode, Antigravity, Pi, Oh My Pi, Muse, and ACP drivers) or
+why it failed to open; a failure never stops the daemon, and `runtime.*` then
+reports `unavailable` (`data.reason = "runtime_unavailable"`). `methods/runtime.rs`
+serves `runtime.catalog|list|add|update|config.save|remove|config.get|health|models|install`
+and `runtime.auth.start|status|cancel`. The configuration is sealed with a vault
+key, so the native engine only learns the configured runtimes through
+`sync_runtimes`, which loads the enabled executors when the vault is unlocked (a
+no-op while it is locked, and on a drive that never saved a runtime
+configuration, so unlocking never creates the runtime encryption key). It runs after `vault.init`/`vault.unlock`, on
+`runtime.list`, and before `conversation.create`, `message.send`, and `agent.start`
+of a runtime conversation whose runtime the engine does not have yet; adding,
+updating, or removing a runtime swaps the engine's executors directly. Runtime
+conversations record `provider_id: "runtime"`; `model_id: "default"`
+(`aidex_native_sessions::RUNTIME_DEFAULT_MODEL`) makes the harness send no model so
+the runtime uses its own default.
 
 ### Standalone desktop conversations
 
