@@ -20,10 +20,28 @@ import type {
 } from "@aidex/client/dto/sessions";
 import { useNavigation } from "../../app/providers/navigation";
 import { usePreferences } from "../../app/providers/preferences";
+import { useToast } from "../../app/providers/toast";
 import { useRpc } from "../../hooks/useRpc";
-import { useInferenceStatus } from "../../hooks/useInferenceStatus";
+import { useProviderCatalog } from "../model-manager/catalog/ProviderCatalog";
+import {
+  modelTargetOf,
+  parseModelKey,
+  type ModelTarget,
+} from "../model-manager/catalog/modelKeys";
 import { LocalInferenceNotice } from "../model-manager/LocalInferenceNotice";
 import { HistoryMessages, MessageContent } from "../sessions/HistoryMessages";
+import { ConversationModelPicker } from "./ConversationModelPicker";
+import { describeCurrentModel } from "./currentModel";
+import { ModelStateNotice } from "./ModelStateNotice";
+import {
+  resolveConversationModel,
+  type ResolvedConversationModel,
+} from "./resolveConversationModel";
+import {
+  buildSessionConfig,
+  configurationChanged,
+  sessionTargetOf,
+} from "./sessionConfig";
 import styles from "./ConversationPage.module.css";
 const permissionOptions = [
   { value: "supervised", label: "Supervised" },
@@ -31,6 +49,16 @@ const permissionOptions = [
   { value: "auto", label: "Auto" },
   { value: "full_access", label: "Full access" },
 ];
+const modeLabels: Record<ConversationMode, string> = {
+  chat: "Chat",
+  plan: "Plan",
+  agent: "Agent",
+};
+const loadingSession: ResolvedConversationModel = {
+  key: null,
+  state: "none",
+  origin: "session",
+};
 export function ConversationPage({
   initialMode,
 }: {
@@ -38,10 +66,11 @@ export function ConversationPage({
 }) {
   const { route, replace, navigate } = useNavigation();
   const preferences = usePreferences();
-  const models = useRpc("model.list");
-  const inference = useInferenceStatus(models.refetch);
+  const catalog = useProviderCatalog();
+  const notify = useToast();
+  const inference = catalog.inference;
   const localCatalog = useRpc("inference.catalog", undefined, {
-    enabled: inference.data?.state === "stopped",
+    enabled: inference?.state === "stopped",
   });
   const workspaces = useRpc("workspace.list");
   const session = useRpc(
@@ -57,13 +86,17 @@ export function ConversationPage({
   const [permission, setPermission] = useState<PermissionMode>(
     preferences.settings.permission_mode ?? "supervised",
   );
-  const [popup, setPopup] = useState<
-    "mode" | "model" | "project" | "attach" | null
-  >(null);
+  // A new chat's own model choice; existing conversations use their configuration.
+  const [draftKey, setDraftKey] = useState<string | null>(null);
+  const [popup, setPopup] = useState<"mode" | "project" | "attach" | null>(
+    null,
+  );
   const [attachmentPath, setAttachmentPath] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const createdId = useRef<string | undefined>(undefined);
+  // What `conversation.create` saved, so a retry after a failed first send can re-apply changes.
+  const createdConfig = useRef<SessionConfig | null>(null);
   const contextTouched = useRef(!!preferences.pendingWorkspaceId);
   const permissionTouched = useRef(false);
   const pendingCommand = useRef<{ content: string; id: string } | null>(null);
@@ -71,46 +104,32 @@ export function ConversationPage({
   const endRef = useRef<HTMLDivElement>(null);
   const following = useRef(true);
   const [arrivalPrompt] = useState(() => preferences.pendingPrompt);
-  const availableModels =
-    models.data?.models.filter((m) => m.capabilities.chat) ?? [];
-  const currentRef = session.data
-    ? `${session.data.provider_id}/${session.data.model_id}`
-    : preferences.modelId;
-  const selectedModel = availableModels.find(
-    (m) => `${m.model.provider_id}/${m.model.model_id}` === currentRef,
-  );
-  const preferredLocal =
-    currentRef?.startsWith("local-llama/") ||
-    (!currentRef && models.data?.default_model?.provider_id === "local-llama");
+
+  const resolved =
+    route.id && !session.data
+      ? loadingSession
+      : resolveConversationModel({
+          session: session.data,
+          draftKey,
+          preferenceKey: preferences.modelId,
+          registryDefault: catalog.registryDefault,
+          models: catalog.chatModels,
+          inference,
+          runtimes: catalog.runtimes,
+        });
+  const current = describeCurrentModel(resolved, catalog);
+  const modelName = current.name;
+  const target = parseModelKey(resolved.key);
+  const runtimeDriver =
+    resolved.runtime &&
+    catalog.runtimeDrivers.find(
+      (driver) => driver.driver === resolved.runtime?.driver,
+    );
   const installedModel =
     localCatalog.data?.models.find(
       (item) =>
-        item.id ===
-        (inference.data?.model_id ?? localCatalog.data?.settings?.model_id),
+        item.id === (inference?.model_id ?? localCatalog.data?.settings?.model_id),
     ) ?? localCatalog.data?.models[0];
-  const chosenModel = preferredLocal
-    ? inference.data?.state === "ready"
-      ? (selectedModel ??
-        (!session.data
-          ? availableModels.find(
-              (item) => item.model.provider_id === "local-llama",
-            )
-          : undefined))
-      : undefined
-    : session.data
-      ? selectedModel
-      : (selectedModel ??
-        availableModels.find(
-          (m) =>
-            m.model.provider_id === models.data?.default_model?.provider_id &&
-            m.model.model_id === models.data?.default_model?.model_id,
-        ) ??
-        availableModels[0]);
-  const model =
-    chosenModel?.model.provider_id === "local-llama" &&
-    inference.data?.state !== "ready"
-      ? undefined
-      : chosenModel;
   const project = workspaces.data?.workspaces.find((w) => w.id === workspaceId);
   const latestRun = session.data?.runs
     .filter((run) => !run.parent_run_id)
@@ -118,11 +137,6 @@ export function ConversationPage({
   const running =
     !!latestRun &&
     ["pending", "running", "waiting_approval"].includes(latestRun.status);
-  const modelName =
-    model?.display_name ??
-    inference.data?.model_name ??
-    installedModel?.name ??
-    "Choose a model";
   const lastMessage = session.data?.messages.at(-1);
   useEffect(() => {
     const container = endRef.current?.closest("main");
@@ -195,34 +209,38 @@ export function ConversationPage({
     )
       preferences.setWorkspaceId("");
   }, [preferences.loaded, preferences.workspaceId, workspaces.data]);
+
+  /** The model a configuration write uses: the conversation's own, else the new chat's choice. */
+  const currentTarget = (): ModelTarget => {
+    if (session.data) return sessionTargetOf(session.data);
+    if (resolved.state === "ready" && target) return modelTargetOf(target);
+    throw new Error(
+      resolved.state === "none"
+        ? "Choose a model first."
+        : `${modelName} is not available right now. Choose another model.`,
+    );
+  };
   const configuration = (
-    nextMode = mode,
-    context = workspaceId,
-    target = model,
+    changes: {
+      mode?: ConversationMode;
+      workspaceId?: string;
+      target?: ModelTarget;
+      permission?: PermissionMode;
+    } = {},
   ): SessionConfig => {
     if (route.id && !session.data)
       throw new Error("The conversation is still loading.");
-    if (!target)
-      throw new Error("Connect a provider or start a local model first.");
-    if (nextMode !== "chat" && !context)
-      throw new Error("Choose a project before starting Plan or Agent mode.");
-    if (context && !workspaces.data?.workspaces.some((w) => w.id === context))
-      throw new Error("Choose a registered project or No project context.");
-    return {
-      title: session.data?.title ?? draft.trim().slice(0, 72),
-      workspace_id: context || null,
-      mode: nextMode,
-      provider_id: target.model.provider_id,
-      model_id: target.model.model_id,
-      permission_mode: permission,
-      runtime_id: session.data?.runtime_id ?? null,
-      instructions:
-        session.data?.instructions ?? preferences.settings.instructions,
-      fallback_model:
-        session.data?.fallback_model ?? preferences.settings.fallback_model,
-      max_steps: session.data?.max_steps ?? preferences.settings.max_steps,
-      max_tokens: session.data?.max_tokens ?? preferences.settings.max_tokens,
-    };
+    return buildSessionConfig({
+      session: session.data,
+      defaults: preferences.settings,
+      title: draft.trim().slice(0, 72),
+      mode: changes.mode ?? mode,
+      workspaceId: changes.workspaceId ?? workspaceId,
+      isRegisteredWorkspace: (id) =>
+        !!workspaces.data?.workspaces.some((w) => w.id === id),
+      target: changes.target ?? currentTarget(),
+      permission: changes.permission ?? permission,
+    });
   };
   const act = async (operation: () => Promise<unknown>) => {
     setBusy(true);
@@ -241,6 +259,14 @@ export function ConversationPage({
     setBusy(true);
     setError(undefined);
     try {
+      if (resolved.state !== "ready")
+        throw new Error(
+          resolved.state === "none"
+            ? "Choose a model first."
+            : resolved.state === "loading-local"
+              ? `${modelName} is still loading. Send when it is ready.`
+              : `${modelName} is not available right now. Choose another model.`,
+        );
       const config = configuration();
       let content = text.trim();
       if (attachmentPath.trim()) {
@@ -253,6 +279,19 @@ export function ConversationPage({
         const created = await call("conversation.create", config);
         id = created.id;
         createdId.current = id;
+        createdConfig.current = config;
+      } else if (!route.id) {
+        // Created earlier, but the first send failed: apply any model, mode, or project change since.
+        if (
+          !createdConfig.current ||
+          configurationChanged(createdConfig.current, config)
+        ) {
+          await call("agent.configuration.set", {
+            session_id: id,
+            configuration: config,
+          });
+          createdConfig.current = config;
+        }
       } else if (
         session.data &&
         session.data.workspace_id !== config.workspace_id
@@ -267,7 +306,7 @@ export function ConversationPage({
           ? pendingCommand.current
           : { content, id: crypto.randomUUID() };
       pendingCommand.current = command;
-      await call(mode === "agent" ? "agent.start" : "message.send", {
+      await call(config.mode === "agent" ? "agent.start" : "message.send", {
         session_id: id,
         content,
         command_id: command.id,
@@ -275,7 +314,7 @@ export function ConversationPage({
       pendingCommand.current = null;
       setDraft("");
       setAttachmentPath("");
-      replace({ page: mode === "agent" ? "agent" : "chat", id });
+      replace({ page: config.mode === "agent" ? "agent" : "chat", id });
       session.refetch();
     } catch (caught) {
       setError(toAidexError(caught).message);
@@ -283,12 +322,15 @@ export function ConversationPage({
       setBusy(false);
     }
   };
+  // A prompt handed over from Home sends itself once an explicit or default model is ready; it never
+  // falls through to an arbitrary listed model.
   useEffect(() => {
     if (
       !arrivalPrompt ||
       autoSent.current ||
       route.id ||
-      !model ||
+      !preferences.loaded ||
+      resolved.state !== "ready" ||
       (workspaceId && !project) ||
       (mode !== "chat" && !workspaceId)
     )
@@ -298,16 +340,80 @@ export function ConversationPage({
   }, [
     arrivalPrompt,
     route.id,
-    model?.model.provider_id,
-    model?.model.model_id,
+    preferences.loaded,
+    resolved.key,
+    resolved.state,
     workspaceId,
     project,
   ]);
+  const selectModel = async (key: string) => {
+    const parsed = parseModelKey(key);
+    if (!parsed || key === resolved.key) return;
+    const nextTarget = modelTargetOf(parsed);
+    const descriptor = catalog.findModel(key);
+    const name =
+      catalog.models.find((model) => model.key === key)?.name ??
+      descriptor?.display_name ??
+      parsed.modelId;
+    let nextMode = mode;
+    let nextPermission = permission;
+    let switchedToChat = false;
+    if (parsed.kind === "runtime") {
+      // External runtimes run as agents with full access inside a project.
+      if (!workspaceId) {
+        setError("Choose a project before starting Plan or Agent mode.");
+        return;
+      }
+      nextMode = "agent";
+      nextPermission = "full_access";
+    } else {
+      if (target?.kind === "runtime")
+        nextPermission = preferences.settings.permission_mode ?? "supervised";
+      if (mode === "agent" && descriptor?.capabilities.tool_calls !== "native") {
+        nextMode = "chat";
+        switchedToChat = true;
+      }
+    }
+    setError(undefined);
+    if (route.id) {
+      // A per-conversation choice; the default for new chats stays as it is.
+      setBusy(true);
+      try {
+        await call("agent.configuration.set", {
+          session_id: route.id,
+          configuration: configuration({
+            mode: nextMode,
+            target: nextTarget,
+            permission: nextPermission,
+          }),
+        });
+        setMode(nextMode);
+        setPermission(nextPermission);
+        session.refetch();
+      } catch (caught) {
+        setError(toAidexError(caught).message);
+        return;
+      } finally {
+        setBusy(false);
+      }
+    } else {
+      // A new chat keeps the choice as its draft and as the default for the next new chat.
+      setDraftKey(key);
+      preferences.setModelId(key);
+      setMode(nextMode);
+      if (nextPermission !== permission) {
+        permissionTouched.current = true;
+        setPermission(nextPermission);
+      }
+    }
+    if (switchedToChat)
+      notify(`Switched to Chat: ${name} cannot use agent tools.`);
+  };
   const changeMode = async (value: ConversationMode) => {
     setBusy(true);
     setError(undefined);
     try {
-      const config = configuration(value);
+      const config = configuration({ mode: value });
       if (route.id)
         await call("agent.configuration.set", {
           session_id: route.id,
@@ -328,7 +434,7 @@ export function ConversationPage({
       void act(async () => {
         await call("agent.configuration.set", {
           session_id: route.id!,
-          configuration: configuration(mode, value),
+          configuration: configuration({ workspaceId: value }),
         });
         setWorkspaceId(value);
         setAttachmentPath("");
@@ -340,6 +446,27 @@ export function ConversationPage({
   };
   const pendingApprovals =
     session.data?.approvals.filter((a) => a.status === "pending") ?? [];
+  const runtimeModes = runtimeDriver?.modes ?? ["agent"];
+  const modeOptions = [
+    {
+      value: "chat",
+      label: "Chat · no agent tools",
+      disabled: target?.kind === "runtime" && !runtimeModes.includes("chat"),
+    },
+    {
+      value: "plan",
+      label: "Plan · project context",
+      disabled: target?.kind === "runtime" && !runtimeModes.includes("plan"),
+    },
+    {
+      value: "agent",
+      label: "Agent · coding tools",
+      disabled:
+        target?.kind === "runtime"
+          ? !runtimeModes.includes("agent")
+          : resolved.model?.capabilities.tool_calls !== "native",
+    },
+  ];
   const dock = (
     <Composer
       size="compact"
@@ -347,7 +474,9 @@ export function ConversationPage({
       label="Message"
       value={draft}
       onValueChange={setDraft}
-      onSubmit={model ? (text) => void submit(text) : undefined}
+      onSubmit={
+        resolved.state === "ready" ? (text) => void submit(text) : undefined
+      }
       disabled={busy || running}
       onAttach={() => setPopup("attach")}
       placeholder={mode === "chat" ? "Message AiDEX…" : "Describe the task…"}
@@ -373,12 +502,11 @@ export function ConversationPage({
             disabled={busy || running}
             onClick={() => setPopup("mode")}
           />
-          <IconButton
-            size="sm"
-            label={`Model: ${modelName}`}
-            icon={<BoxIcon />}
-            disabled={busy || running}
-            onClick={() => setPopup("model")}
+          <ConversationModelPicker
+            value={resolved.key}
+            current={current}
+            onSelect={(key) => void selectModel(key)}
+            disabled={busy || running || (!!route.id && !session.data)}
           />
           <IconButton
             size="sm"
@@ -388,10 +516,10 @@ export function ConversationPage({
             disabled={busy || running}
             onClick={() => setPopup("project")}
           />
-          <span className={styles.summary}>
-            {mode[0].toUpperCase() + mode.slice(1)} · {modelName}
+          <Text as="span" tone="muted">
+            {modeLabels[mode]}
             {project ? ` · ${project.name}` : ""}
-          </span>
+          </Text>
         </>
       }
       toolbarEnd={
@@ -408,6 +536,8 @@ export function ConversationPage({
       }
     />
   );
+  const localNoticeShown =
+    inference?.state === "starting" || inference?.state === "failed";
   return (
     <DockLayout width="prose" dock={dock}>
       <div className={styles.conversation}>
@@ -422,47 +552,31 @@ export function ConversationPage({
             />
           )}
         </header>
-        {(error ||
-          session.error ||
-          models.error ||
-          inference.error ||
-          localCatalog.error) && (
+        {(error || session.error || catalog.error || localCatalog.error) && (
           <Notice tone="danger" role="alert">
             {error ??
               session.error?.message ??
-              models.error?.message ??
-              inference.error?.message ??
+              catalog.error ??
               localCatalog.error?.message}
           </Notice>
         )}
         <LocalInferenceNotice
-          status={inference.data}
-          onRefresh={inference.refetch}
+          status={inference}
+          onRefresh={catalog.refreshInference}
         />
-        {!inference.data && !inference.error && !availableModels.length && (
-          <Notice role="status">Checking the local model on this drive…</Notice>
+        {(!route.id || session.data) && (
+          <ModelStateNotice
+            state={resolved.state}
+            name={modelName}
+            installedLocalName={installedModel?.name}
+            hasModels={catalog.models.length > 0}
+            loading={
+              catalog.loading ||
+              (target?.kind === "runtime" && catalog.runtimesLoading)
+            }
+            localNoticeShown={localNoticeShown}
+          />
         )}
-        {!models.loading &&
-          !availableModels.length &&
-          !!inference.data &&
-          !localCatalog.loading &&
-          (inference.data.state !== "stopped" || !!localCatalog.data) &&
-          inference.data?.state !== "starting" &&
-          inference.data?.state !== "failed" && (
-            <Notice>
-              <Text>
-                {installedModel
-                  ? `${installedModel.name} is installed on this drive. Start it in Models and accounts to use local chat.`
-                  : "Choose a model to start chatting."}
-              </Text>
-              <Button
-                variant="outline"
-                onClick={() => navigate({ page: "models" })}
-              >
-                Models and accounts
-              </Button>
-            </Notice>
-          )}
         {!session.data?.messages.length && !route.id && (
           <div className={styles.empty}>
             <ChatIcon size={28} />
@@ -571,15 +685,7 @@ export function ConversationPage({
           label="Mode"
           disabled={busy || running}
           value={mode}
-          options={[
-            { value: "chat", label: "Chat · no agent tools" },
-            { value: "plan", label: "Plan · project context" },
-            {
-              value: "agent",
-              label: "Agent · coding tools",
-              disabled: model?.capabilities.tool_calls !== "native",
-            },
-          ]}
+          options={modeOptions}
           onChange={(event) =>
             void changeMode(event.target.value as ConversationMode)
           }
@@ -587,7 +693,12 @@ export function ConversationPage({
         {mode !== "chat" && (
           <Select
             label="Permissions"
-            disabled={busy || running}
+            disabled={busy || running || target?.kind === "runtime"}
+            hint={
+              target?.kind === "runtime"
+                ? "External runtimes run with full access."
+                : undefined
+            }
             value={permission}
             options={permissionOptions}
             onChange={(event) => {
@@ -597,10 +708,7 @@ export function ConversationPage({
                 void act(async () => {
                   await call("agent.configuration.set", {
                     session_id: route.id!,
-                    configuration: {
-                      ...configuration(),
-                      permission_mode: value,
-                    },
+                    configuration: configuration({ permission: value }),
                   });
                   setPermission(value);
                 });
@@ -611,48 +719,6 @@ export function ConversationPage({
         <Text tone="muted">
           Plan and Agent require a project. Chat works independently.
         </Text>
-      </Dialog>
-      <Dialog
-        open={popup === "model"}
-        title="Choose a model"
-        onClose={() => setPopup(null)}
-      >
-        {error && <Notice tone="danger">{error}</Notice>}
-        <LocalInferenceNotice
-          status={inference.data}
-          onRefresh={inference.refetch}
-        />
-        <Select
-          label="Model"
-          disabled={busy || running}
-          value={
-            model ? `${model.model.provider_id}/${model.model.model_id}` : ""
-          }
-          options={availableModels.map((m) => ({
-            value: `${m.model.provider_id}/${m.model.model_id}`,
-            label: m.display_name,
-          }))}
-          onChange={(event) => {
-            const selected = availableModels.find(
-              (m) =>
-                `${m.model.provider_id}/${m.model.model_id}` ===
-                event.target.value,
-            );
-            if (!selected) return;
-            preferences.setModelId(event.target.value);
-            if (route.id)
-              void act(() =>
-                call("agent.configuration.set", {
-                  session_id: route.id!,
-                  configuration: configuration(mode, workspaceId, selected),
-                }),
-              );
-            setPopup(null);
-          }}
-        />
-        <Button variant="ghost" onClick={() => navigate({ page: "models" })}>
-          Manage models and accounts
-        </Button>
       </Dialog>
       <Dialog
         open={popup === "project" || popup === "attach"}
