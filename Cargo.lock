@@ -134,6 +134,7 @@ dependencies = [
  "aidex-providers",
  "aidex-router",
  "aidex-sessions",
+ "aidex-skills",
  "aidex-updater",
  "aidex-vault",
  "aidex-workspace",
@@ -374,6 +375,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "aidex-skills"
+version = "0.1.0"
+dependencies = [
+ "aidex-core",
+ "aidex-drive",
+ "aidex-events",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
 name = "aidex-storage"
 version = "0.1.0"
 dependencies = [
@@ -477,6 +491,7 @@ dependencies = [
  "aidex-router",
  "aidex-sandbox",
  "aidex-sessions",
+ "aidex-skills",
  "aidex-tools",
  "aidex-updater",
  "aidex-vault",

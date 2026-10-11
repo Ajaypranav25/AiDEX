@@ -22,6 +22,7 @@ pub mod policy;
 pub mod runtime;
 pub mod sessions;
 pub mod settings;
+pub mod skills;
 pub mod tools;
 pub mod update;
 pub mod vault;
@@ -75,6 +76,7 @@ pub(crate) fn register_all(
     inference::register(router, services)?;
     native::register(router, services)?;
     settings::register(router, services)?;
+    skills::register(router, services)?;
     daemon::register(router, services)?;
     emergency::register(router, services)?;
     events::register(router, services)?;

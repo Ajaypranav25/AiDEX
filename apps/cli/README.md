@@ -104,6 +104,12 @@ Repository context commands use the daemon's `context.*`, `memory.*`, and `rules
 - `aidex memory list|add <TEXT>... [--tag T]...|edit <ID> [--text T] [--tag T]... [--clear-tags]|remove <ID>` with `--workspace ID|NAME` (default), `--user`, or `--session ID` inspects and edits memory. Secret-like text is refused (exit 2); memories added here are user-written.
 - `aidex rules show` prints the workspace's `.aidex/rules.toml` commands and guardrails (which can only tighten policy) and the instruction files found (`AGENTS.md`, `CLAUDE.md`, `.aidex/instructions.md`). An invalid rules file is exit 2.
 
+Skill commands use the daemon's `skill.*` methods (all with `--drive PATH` and `--json`). `--workspace ID|NAME` adds that workspace's project and repo skills; without it only drive and plugin skills are visible:
+
+- `aidex skills list` prints each skill's id (`<scope>:<name>`), state (`enabled`, `disabled`, or `error`), and description or error, then any roots that were skipped (links, unreadable directories, duplicate names).
+- `aidex skills show <ID>` prints the skill's details, front matter, and redacted instructions; control characters in skill text are replaced before printing.
+- `aidex skills enable <ID>` / `aidex skills disable <ID>` record the decision in `private_config/skills.toml`. Project and repo skills start disabled and need `--workspace`; a skill with an error cannot be enabled (exit 2).
+
 `aidex` and `aidex chat` open Oh My Pi's interactive terminal UI. AiDEX passes `--approval-mode always-ask`, disables OMP extensions, MCP, LSP, skills, session persistence, and automatic title generation, and requests a limited tool set. OMP still owns its CLI tool lifecycle and approval implementation; this is not an AiDEX sandbox or policy boundary.
 
 `aidex run` is headless, in-memory, and strictly restricts OMP SDK tools to `read`, `grep`, and `glob` (`restrictToolNames: true`). It disables MCP, LSP, extensions, custom tools, and skills. Writes and shell execution are not exposed in this mode.

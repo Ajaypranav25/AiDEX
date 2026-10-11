@@ -20,6 +20,7 @@ pub mod omp;
 pub mod policy;
 pub mod provider;
 pub mod session;
+pub mod skills;
 pub mod tools;
 pub mod update;
 pub mod vault;
@@ -49,6 +50,7 @@ pub fn dispatch(command: Option<Commands>, output: Output) -> Result<Exit, CliEr
         Some(Commands::Provider(args)) => provider::run(args, output),
         Some(Commands::Offline(args)) => offline::run(args, output),
         Some(Commands::Session(args)) => session::run(args, output),
+        Some(Commands::Skills(args)) => skills::run(args, output),
         Some(Commands::Approvals(args)) => approvals::run(args, output),
         Some(Commands::Approve(args)) => approvals::approve(args, output),
         Some(Commands::Deny(args)) => approvals::deny(args, output),

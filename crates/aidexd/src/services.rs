@@ -18,6 +18,7 @@ use aidex_core::ServiceErrorCode;
 use aidex_drive::DrivePaths;
 use aidex_events::{EventLog, EventSink, RetentionPolicy};
 use aidex_sessions::{RecoveryReport, SessionStore};
+use aidex_skills::SkillService;
 use aidex_updater::{RecoveryReport as UpdateRecovery, Updater, UpdaterConfig};
 use aidex_vault::{VaultService, VaultServiceConfig};
 use aidex_workspace::WorkspaceRegistry;
@@ -65,6 +66,7 @@ pub struct Services {
     sessions: Arc<SessionStore>,
     session_recovery: RecoveryReport,
     context: Arc<ContextService>,
+    skills: Arc<SkillService>,
     native: Arc<aidex_harness::NativeEngine>,
     inference: Arc<aidex_inference::InferenceService>,
     runtime: Result<Arc<aidex_adapters::RuntimeManager>, String>,
@@ -129,6 +131,9 @@ impl Services {
         let (sessions, session_recovery) = open_sessions(&paths, &events)?;
         let context = ContextService::open(&paths, Arc::new(events.clone()))
             .map_err(|error| ServicesError::new("context", error.code(), error.to_string()))?;
+        // Skills are rescanned on every request; enablement lives in
+        // `private_config/skills.toml` and changes emit `extension.*` events.
+        let skills = Arc::new(SkillService::new(paths.clone(), Arc::new(events.clone())));
         let private_sessions = Arc::new(
             aidex_native_sessions::SessionStore::open(
                 paths.sessions().join("native.sqlite3"),
@@ -163,6 +168,7 @@ impl Services {
             sessions: Arc::new(sessions),
             session_recovery,
             context: Arc::new(context),
+            skills,
             native,
             inference,
             runtime,
@@ -235,6 +241,10 @@ impl Services {
     /// (`aidex-context`). Dropping the services cancels running index jobs.
     pub fn context(&self) -> &Arc<ContextService> {
         &self.context
+    }
+    /// Skill discovery, enablement, and drive skill authoring (`aidex-skills`).
+    pub fn skills(&self) -> &Arc<SkillService> {
+        &self.skills
     }
     pub fn native(&self) -> &Arc<aidex_harness::NativeEngine> {
         &self.native
