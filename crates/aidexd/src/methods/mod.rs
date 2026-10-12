@@ -19,6 +19,7 @@ pub mod native;
 pub mod native_history;
 pub mod native_view;
 pub mod policy;
+pub mod runtime;
 pub mod sessions;
 pub mod settings;
 pub mod tools;
@@ -80,6 +81,7 @@ pub(crate) fn register_all(
     memory::register(router, services)?;
     models::register(router, services)?;
     policy::register(router, services)?;
+    runtime::register(router, services)?;
     sessions::register(router, services)?;
     tools::register(router, services)?;
     update::register(router, services)?;

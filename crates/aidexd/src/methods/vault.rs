@@ -195,6 +195,8 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
                 vault_id: outcome.vault_id.clone(),
             },
         )?;
+        // Best effort: runtime sessions also load their runtime lazily.
+        let _ = super::runtime::sync_runtimes(&shared);
         to_result(&InitResult {
             state: VaultState::Unlocked,
             vault_id: outcome.vault_id.to_string(),
@@ -232,6 +234,10 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
                 },
             )?;
         }
+        // The runtime configuration is sealed with a vault key, so the native
+        // engine learns the configured runtimes only now. Best effort: runtime
+        // sessions also load their runtime lazily.
+        let _ = super::runtime::sync_runtimes(&shared);
         to_result(&status)
     })?;
 

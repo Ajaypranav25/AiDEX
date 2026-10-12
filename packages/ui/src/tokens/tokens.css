@@ -29,6 +29,12 @@
   --aidex-color-focus: color-mix(in srgb, var(--aidex-color-accent) 75%, white);
   --aidex-color-accent-ring: color-mix(in srgb, var(--aidex-color-accent) 20%, transparent);
 
+  /* Elevation: shadow color for floating surfaces such as popovers. The light theme derives it from text. */
+  --aidex-color-shadow: color-mix(in srgb, var(--aidex-color-bg) 72%, transparent);
+
+  /* Brand glyphs: share of the brand color kept when mixing with black (the light theme darkens marks). */
+  --aidex-brand-color-strength: 100%;
+
   /* Code diffs: line tints derive from the status colors so +/- rows stay consistent with badges. */
   --aidex-color-diff-bg: var(--aidex-color-surface);
   --aidex-color-diff-addition: var(--aidex-color-success);

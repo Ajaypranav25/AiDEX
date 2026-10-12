@@ -136,3 +136,11 @@ export const UserIcon = createIcon(
     <path d="M5 20a7 7 0 0 1 14 0" />
   </>,
 );
+
+const STAR_PATH = "M12 3.4 14.3 9.4l6.45.35-5.04 4.06 1.7 6.23L12 16.5l-5.41 3.54 1.7-6.23-5.04-4.06 6.45-.35Z";
+
+/** Outline star, e.g. for adding an item to favorites. */
+export const StarIcon = createIcon("StarIcon", <path d={STAR_PATH} />);
+
+/** Filled star marking a favorite. */
+export const StarFilledIcon = createIcon("StarFilledIcon", <path d={STAR_PATH} fill="currentColor" />);

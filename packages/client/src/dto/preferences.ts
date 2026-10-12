@@ -15,3 +15,11 @@ export type AppPreferences = {
   max_tokens: number;
   shortcuts: Record<string, string>;
 };
+
+/** Mirrors aidex-preferences::ModelPreferences (`model.preferences.get|set`), stored apart from AppPreferences. */
+export type ModelPreferences = {
+  /** Model keys pinned in the model picker: `provider/model` or `runtime:<runtime>/<model>`. */
+  favorite_models: string[];
+  /** Model keys hidden from the model picker. */
+  hidden_models: string[];
+};

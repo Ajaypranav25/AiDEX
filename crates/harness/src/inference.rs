@@ -5,7 +5,7 @@ use aidex_events::EventKind;
 use aidex_native_sessions::{Mode, Run, SessionConfig};
 use aidex_providers::{
     CapabilitySource, ChatRequest, ChatResponse, ModelDescriptor, ModelProvider, ModelRef,
-    ProviderError, StreamEvent, ToolCallSupport,
+    ProviderError, RegistryError, StreamEvent, ToolCallSupport,
 };
 use std::{
     sync::Arc,
@@ -17,20 +17,22 @@ impl NativeEngine {
         target: &ModelRef,
         config: &SessionConfig,
     ) -> Result<(Arc<dyn ModelProvider>, ModelDescriptor), ProviderError> {
+        let absent = || ProviderError::unavailable("configured model provider is absent");
         let provider = self
             .registry
             .provider(&target.provider_id)
-            .ok_or_else(|| ProviderError::unavailable("configured model provider is absent"))?;
-        let listing = self.registry.models();
-        let model = listing
-            .models
-            .iter()
-            .find(|m| m.model == *target)
-            .ok_or_else(|| {
-                ProviderError::InvalidRequest(
-                    "configured model is not in the provider catalog".into(),
-                )
-            })?;
+            .ok_or_else(absent)?;
+        // List only the run's own provider; its listing failure is the error.
+        let models =
+            self.registry
+                .models_for(&target.provider_id)
+                .map_err(|error| match error {
+                    RegistryError::Provider { error, .. } => error,
+                    _ => absent(),
+                })?;
+        let model = models.iter().find(|m| m.model == *target).ok_or_else(|| {
+            ProviderError::InvalidRequest("configured model is not in the provider catalog".into())
+        })?;
         if !model.capabilities.chat || !model.capabilities.streaming {
             return Err(ProviderError::InvalidRequest(
                 "configured model does not support streamed chat".into(),
@@ -225,7 +227,15 @@ fn bound_request(
     let mut budget = configuration
         .max_tokens
         .min(model.max_output_tokens.unwrap_or(configuration.max_tokens));
-    if model.source != CapabilitySource::Assumed && model.context_window > 0 {
+    // Only a declared or reported window is a real ceiling. Catalog windows are
+    // conservative lower bounds and Assumed ones are guesses, so neither may
+    // reject or truncate a request the model would accept; the provider's own
+    // context error covers a real overflow.
+    let exact_window = matches!(
+        model.source,
+        CapabilitySource::Configured | CapabilitySource::Discovered
+    );
+    if exact_window && model.context_window > 0 {
         let input = request.estimated_input_tokens();
         let remaining = model.context_window.saturating_sub(input);
         if remaining == 0 {

@@ -187,7 +187,9 @@ impl NativeEngine {
                 s.configuration.permission_mode
             },
             instructions: s.configuration.instructions.clone(),
-            model: Some(s.configuration.model_id.clone()),
+            // The default-model sentinel lets the runtime pick its own default.
+            model: (s.configuration.model_id != RUNTIME_DEFAULT_MODEL)
+                .then(|| s.configuration.model_id.clone()),
             messages: run.transcript.clone(),
             max_steps: s.configuration.max_steps.saturating_sub(run.steps),
             max_tokens: s.configuration.max_tokens,

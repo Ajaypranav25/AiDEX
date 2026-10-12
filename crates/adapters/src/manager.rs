@@ -68,6 +68,12 @@ impl RuntimeManager {
     pub fn catalog(&self) -> Vec<DriverInfo> {
         catalog()
     }
+    /// Whether a runtime configuration was ever saved on this drive. Reads
+    /// only file metadata: no vault access, so it never creates the runtime
+    /// encryption key and works while the vault is locked.
+    pub fn has_saved_configuration(&self) -> bool {
+        self.state.root.join("runtime-config.sealed").is_file()
+    }
     pub fn list(&self) -> Result<Vec<RuntimeConfig>, RuntimeError> {
         let Some(bytes) = self.state.read("runtime-config.sealed")? else {
             return Ok(vec![]);
@@ -414,6 +420,14 @@ fn validate_config(config: &RuntimeConfig) -> Result<(), RuntimeError> {
         return Err(error(
             "invalid_config",
             "Runtime ID must be 1-64 ASCII letters, numbers, dash or underscore",
+        ));
+    }
+    // The native engine refuses an external runtime with this ID; saving one
+    // would make every later runtime sync fail.
+    if config.id == "native" {
+        return Err(error(
+            "invalid_config",
+            "Runtime ID \"native\" is reserved for the built-in agent loop",
         ));
     }
     if config.executable.is_empty()
