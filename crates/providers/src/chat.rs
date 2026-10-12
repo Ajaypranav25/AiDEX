@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::{ContentPart, MAX_PARTS_PER_MESSAGE, ModelId, ProviderError};
+use crate::{ContentPart, MAX_PARTS_PER_MESSAGE, ModelId, PDF_PAGE_TOKENS, ProviderError};
 
 /// Most messages accepted in one request.
 pub const MAX_MESSAGES: usize = 4096;
@@ -293,6 +293,12 @@ impl ChatRequest {
     /// by its base64 size), for budgeting before a provider reports real
     /// usage.
     pub fn estimated_input_tokens(&self) -> u32 {
+        self.estimated_input_tokens_with(PDF_PAGE_TOKENS)
+    }
+
+    /// [`Self::estimated_input_tokens`] with `pdf_page_tokens` per PDF page,
+    /// the model's [`crate::PartLimits::pdf_page_tokens`].
+    pub fn estimated_input_tokens_with(&self, pdf_page_tokens: u32) -> u32 {
         let bytes: usize = self
             .messages
             .iter()
@@ -312,7 +318,7 @@ impl ChatRequest {
             .messages
             .iter()
             .flat_map(|message| &message.parts)
-            .map(|part| u64::from(part.estimated_tokens()))
+            .map(|part| u64::from(part.estimated_tokens_with(pdf_page_tokens)))
             .sum();
         u32::try_from((bytes.div_ceil(4) as u64).saturating_add(parts)).unwrap_or(u32::MAX)
     }
@@ -397,7 +403,6 @@ pub struct ChatResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::PDF_PAGE_TOKENS;
     use serde_json::json;
 
     fn request() -> ChatRequest {
@@ -541,6 +546,10 @@ mod tests {
             vec![ChatMessage::user("").with_parts(vec![ContentPart::pdf("a.pdf", pdf(), 10)])],
         );
         assert_eq!(document.estimated_input_tokens(), 4 + 10 * PDF_PAGE_TOKENS);
+        // A family's own page cost (Gemini's 560); text and images are
+        // estimated the same way.
+        assert_eq!(document.estimated_input_tokens_with(560), 4 + 10 * 560);
+        assert_eq!(image.estimated_input_tokens_with(560), 5);
         assert_eq!(
             request().estimated_input_tokens(),
             ChatRequest::new(model(), vec![ChatMessage::user("hello")]).estimated_input_tokens()

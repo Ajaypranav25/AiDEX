@@ -119,6 +119,12 @@ impl ContentPart {
     /// the size is unknown) and [`PDF_PAGE_TOKENS`] per PDF page. These are
     /// deliberate over-estimates for budgeting, never base64 length.
     pub fn estimated_tokens(&self) -> u32 {
+        self.estimated_tokens_with(PDF_PAGE_TOKENS)
+    }
+
+    /// [`Self::estimated_tokens`] with `pdf_page_tokens` per PDF page, the
+    /// family's [`crate::PartLimits::pdf_page_tokens`].
+    pub fn estimated_tokens_with(&self, pdf_page_tokens: u32) -> u32 {
         match self {
             Self::Image { data, .. } => {
                 image_dimensions(data).map_or(MAX_IMAGE_TOKENS, |(w, h)| {
@@ -127,7 +133,7 @@ impl ContentPart {
                         .unwrap_or(MAX_IMAGE_TOKENS)
                 })
             }
-            Self::Pdf { pages, .. } => (*pages).max(1).saturating_mul(PDF_PAGE_TOKENS),
+            Self::Pdf { pages, .. } => (*pages).max(1).saturating_mul(pdf_page_tokens),
         }
     }
 
@@ -434,6 +440,12 @@ mod tests {
             ContentPart::pdf("a.pdf", pdf(), 4).estimated_tokens(),
             4 * PDF_PAGE_TOKENS
         );
+        // A family's own page cost; images do not depend on it.
+        assert_eq!(
+            ContentPart::pdf("a.pdf", pdf(), 4).estimated_tokens_with(560),
+            4 * 560
+        );
+        assert_eq!(small.estimated_tokens_with(560), 19 * 19);
     }
 
     #[test]

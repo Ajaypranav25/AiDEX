@@ -859,6 +859,7 @@ mod tests {
                 {"id":"meta-llama/Llama-3.1-8B","max_model_len":131072},
                 {"id":"qwen","meta":{"n_ctx_train":32768}},
                 {"id":"bad id with spaces"},
+                {"id":"~x-ai/grok-latest"},
                 {"id":"router/x","context_length":8192}
             ]}"#,
         )

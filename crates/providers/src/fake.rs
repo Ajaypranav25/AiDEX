@@ -266,7 +266,11 @@ impl ModelProvider for FakeProvider {
             .ok_or_else(|| ProviderError::ModelNotFound {
                 model: request.model.to_string(),
             })?;
-        let requested = request.estimated_input_tokens();
+        // PDF pages cost what the account's family charges (Gemini's are
+        // cheaper), as the harness estimates them.
+        let requested = request.estimated_input_tokens_with(
+            crate::part_limits(&self.descriptor, None, model).pdf_page_tokens,
+        );
         let (turn, call_number) = {
             let mut state = self.lock();
             state.requests.push(request.clone());
@@ -509,5 +513,16 @@ mod tests {
             Err(ProviderError::InvalidRequest(_))
         ));
         assert_eq!(gemini.remaining_turns(), 1, "a refusal consumes no turn");
+
+        // 100 PDF pages overflow the 100,000-token window at 3,000 tokens a
+        // page, but fit at Gemini's 560.
+        let long = vec![ContentPart::pdf("a.pdf", pdf(), 100)];
+        assert!(matches!(
+            fake.chat(&request("eyes", long.clone()), &mut |_| {}, &cancel),
+            Err(ProviderError::ContextOverflow { .. })
+        ));
+        gemini
+            .chat(&request("eyes", long), &mut |_| {}, &cancel)
+            .unwrap();
     }
 }

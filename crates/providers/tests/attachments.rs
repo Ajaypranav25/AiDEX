@@ -227,6 +227,38 @@ fn refused_parts_open_no_connection() {
 }
 
 #[test]
+fn xai_accounts_take_only_png_and_jpeg_images() {
+    let registry = registry();
+    let grok = add(
+        &registry,
+        "compat",
+        ProviderKind::OpenaiCompatible,
+        "https://api.x.ai/v1",
+        Some("xai"),
+        "key",
+    );
+    let other = add(
+        &registry,
+        "other",
+        ProviderKind::OpenaiCompatible,
+        "https://api.groq.com/openai/v1",
+        Some("groq"),
+        "key",
+    );
+    let mut webp = b"RIFF\0\0\0\0WEBPVP8 \0\0\0\0".to_vec();
+    webp.extend_from_slice(&[0, 0, 0, 0x9D, 0x01, 0x2A, 0x40, 0x00, 0x30, 0x00]);
+    let webp = ContentPart::image("image/webp", webp);
+    let gif = ContentPart::image("image/gif", gif());
+    let png = ContentPart::image("image/png", png());
+    assert!(registry.accepts_part(&grok, &png));
+    assert!(!registry.accepts_part(&grok, &webp));
+    assert!(!registry.accepts_part(&grok, &gif));
+    for part in [&png, &webp, &gif] {
+        assert!(registry.accepts_part(&other, part), "{part:?}");
+    }
+}
+
+#[test]
 fn input_follows_preset_plan_and_runtime_providers() {
     let registry = registry();
     let custom = add(
