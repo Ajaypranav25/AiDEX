@@ -1,7 +1,7 @@
 //! Provider turns and scoped tool exchange; no blind retry of side effects.
 use crate::{
     NativeEngine,
-    engine::PendingPlan,
+    engine::{PendingPlan, relock},
     native_tools::{AGENT_RESULT, AGENT_SPAWN},
 };
 use aidex_core::{CancelToken, EntityId, WorkspacePath};
@@ -63,14 +63,8 @@ impl NativeEngine {
             runtime_ref: None,
             preview: request.preview,
         };
-        self.pending
-            .lock()
-            .map_err(|_| "pending plans poisoned")?
-            .insert(approval.id.clone(), request.pending);
-        self.live
-            .lock()
-            .map_err(|_| "native run registry poisoned")?
-            .remove(id);
+        relock(&self.pending).insert(approval.id.clone(), request.pending);
+        relock(&self.live).remove(id);
         self.store.update(&run.session_id, |s| {
             s.approvals.push(approval.clone());
             s.runs

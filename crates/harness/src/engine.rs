@@ -10,9 +10,19 @@ use aidex_providers::ProviderRegistry;
 use aidex_workspace::WorkspaceRegistry;
 use std::{
     collections::HashMap,
+    panic::{AssertUnwindSafe, catch_unwind},
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
+/// The error of a run whose thread panicked.
+const RUN_CRASHED: &str = "native run crashed unexpectedly";
+/// Lock one of the engine's mutexes even when a panicking thread poisoned it.
+/// Each critical section is a single lookup, insert, or remove (`operations`
+/// guards no data at all), so the contents stay consistent across a panic,
+/// and one crashed run must not refuse every later one.
+pub(crate) fn relock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
 /// A call waiting for the user's approval: a workspace tool plan or a
 /// harness-level (web, MCP) plan.
 pub(crate) enum PendingPlan {
@@ -135,10 +145,7 @@ impl NativeEngine {
         parent: Option<String>,
         options: RunOptions,
     ) -> Result<Run, String> {
-        let _guard = self
-            .operations
-            .lock()
-            .map_err(|_| "native operations poisoned")?;
+        let _guard = relock(&self.operations);
         let s = self.store.get(session)?;
         if s.configuration.mode == Mode::Agent && s.configuration.workspace_id.is_none() {
             return Err("agent mode requires a selected workspace".into());
@@ -272,10 +279,7 @@ impl NativeEngine {
         )>,
         operation: RuntimeOperation,
     ) -> Result<(), String> {
-        let mut live = self
-            .live
-            .lock()
-            .map_err(|_| "native run registry poisoned")?;
+        let mut live = relock(&self.live);
         if live.get(&run.id).is_some_and(|r| r.executing) {
             return Ok(());
         }
@@ -303,7 +307,10 @@ impl NativeEngine {
         std::thread::Builder::new()
             .name("aidex-native-run".into())
             .spawn(move || {
-                let result = (|| {
+                // Last resort: a panic anywhere in the run (a provider, an
+                // extension, a runtime) fails the run instead of unwinding
+                // past the bookkeeping below and leaving it running forever.
+                let result = catch_unwind(AssertUnwindSafe(|| {
                     match prelude {
                         Some((PendingPlan::Tool(prepared), call, issuer)) => {
                             engine.execute(&run.id, &call, &prepared, issuer)?;
@@ -324,20 +331,25 @@ impl NativeEngine {
                     } else {
                         engine.pump(&run.id, &token, &tool)
                     }
-                })();
+                }))
+                .unwrap_or_else(|_| Err(RUN_CRASHED.into()));
                 if let Err(error) = result {
                     let status = if token.is_cancelled() {
                         RunStatus::Cancelled
                     } else {
                         RunStatus::Failed
                     };
-                    let _ = engine.transition(
-                        &run.id,
-                        status,
-                        Some(aidex_events::redact_text(&error).into_owned()),
-                    );
+                    // Settling (the store, the event sink) must not skip the
+                    // registry cleanup either.
+                    let _ = catch_unwind(AssertUnwindSafe(|| {
+                        engine.transition(
+                            &run.id,
+                            status,
+                            Some(aidex_events::redact_text(&error).into_owned()),
+                        )
+                    }));
                 }
-                let mut live = engine.live.lock().unwrap_or_else(|p| p.into_inner());
+                let mut live = relock(&engine.live);
                 if live
                     .get(&run.id)
                     .is_some_and(|r| r.generation == generation)
@@ -453,10 +465,7 @@ impl NativeEngine {
         if command.is_empty() || command.len() > 128 {
             return Err("approval command id is required".into());
         }
-        let guard = self
-            .operations
-            .lock()
-            .map_err(|_| "native operations poisoned")?;
+        let guard = relock(&self.operations);
         let approval = self
             .approvals(None)?
             .into_iter()
@@ -480,10 +489,7 @@ impl NativeEngine {
         if approval.runtime_id.is_some() {
             return self.respond_runtime(&approval, approved);
         }
-        let prepared = self
-            .pending
-            .lock()
-            .map_err(|_| "pending plans poisoned")?
+        let prepared = relock(&self.pending)
             .remove(id)
             .ok_or("approval interrupted by daemon restart; explicitly resume run to replan")?;
         let call = run
@@ -552,12 +558,7 @@ impl NativeEngine {
         if !r.status.active() {
             return Ok(r);
         }
-        if let Some(live) = self
-            .live
-            .lock()
-            .map_err(|_| "native run registry poisoned")?
-            .get(id)
-        {
+        if let Some(live) = relock(&self.live).get(id) {
             live.provider.cancel();
             live.tool.cancel();
         }
@@ -574,10 +575,7 @@ impl NativeEngine {
         self.transition(id, RunStatus::Cancelled, None)
     }
     pub fn resume(self: &Arc<Self>, id: &str) -> Result<Run, String> {
-        let guard = self
-            .operations
-            .lock()
-            .map_err(|_| "native operations poisoned")?;
+        let guard = relock(&self.operations);
         let r = self.store.run(id)?;
         let configuration = self.store.get(&r.session_id)?.configuration;
         let external = configuration
@@ -599,13 +597,7 @@ impl NativeEngine {
         ) {
             return Err("only an interrupted run can resume".into());
         }
-        if self
-            .live
-            .lock()
-            .map_err(|_| "native run registry poisoned")?
-            .get(id)
-            .is_some_and(|r| r.executing)
-        {
+        if relock(&self.live).get(id).is_some_and(|r| r.executing) {
             return Err("run is still executing".into());
         }
         self.store.update(&r.session_id, |s| {
@@ -746,7 +738,7 @@ impl NativeEngine {
         Ok(())
     }
     pub fn shutdown(&self) {
-        for r in self.live.lock().unwrap_or_else(|p| p.into_inner()).values() {
+        for r in relock(&self.live).values() {
             r.provider.cancel();
             r.tool.cancel();
         }
@@ -764,7 +756,7 @@ impl NativeEngine {
                 }
             }
         }
-        for r in self.live.lock().unwrap_or_else(|p| p.into_inner()).values() {
+        for r in relock(&self.live).values() {
             r.provider.cancel();
             r.tool.cancel();
         }

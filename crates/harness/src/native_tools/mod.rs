@@ -15,7 +15,7 @@ mod specs;
 pub(crate) use mcp::{McpBinding, McpTarget};
 pub(crate) use plan::ExtensionPlan;
 
-use crate::{NativeEngine, extensions::SkillEntry};
+use crate::{NativeEngine, engine::relock, extensions::SkillEntry};
 use aidex_core::CancelToken;
 use aidex_events::RiskLevel;
 use aidex_native_sessions::{Mode, Run, SessionDetail};
@@ -214,7 +214,7 @@ impl NativeEngine {
 
     /// Record the MCP tools `offer` gives the next turn of `run`.
     pub(crate) fn remember_offer(&self, run: &str, offer: &Offer) {
-        let mut offered = self.offered_mcp.lock().unwrap_or_else(|p| p.into_inner());
+        let mut offered = relock(&self.offered_mcp);
         if offer.mcp.is_empty() {
             offered.remove(run);
         } else {
@@ -224,16 +224,11 @@ impl NativeEngine {
 
     /// Forget what `run` was offered once it settles.
     pub(crate) fn forget_offer(&self, run: &str) {
-        self.offered_mcp
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .remove(run);
+        relock(&self.offered_mcp).remove(run);
     }
 
     fn offered_target(&self, run: &str, name: &str) -> Option<McpTarget> {
-        self.offered_mcp
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
+        relock(&self.offered_mcp)
             .get(run)?
             .iter()
             .find(|target| target.name == name)

@@ -38,6 +38,10 @@ struct Fake {
     listings: AtomicUsize,
     mcp_calls: Mutex<Vec<(String, String, Value)>>,
     context: Mutex<Option<aidex_policy::EvaluationContext>>,
+    /// Searches, fetches, and MCP calls panic, as a crashing client would.
+    crash_calls: AtomicBool,
+    /// Listing model skills panics: a crash outside any one tool call.
+    crash_listing: AtomicBool,
 }
 
 impl Fake {
@@ -67,6 +71,7 @@ impl Extensions for Fake {
             .map(|id| match id.as_str() {
                 "drive:review" => Ok(Self::skill("review", "drive")),
                 "project:lint" => Ok(Self::skill("lint", "project")),
+                "drive:crash" => panic!("skill store crashed"),
                 other => Err(ExtensionError::SkillUnavailable(format!(
                     "no skill `{other}`"
                 ))),
@@ -75,6 +80,9 @@ impl Extensions for Fake {
     }
 
     fn model_skills(&self, _workspace: Option<&str>) -> Vec<SkillEntry> {
+        if self.crash_listing.load(Ordering::SeqCst) {
+            panic!("skill catalog crashed");
+        }
         vec![SkillEntry {
             name: "review".into(),
             description: "Reviews diffs".into(),
@@ -109,6 +117,9 @@ impl Extensions for Fake {
         _max_results: Option<usize>,
         _cancel: &CancelToken,
     ) -> Result<(String, Vec<WebHit>), ExtensionError> {
+        if self.crash_calls.load(Ordering::SeqCst) {
+            panic!("search client crashed");
+        }
         self.searches.lock().unwrap().push(query.into());
         Ok((
             "brave".into(),
@@ -122,6 +133,9 @@ impl Extensions for Fake {
     }
 
     fn web_fetch(&self, url: &str, _cancel: &CancelToken) -> Result<WebPage, ExtensionError> {
+        if self.crash_calls.load(Ordering::SeqCst) {
+            panic!("page extraction crashed");
+        }
         self.fetches.lock().unwrap().push(url.into());
         Ok(WebPage {
             url: url.into(),
@@ -150,6 +164,9 @@ impl Extensions for Fake {
         arguments: Value,
         _cancel: &CancelToken,
     ) -> Result<McpOutput, ExtensionError> {
+        if self.crash_calls.load(Ordering::SeqCst) {
+            panic!("MCP client crashed");
+        }
         self.mcp_calls
             .lock()
             .unwrap()
@@ -1215,4 +1232,153 @@ fn approved_networked_workspace_tools_recheck_the_offline_switch_and_settings() 
         "second",
     );
     assert!(error.contains("policy changed"), "{error}");
+}
+
+const CRASHED: &str = "Tool failed: the tool crashed before returning a result";
+
+fn web_options() -> RunOptions {
+    RunOptions {
+        skills: vec![],
+        web_search: true,
+    }
+}
+
+#[test]
+fn a_panicking_extension_call_fails_only_that_call_and_later_runs_work() {
+    let fake = web_on();
+    fake.crash_calls.store(true, Ordering::SeqCst);
+    let f = fixture(
+        vec![
+            FakeTurn::tool_call("web_search", r#"{"query":"crash"}"#),
+            FakeTurn::text("the search crashed"),
+            FakeTurn::tool_call("web_search", r#"{"query":"rust"}"#),
+            FakeTurn::text("found it"),
+        ],
+        Mode::Chat,
+        false,
+        fake,
+    );
+    let first = f
+        .engine
+        .start_with(&f.session, "search", "first", None, web_options())
+        .unwrap();
+    let done = wait(&f.engine, &first.id);
+    assert_eq!(done.status, RunStatus::Completed, "{:?}", done.error);
+    assert!(done.pending_calls.is_empty());
+    let results = tool_results(&f.engine, &f.session);
+    assert_eq!(results.len(), 1);
+    assert!(results[0].starts_with(CRASHED), "{}", results[0]);
+    // The model was told and answered.
+    let requests = f.provider.requests();
+    assert_eq!(requests.len(), 2);
+    assert!(
+        requests[1]
+            .messages
+            .iter()
+            .any(|m| m.role == Role::Tool && m.content.contains(CRASHED))
+    );
+    assert!(f.fake.searches.lock().unwrap().is_empty());
+
+    // The session is not left with a run stuck "running".
+    f.fake.crash_calls.store(false, Ordering::SeqCst);
+    let second = f
+        .engine
+        .start_with(&f.session, "search again", "second", None, web_options())
+        .unwrap();
+    let done = wait(&f.engine, &second.id);
+    assert_eq!(done.status, RunStatus::Completed, "{:?}", done.error);
+    assert_eq!(*f.fake.searches.lock().unwrap(), vec!["rust"]);
+    let results = tool_results(&f.engine, &f.session);
+    let stored: Value = serde_json::from_str(&results[1]).unwrap();
+    assert_eq!(stored["query"], "rust");
+}
+
+#[test]
+fn an_approved_call_that_panics_is_reported_and_the_run_completes() {
+    let fake = web_on();
+    fake.crash_calls.store(true, Ordering::SeqCst);
+    let f = fixture(
+        vec![
+            FakeTurn::tool_call("web_fetch", r#"{"url":"https://example.com/"}"#),
+            FakeTurn::text("could not read it"),
+            FakeTurn::text("hello again"),
+        ],
+        Mode::Chat,
+        false,
+        fake,
+    );
+    let run = f
+        .engine
+        .start_with(&f.session, "read this", "first", None, web_options())
+        .unwrap();
+    assert_eq!(wait(&f.engine, &run.id).status, RunStatus::WaitingApproval);
+    let approval = f.engine.approvals(Some(&run.id)).unwrap().remove(0);
+    f.engine
+        .respond(&approval.id, &approval.fingerprint, true, "approve")
+        .unwrap();
+    let done = wait(&f.engine, &run.id);
+    assert_eq!(done.status, RunStatus::Completed, "{:?}", done.error);
+    assert!(tool_results(&f.engine, &f.session)[0].starts_with(CRASHED));
+    assert_eq!(
+        f.engine.approvals(Some(&run.id)).unwrap()[0].status,
+        "approved"
+    );
+    let next = f.engine.start(&f.session, "hello", "second", None).unwrap();
+    let done = wait(&f.engine, &next.id);
+    assert_eq!(done.status, RunStatus::Completed, "{:?}", done.error);
+}
+
+#[test]
+fn a_panic_outside_a_tool_call_fails_the_run_and_later_runs_work() {
+    let fake = Fake::default();
+    fake.crash_listing.store(true, Ordering::SeqCst);
+    let f = fixture(vec![FakeTurn::text("planned")], Mode::Plan, false, fake);
+    let first = f
+        .engine
+        .start(&f.session, "plan it", "first", None)
+        .unwrap();
+    let done = wait(&f.engine, &first.id);
+    assert_eq!(done.status, RunStatus::Failed);
+    assert_eq!(
+        done.error.as_deref(),
+        Some("native run crashed unexpectedly")
+    );
+    assert!(f.provider.requests().is_empty());
+
+    f.fake.crash_listing.store(false, Ordering::SeqCst);
+    let second = f
+        .engine
+        .start(&f.session, "plan it again", "second", None)
+        .unwrap();
+    let done = wait(&f.engine, &second.id);
+    assert_eq!(done.status, RunStatus::Completed, "{:?}", done.error);
+    assert_eq!(f.provider.requests().len(), 1);
+}
+
+#[test]
+fn a_panic_while_starting_a_run_does_not_block_later_runs() {
+    let f = fixture(
+        vec![FakeTurn::text("hi")],
+        Mode::Chat,
+        false,
+        Fake::default(),
+    );
+    // The embedder catches the panic (the daemon turns it into an RPC error);
+    // the engine's operation lock must not stay poisoned.
+    let crashed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        f.engine.start_with(
+            &f.session,
+            "hi",
+            "first",
+            None,
+            RunOptions {
+                skills: vec!["drive:crash".into()],
+                web_search: false,
+            },
+        )
+    }));
+    assert!(crashed.is_err());
+    let run = f.engine.start(&f.session, "hi", "second", None).unwrap();
+    let done = wait(&f.engine, &run.id);
+    assert_eq!(done.status, RunStatus::Completed, "{:?}", done.error);
 }

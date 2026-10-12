@@ -12,11 +12,18 @@ use aidex_core::CancelToken;
 use aidex_events::EventKind;
 use aidex_native_sessions::{ArtifactKind, ArtifactMeta, NewArtifact, Run, RunStatus};
 use serde::Serialize;
-use std::time::Instant;
+use std::{
+    panic::{AssertUnwindSafe, catch_unwind},
+    time::Instant,
+};
 
 /// Page text returned inline by `web_fetch`; longer pages are saved as a
 /// `web_page` artifact and only this much is returned.
 pub(crate) const FETCH_INLINE_BYTES: usize = 64 * 1024;
+/// The failure the model receives when a tool panicked. An MCP call may have
+/// reached its server first, so effects are not ruled out.
+const TOOL_CRASHED: &str =
+    "the tool crashed before returning a result; any effects it had are unknown";
 /// Largest MCP result passed back to the model.
 const MAX_MCP_TEXT: usize = 256 * 1024;
 const MAX_TITLE: usize = 160;
@@ -104,7 +111,8 @@ fn page_name(title: Option<&str>, url: &str) -> String {
 
 impl NativeEngine {
     /// Run `plan` (approved or not needing approval) and append its result to
-    /// the run. Tool failures become results; only store errors are `Err`.
+    /// the run. Tool failures, panics included, become results; only store
+    /// errors and cancellation are `Err`.
     pub(crate) fn execute_extension(
         &self,
         id: &str,
@@ -123,7 +131,10 @@ impl NativeEngine {
             },
         );
         let started = Instant::now();
-        let outcome = self.run_extension(&run, plan, cancel);
+        // A panicking extension (an HTML extractor, an MCP client, a skill
+        // loader) fails this call only; no engine lock is held while it runs.
+        let outcome = catch_unwind(AssertUnwindSafe(|| self.run_extension(&run, plan, cancel)))
+            .unwrap_or_else(|_| Err(TOOL_CRASHED.into()));
         if cancel.is_cancelled() {
             return Err("run cancelled".into());
         }
