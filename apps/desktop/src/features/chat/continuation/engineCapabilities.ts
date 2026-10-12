@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { callUntyped } from "@aidex/client/rpc";
+import { call } from "@aidex/client/rpc";
+import type { EngineCapabilities } from "@aidex/client/dto/execution";
 
 // One answer per window: the engine runs on this computer and its sandbox does not change while the
 // app is open.
@@ -12,17 +13,13 @@ function windowsHost(): boolean {
 
 /**
  * Whether shell commands outside Full access are refused, from the engine capabilities in
- * `execution.status` (`shell_requires_full_access_on_windows`, or no filesystem confinement for
- * commands on this host). Undefined when the result does not say.
+ * `execution.status`: `shell_requires_full_access_on_windows`, or no filesystem confinement for
+ * commands on this host.
  */
-export function shellNeedsFullAccessFrom(status: unknown): boolean | undefined {
-  if (typeof status !== "object" || status === null) return undefined;
-  const capabilities = (status as Record<string, unknown>).capabilities;
-  if (typeof capabilities !== "object" || capabilities === null) return undefined;
-  const windows = (capabilities as Record<string, unknown>).shell_requires_full_access_on_windows;
-  const confinement = (capabilities as Record<string, unknown>).filesystem_confinement;
-  if (typeof windows !== "boolean" && typeof confinement !== "boolean") return undefined;
-  return windows === true || confinement === false;
+export function shellNeedsFullAccessFrom(
+  capabilities: Pick<EngineCapabilities, "shell_requires_full_access_on_windows" | "filesystem_confinement">,
+): boolean {
+  return capabilities.shell_requires_full_access_on_windows || !capabilities.filesystem_confinement;
 }
 
 /**
@@ -38,10 +35,9 @@ export function useShellNeedsFullAccess(enabled: boolean): boolean {
       return;
     }
     let live = true;
-    callUntyped("execution.status")
+    call("execution.status")
       .then((status) => {
-        const answer = shellNeedsFullAccessFrom(status);
-        if (answer === undefined) return;
+        const answer = shellNeedsFullAccessFrom(status.capabilities);
         known = answer;
         if (live) setValue(answer);
       })

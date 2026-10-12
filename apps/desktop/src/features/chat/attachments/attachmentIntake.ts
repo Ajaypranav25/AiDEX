@@ -35,8 +35,18 @@ async function bytesOf(blob: Blob): Promise<Uint8Array<ArrayBuffer>> {
 }
 
 /**
+ * The bytes of a picked file held in memory. A `File` only points at the file on disk, and Chromium
+ * refuses to read it once it changed, moved, or was deleted, so nothing that is uploaded later (a new
+ * chat's first send, a re-upload of an expired copy) may keep the `File` itself.
+ */
+async function inMemory(blob: Blob, type: string): Promise<Blob> {
+  return new Blob([await blob.arrayBuffer()], { type });
+}
+
+/**
  * Prepares one file. `name` is its display name. Images go through `prepare` (decode, downscale,
- * convert); PDFs and text pass through after their checks.
+ * convert); PDFs and text pass through after their checks. What is uploaded is always held in memory,
+ * never the picked file itself (`inMemory`).
  */
 export async function prepareFile(
   file: Blob,
@@ -55,23 +65,19 @@ export async function prepareFile(
   const format = sniffFormat(head);
   if (format === "pdf") {
     if (file.size > MAX_PDF_BYTES) return refuse(intakeMessages.tooLarge(name));
-    return { ok: true, file: { kind: "pdf", name, blob: file, mime: "application/pdf" } };
+    let blob: Blob;
+    try {
+      blob = await inMemory(file, "application/pdf");
+    } catch {
+      return refuse(intakeMessages.unreadable(name));
+    }
+    return { ok: true, file: { kind: "pdf", name, blob, mime: "application/pdf" } };
   }
   if (format !== "unknown") {
     if (file.size > MAX_IMAGE_SOURCE_BYTES) return refuse(intakeMessages.tooLarge(name));
+    let image: PreparedImage;
     try {
-      const image = await prepare(file, format);
-      return {
-        ok: true,
-        file: {
-          kind: "image",
-          name: renameForMime(name, image.mime),
-          blob: image.blob,
-          mime: image.mime,
-          previewUrl: image.previewUrl,
-          previewExact: image.previewExact,
-        },
-      };
+      image = await prepare(file, format);
     } catch (caught) {
       if (caught instanceof ImageTooLargeError) return refuse(intakeMessages.tooLargeAfterCompression(name));
       if (caught instanceof ImageDecodeError && format === "heic") return refuse(intakeMessages.heic(name));
@@ -79,6 +85,26 @@ export async function prepareFile(
         return refuse(intakeMessages.unsupported(name));
       return refuse(intakeMessages.notImage(name));
     }
+    // An image that passes through unchanged is still the picked file: keep its bytes instead.
+    let blob = image.blob;
+    if (blob === file) {
+      try {
+        blob = await inMemory(file, image.mime);
+      } catch {
+        return refuse(intakeMessages.unreadable(name));
+      }
+    }
+    return {
+      ok: true,
+      file: {
+        kind: "image",
+        name: renameForMime(name, image.mime),
+        blob,
+        mime: image.mime,
+        previewUrl: image.previewUrl,
+        previewExact: image.previewExact,
+      },
+    };
   }
   // Anything else must be UTF-8 text without NUL bytes.
   if (file.size > MAX_TEXT_ATTACHMENT_BYTES) {
@@ -97,7 +123,8 @@ export async function prepareFile(
   }
   if (!isUtf8Text(bytes)) return refuse(intakeMessages.unsupported(name));
   if (containsPrivateKey(new TextDecoder().decode(bytes))) return refuse(intakeMessages.privateKey(name));
-  // A copy, so editing the file on disk before the upload cannot change or break what is sent.
+  // A copy (like PDFs and images above), so editing the file on disk before the upload cannot change
+  // or break what is sent.
   const copy = new Blob([bytes]);
   return { ok: true, file: { kind: "text", name, blob: copy, mime: textMimeOf(name, declaredType) } };
 }

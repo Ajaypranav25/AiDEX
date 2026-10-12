@@ -1,14 +1,17 @@
 // The attachments waiting in one composer: intake (prepare and validate files, fold large pastes,
 // add project files), sequential chunked uploads to the bound conversation with progress, remove
-// (abort or delete the staged copy), retry, and handing the ready ids to a send. Framework-free
-// (React subscribes through `subscribe`/`getSnapshot`); RPC and file preparation are injectable.
+// (abort or delete the staged copy), retry, showing an existing conversation's staged copies again,
+// and handing the ready ids to a send. Framework-free (React subscribes through
+// `subscribe`/`getSnapshot`); RPC and file preparation are injectable.
 import { call as rpcCall, type RpcMethod, type RpcParams, type RpcResult } from "@aidex/client/rpc";
 import { toAidexError } from "@aidex/client/errors";
 import {
+  ATTACHMENT_LIST_LIMIT,
   MAX_ATTACHMENTS_PER_MESSAGE,
   MAX_TEXT_ATTACHMENT_BYTES,
   type Attachment,
   type AttachmentKind,
+  type AttachmentList,
 } from "@aidex/client/dto/attachments";
 import {
   attachmentDisplayName,
@@ -18,6 +21,7 @@ import {
   dedupeKey,
   fitsMessageTotal,
   intakeMessages,
+  isFileReadError,
   nextPasteName,
   toHex,
   uploadFailureMessage,
@@ -111,12 +115,27 @@ export class AttachmentDraft {
   private pumping = false;
   private active: { key: string; cancelled: boolean } | null = null;
   private waiters: Array<() => void> = [];
+  /**
+   * `needed` from `bindExisting` until `restoreStaged` has run: nothing uploads and a send waits, so
+   * an upload committed meanwhile cannot be mistaken for a staged copy no draft holds.
+   */
+  private restore: "none" | "needed" | "running" = "none";
+  /**
+   * The ids `uploadAll` handed to a send, until `markSent` or `release`. The send outlives the page
+   * that started it, so the lock lives here: a remounted page must not remove what is being sent.
+   */
+  private sendingIds: ReadonlySet<string> | null = null;
 
   constructor(private readonly deps: DraftDeps = browserDeps) {}
 
   /** The conversation uploads go to, once bound. */
   get sessionId(): string | undefined {
     return this.session;
+  }
+
+  /** A send carries this draft's attachments: they cannot be removed or retried until it settles. */
+  get sending(): boolean {
+    return this.sendingIds !== null;
   }
 
   readonly subscribe = (listener: () => void): (() => void) => {
@@ -128,11 +147,20 @@ export class AttachmentDraft {
 
   readonly getSnapshot = (): readonly DraftAttachment[] => this.items;
 
+  private notify() {
+    this.listeners.forEach((listener) => listener());
+  }
+
   private setItems(next: readonly DraftAttachment[]) {
     this.items = next;
-    this.listeners.forEach((listener) => listener());
+    this.notify();
     this.deps.onChange?.(this);
     this.settle();
+  }
+
+  private setSending(ids: ReadonlySet<string> | null) {
+    this.sendingIds = ids;
+    this.notify();
   }
 
   private find(key: string): DraftAttachment | undefined {
@@ -268,10 +296,13 @@ export class AttachmentDraft {
     return undefined;
   }
 
-  /** Removes an attachment: an upload in flight is aborted, a staged copy deleted. */
+  /**
+   * Removes an attachment: an upload in flight is aborted, a staged copy deleted. One a send carries
+   * stays (deleting it would race the send, which could still deliver it).
+   */
   remove(key: string): void {
     const item = this.find(key);
-    if (!item) return;
+    if (!item || (item.attachmentId && this.sendingIds?.has(item.attachmentId))) return;
     this.drop(key);
     if (this.active?.key === key) {
       this.active.cancelled = true;
@@ -281,10 +312,10 @@ export class AttachmentDraft {
       void this.deps.call("attachment.delete", { id: item.attachmentId }).catch(noop);
   }
 
-  /** Uploads a failed attachment again, from the start. */
+  /** Uploads a failed attachment again, from the start (not while a send is in flight). */
   retry(key: string): void {
     const item = this.find(key);
-    if (item?.status !== "failed") return;
+    if (item?.status !== "failed" || this.sendingIds) return;
     this.patch(key, { status: "pending", error: undefined, progress: undefined, attachmentId: undefined });
     void this.pump();
   }
@@ -297,8 +328,89 @@ export class AttachmentDraft {
     void this.pump();
   }
 
+  /**
+   * Binds an existing conversation that has no draft in this window (it was opened, the window
+   * reloaded, or the app restarted). Uploads wait for `restoreStaged`, which must follow.
+   */
+  bindExisting(sessionId: string): void {
+    this.restore = "needed";
+    this.bind(sessionId);
+  }
+
+  /**
+   * After `bindExisting`: the conversation's staged copies that no draft holds (left by a reload, a
+   * restart, or a delete that failed) still count against the daemon's caps, so they come back to
+   * the tray as ready, newest first while they fit one message (20 attachments, 32 MB); the rest are
+   * deleted. Runs once; a failure (e.g. a locked vault) leaves them to expire.
+   */
+  async restoreStaged(): Promise<void> {
+    const session = this.session;
+    if (this.restore !== "needed" || !session) return;
+    this.restore = "running";
+    try {
+      const staged: Attachment[] = [];
+      let offset: number | null = 0;
+      while (offset !== null) {
+        const page: AttachmentList = await this.deps.call("attachment.list", {
+          session_id: session,
+          offset,
+          limit: ATTACHMENT_LIST_LIMIT,
+        });
+        staged.push(...page.attachments.filter((attachment) => attachment.state === "staged"));
+        offset = page.next_offset !== null && page.next_offset > offset ? page.next_offset : null;
+      }
+      if (this.session === session) this.adoptStaged(staged);
+    } catch {
+      // They expire on their own.
+    } finally {
+      this.restore = "none";
+      void this.pump();
+    }
+  }
+
+  /** Adds staged copies (newest first) that fit this message; deletes the others. */
+  private adoptStaged(staged: readonly Attachment[]) {
+    const held = new Set(this.items.flatMap((item) => (item.attachmentId ? [item.attachmentId] : [])));
+    const sizes = this.sizes();
+    let count = this.items.length;
+    const restored: DraftAttachment[] = [];
+    for (const meta of staged) {
+      if (held.has(meta.id)) continue;
+      held.add(meta.id);
+      if (count >= MAX_ATTACHMENTS_PER_MESSAGE || !fitsMessageTotal(sizes, meta.size)) {
+        void this.deps.call("attachment.delete", { id: meta.id }).catch(noop);
+        continue;
+      }
+      count += 1;
+      sizes.push(meta.size);
+      restored.push({
+        key: this.deps.newKey(),
+        name: meta.name,
+        kind: kindOf(meta.kind),
+        size: meta.size,
+        mime: meta.mime,
+        source: meta.source === "paste" ? "paste" : "file",
+        status: "ready",
+        progress: 1,
+        attachmentId: meta.id,
+      });
+    }
+    if (!restored.length) return;
+    // Oldest first, ahead of anything added since: the tray's order is the order they are sent in.
+    this.setItems([...restored.reverse(), ...this.items]);
+    for (const { key, kind, attachmentId, mime } of restored)
+      if (kind === "image" && attachmentId && mime) this.loadPreview(key, attachmentId, mime);
+  }
+
+  /** Shows a staged image's stored copy as its tray preview. */
+  private loadPreview(key: string, id: string, mime: string) {
+    void this.deps.loadImage(id, mime).then((src) => {
+      if (src && this.find(key)?.attachmentId === id) this.patch(key, { previewUrl: src, previewExact: true });
+    });
+  }
+
   private settledNow(): boolean {
-    if (this.pumping) return false;
+    if (this.pumping || this.restore !== "none") return false;
     return !this.items.some(
       (item) =>
         item.status === "processing" || item.status === "uploading" || (item.status === "pending" && !!this.session),
@@ -320,14 +432,22 @@ export class AttachmentDraft {
 
   /**
    * Binds the conversation, uploads everything not yet uploaded, and returns the staged ids in tray
-   * order. Throws the first failure's message when an attachment could not be uploaded.
+   * order. Throws the first failure's message when an attachment could not be uploaded. The returned
+   * ids stay locked (see `sending`) until `markSent`, or `release` when the send fails.
    */
   async uploadAll(sessionId: string): Promise<string[]> {
     this.bind(sessionId);
     await this.settled();
     const failed = this.items.find((item) => item.status === "failed");
     if (failed) throw new Error(failed.error ?? "Retry or remove the failed attachment.");
-    return this.items.flatMap((item) => (item.status === "ready" && item.attachmentId ? [item.attachmentId] : []));
+    const ids = this.items.flatMap((item) => (item.status === "ready" && item.attachmentId ? [item.attachmentId] : []));
+    this.setSending(new Set(ids));
+    return ids;
+  }
+
+  /** After a send failed: its attachments can be removed and retried again. */
+  release(): void {
+    if (this.sendingIds) this.setSending(null);
   }
 
   private async pump(): Promise<void> {
@@ -336,7 +456,8 @@ export class AttachmentDraft {
     try {
       for (;;) {
         const session = this.session;
-        const next = session ? this.items.find((item) => item.status === "pending") : undefined;
+        const next =
+          session && this.restore === "none" ? this.items.find((item) => item.status === "pending") : undefined;
         if (!session || !next) break;
         await this.upload(next, session);
       }
@@ -397,19 +518,17 @@ export class AttachmentDraft {
         size: meta.size,
         mime: meta.mime,
       });
-      if (meta.kind === "image" && !item.previewUrl) {
-        void this.deps.loadImage(meta.id, meta.mime).then((src) => {
-          if (src && this.find(item.key)?.attachmentId === meta.id)
-            this.patch(item.key, { previewUrl: src, previewExact: true });
-        });
-      }
+      if (meta.kind === "image" && !item.previewUrl) this.loadPreview(item.key, meta.id, meta.mime);
     } catch (caught) {
       if (uploadId && !committed) void call("attachment.upload.abort", { upload_id: uploadId }).catch(noop);
       if (token.cancelled) return;
       this.patch(item.key, {
         status: "failed",
         progress: undefined,
-        error: uploadFailureMessage(item.name, item.kind, toAidexError(caught)),
+        // Retrying cannot help a file that changed on disk; intake copies new files into memory.
+        error: isFileReadError(caught)
+          ? intakeMessages.changedOnDisk(item.name)
+          : uploadFailureMessage(item.name, item.kind, toAidexError(caught)),
       });
     } finally {
       if (this.active === token) this.active = null;
@@ -444,7 +563,10 @@ export class AttachmentDraft {
     for (const item of leaving)
       if (item.kind === "image" && item.previewUrl && item.attachmentId)
         this.deps.seedImage(item.attachmentId, item.previewUrl, item.mime ?? "image/png", !item.previewExact);
+    const wasSending = this.sendingIds !== null;
+    this.sendingIds = null;
     if (leaving.length) this.setItems(this.items.filter((item) => !leaving.includes(item)));
+    else if (wasSending) this.notify();
   }
 
   /** Hands every attachment over (Home → the new chat) and empties this draft. */

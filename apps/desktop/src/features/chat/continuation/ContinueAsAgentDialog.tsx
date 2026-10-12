@@ -4,8 +4,10 @@ import { Button, ChoiceCardGroup, Select, Stack, Text, TextArea } from "@aidex/u
 import { toAidexError } from "@aidex/client/errors";
 import type { PermissionMode } from "@aidex/client/dto/sessions";
 import type { Workspace } from "@aidex/client/dto/workspace";
+import type { ConversationModelState } from "../resolveConversationModel";
 import {
   carriedAttachmentWarning,
+  currentModelHint,
   defaultContinuation,
   type AgentContinuation,
   type AgentModelOption,
@@ -27,6 +29,8 @@ export type ContinueAsAgentDialogProps = {
   modelKeys: readonly (string | null | undefined)[];
   /** Name of the conversation's model, to say why it is not offered. */
   currentModelName: string;
+  /** Whether the conversation's model can run now (an unlisted one is unavailable, not tool-less). */
+  currentModelState: ConversationModelState;
   /** Images and PDFs the conversation's messages carry. */
   carried: { images: number; pdfs: number };
   /** Attachments waiting in the composer (they stay there). */
@@ -54,6 +58,7 @@ export function ContinueAsAgentDialog({
   models,
   modelKeys,
   currentModelName,
+  currentModelState,
   carried,
   composerAttachments,
   shellNeedsFullAccess,
@@ -159,7 +164,7 @@ export function ContinueAsAgentDialog({
             label="Model"
             value={choice.modelKey}
             disabled={!!pending}
-            hint={currentOffered ? undefined : `${currentModelName} can't use agent tools. Choose a model that can.`}
+            hint={currentModelHint({ name: currentModelName, state: currentModelState, offered: currentOffered })}
             options={[
               { value: "", label: "Choose a model that can use tools", disabled: true },
               ...models.map((item) => ({ value: item.key, label: item.label })),

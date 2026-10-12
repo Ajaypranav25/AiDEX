@@ -5,6 +5,7 @@ import type { ModelInput, ProviderModel } from "@aidex/client/dto/models";
 import type { PermissionMode } from "@aidex/client/dto/sessions";
 import type { Workspace } from "@aidex/client/dto/workspace";
 import { parseModelKey } from "../../model-manager/catalog/modelKeys";
+import type { ConversationModelState } from "../resolveConversationModel";
 
 /** What the user chose in the dialog. */
 export type AgentContinuation = {
@@ -62,6 +63,30 @@ export function agentModelOptions(input: {
   if (current?.key && !options.some((item) => item.key === current.key) && canRunAgent(current.key, current.descriptor))
     options.unshift(option(current.key, current.name, current.descriptor));
   return options;
+}
+
+/**
+ * Why the conversation's own model is not offered, or undefined when it is (or there is none). A model
+ * that is not listed now may well use tools, so it is called unavailable; any other is not offered
+ * because it has no native tool calling (AiDEX's local model never has).
+ */
+export function currentModelHint(input: {
+  name: string;
+  state: ConversationModelState;
+  offered: boolean;
+}): string | undefined {
+  if (input.offered) return undefined;
+  if (input.state === "unlisted")
+    return `${input.name} is not available right now. Choose a model that can use agent tools.`;
+  return `${input.name} can't use agent tools. Choose a model that can.`;
+}
+
+/**
+ * The composer text after "Continue here" switched the conversation but its first instruction was
+ * not sent: the instruction, after any text already there.
+ */
+export function draftWithInstruction(draft: string, instruction: string): string {
+  return draft.trim() ? `${draft.trimEnd()}\n\n${instruction}` : instruction;
 }
 
 /** Images and PDFs the conversation's messages carry to the agent (excluded ones are not sent). */

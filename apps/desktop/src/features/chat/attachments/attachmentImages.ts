@@ -1,6 +1,7 @@
 // Images of sent attachments as `data:` URLs (the release CSP allows no `blob:` images), read
 // through `attachment.read` pages once and shared by every transcript view in this window. The
-// cache is bounded; evicted images are read again when they are shown again.
+// cache is bounded, except that images on screen are never evicted (so tiles in view cannot evict
+// each other in a reload loop); evicted images are read again when they are shown again.
 import { useSyncExternalStore } from "react";
 import { call } from "@aidex/client/rpc";
 import type { AttachmentContent } from "@aidex/client/dto/attachments";
@@ -18,6 +19,8 @@ type Entry = AttachmentImage;
 const CACHE_CHARS = 64 * 1024 * 1024;
 
 const entries = new Map<string, Entry>();
+/** How many views show each image now (`setAttachmentImageShown`); those are never evicted. */
+const shown = new Map<string, number>();
 const listeners = new Set<() => void>();
 let version = 0;
 
@@ -30,16 +33,22 @@ function size(entry: Entry): number {
   return entry.status === "ready" ? entry.src.length : 0;
 }
 
-/** Keeps the newest entries within the budget; Map order is least recently used first. */
-function evict() {
+/**
+ * Keeps the newest entries within the budget; Map order is least recently used first. Images on
+ * screen stay, so the cache exceeds the budget only by what is on screen. Returns whether any went.
+ */
+function evict(): boolean {
   let total = 0;
+  let evicted = false;
   entries.forEach((entry) => (total += size(entry)));
   for (const [id, entry] of entries) {
     if (total <= CACHE_CHARS) break;
-    if (entry.status !== "ready") continue;
+    if (entry.status !== "ready" || shown.has(id)) continue;
     total -= size(entry);
     entries.delete(id);
+    evicted = true;
   }
+  return evicted;
 }
 
 function set(id: string, entry: Entry) {
@@ -109,6 +118,20 @@ export async function loadAttachmentImage(id: string, mime: string): Promise<str
   await load(id, mime, false);
   const loaded = entries.get(id);
   return loaded?.status === "ready" ? loaded.src : undefined;
+}
+
+/**
+ * Counts a view that shows the image (`visible`) or stopped showing it, as `MessageAttachments`
+ * reports through `onImageVisibilityChange`. Once no view shows it, the budget applies to it again.
+ */
+export function setAttachmentImageShown(id: string, visible: boolean): void {
+  const count = (shown.get(id) ?? 0) + (visible ? 1 : -1);
+  if (count > 0) {
+    shown.set(id, count);
+    return;
+  }
+  shown.delete(id);
+  if (evict()) emit();
 }
 
 /**

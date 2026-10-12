@@ -103,6 +103,7 @@ import type {
   AttachmentUploadChunkParams,
   AttachmentUploadTicket,
 } from "./dto/attachments";
+import type { ExecutionStatus } from "./dto/execution";
 import type { AppPreferences, ModelPreferences } from "./dto/preferences";
 import type {
   InferenceCatalog,
@@ -251,6 +252,8 @@ export type RpcMethods = {
     params: { session_id: string; configuration: SessionConfig };
     result: SessionConfig;
   };
+  /** Engine capabilities on this computer, with bounded session and run summaries. */
+  "execution.status": { params: undefined; result: ExecutionStatus };
   "model.list": { params: ModelListParams | undefined; result: ModelList };
   "model.providers": {
     params: undefined;

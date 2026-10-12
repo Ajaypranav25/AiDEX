@@ -1,11 +1,11 @@
 import { MessageAttachments, type MessageAttachmentItem } from "@aidex/ui/components";
 import type { AttachmentRef } from "@aidex/client/dto/attachments";
 import { useAttachmentDownload } from "./attachmentDownload";
-import { requestAttachmentImage, useAttachmentImages } from "./attachmentImages";
+import { requestAttachmentImage, setAttachmentImageShown, useAttachmentImages } from "./attachmentImages";
 
 /**
  * The attachments of a sent user message: images load lazily (through `attachment.read` into `data:`
- * URLs, cached per id) and open in the image viewer; other files download.
+ * URLs, cached per id, kept while on screen) and open in the image viewer; other files download.
  */
 export function SentAttachments({ attachments }: { attachments: readonly AttachmentRef[] }) {
   const image = useAttachmentImages();
@@ -29,6 +29,7 @@ export function SentAttachments({ attachments }: { attachments: readonly Attachm
     <MessageAttachments
       items={items}
       onRequestImage={(id) => requestAttachmentImage(id, mimes.get(id) ?? "image/png")}
+      onImageVisibilityChange={setAttachmentImageShown}
       onDownload={download}
     />
   );

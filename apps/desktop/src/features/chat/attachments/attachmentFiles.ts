@@ -24,11 +24,14 @@ export type SniffedFormat =
   | "pdf"
   | "unknown";
 
-/** Image formats the webview may convert to PNG or JPEG before upload. */
+/** Image formats converted to PNG or JPEG when this webview can decode them (refused otherwise). */
 export const CONVERTIBLE_IMAGE_FORMATS: ReadonlySet<SniffedFormat> = new Set(["bmp", "heic", "avif"]);
 
-/** Image formats the daemon stores as they are (GIF is converted to its first frame first). */
-export const STORED_IMAGE_FORMATS: ReadonlySet<SniffedFormat> = new Set(["png", "jpeg", "webp"]);
+/**
+ * Image formats uploaded as they are when within the limits. Every vendor reads PNG and JPEG; WebP
+ * (some vendors, e.g. xAI, take only PNG and JPEG) and GIF (first frame) are converted first.
+ */
+export const STORED_IMAGE_FORMATS: ReadonlySet<SniffedFormat> = new Set(["png", "jpeg"]);
 
 export const FORMAT_MIME: Partial<Record<SniffedFormat, string>> = {
   png: "image/png",
@@ -52,12 +55,22 @@ function ascii(bytes: Uint8Array, start: number, end: number): string {
   return text;
 }
 
+/**
+ * Sizes of the BMP info header that follows the 14-byte file header. Each is below 256, so a real BMP
+ * has NUL bytes there and can never be text that starts with "BM" (`bmi.csv`, "BMW …").
+ */
+const BMP_INFO_HEADER_SIZES = new Set([12, 16, 40, 52, 56, 64, 108, 124]);
+
+function littleEndianU32(bytes: Uint8Array, at: number): number {
+  return (bytes[at] | (bytes[at + 1] << 8) | (bytes[at + 2] << 16) | (bytes[at + 3] << 24)) >>> 0;
+}
+
 function startsWith(bytes: Uint8Array, prefix: readonly number[]): boolean {
   if (bytes.length < prefix.length) return false;
   return prefix.every((value, index) => bytes[index] === value);
 }
 
-/** The format of a file from its first bytes (at least 12 are needed for WebP and HEIF). */
+/** The format of a file from its first bytes (at least 12 are needed for WebP and HEIF, 18 for BMP). */
 export function sniffFormat(head: Uint8Array): SniffedFormat {
   if (startsWith(head, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return "png";
   if (startsWith(head, [0xff, 0xd8, 0xff])) return "jpeg";
@@ -70,7 +83,8 @@ export function sniffFormat(head: Uint8Array): SniffedFormat {
     if (BRANDS_AVIF.has(brand)) return "avif";
     if (BRANDS_HEIC.has(brand)) return "heic";
   }
-  if (head.length >= 14 && ascii(head, 0, 2) === "BM") return "bmp";
+  if (head.length >= 18 && ascii(head, 0, 2) === "BM" && BMP_INFO_HEADER_SIZES.has(littleEndianU32(head, 14)))
+    return "bmp";
   return "unknown";
 }
 
@@ -209,6 +223,8 @@ export const intakeMessages = {
   heic: (name: string) =>
     `'${name}' is a HEIC image this computer can't convert. Save it as JPEG or PNG and attach it again.`,
   privateKey: (name: string) => `'${name}' contains a private key, so it can't be attached.`,
+  changedOnDisk: (name: string) =>
+    `'${name}' changed or was moved after it was attached. Remove it and attach it again.`,
   messageTotal: (name: string) =>
     `'${name}' would take this message's attachments over ${MAX_MESSAGE_ATTACHMENT_BYTES / (1024 * 1024)} MB. Send it in another message.`,
   pasteTooLarge: "Pasted text is too large to attach.",
@@ -295,6 +311,16 @@ export function attachmentSendBlock(input: {
   return undefined;
 }
 
+/**
+ * Whether reading a picked file failed because it changed, moved, or was deleted on disk after it was
+ * attached (Chromium's `NotReadableError` and `NotFoundError`); reading it again fails the same way.
+ */
+export function isFileReadError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const name = (error as { name?: unknown }).name;
+  return name === "NotReadableError" || name === "NotFoundError";
+}
+
 /** `data.reason` of a refused attachment call, when it carries one. */
 export function reasonOf(data: unknown): AttachmentErrorReason | undefined {
   if (typeof data !== "object" || data === null) return undefined;
@@ -323,7 +349,8 @@ export function uploadFailureMessage(
     case "too_large":
       return intakeMessages.tooLarge(name);
     case "too_many_attachments":
-      return "This conversation has too many attachments waiting to be sent. Send or remove some first.";
+      // The daemon caps unsent attachments per conversation and across all conversations alike.
+      return "Too many attachments are waiting to be sent in this or other conversations. Send or remove some first.";
     case "busy":
       return "Too many uploads are in progress. Retry in a moment.";
     case "bad_offset":

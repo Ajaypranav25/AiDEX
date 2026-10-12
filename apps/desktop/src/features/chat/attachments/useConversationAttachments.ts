@@ -1,4 +1,4 @@
-import { useCallback, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type { AttachmentTrayItem } from "@aidex/ui/components";
 import { AttachmentDraft, browserDeps, type DraftAttachment } from "./attachmentDraft";
 
@@ -19,7 +19,9 @@ const trackedDeps = { ...browserDeps, onChange: track };
 /**
  * The attachments of a conversation's composer. A new chat (no id) starts with `arrival` (handed over
  * from Home) and uploads nothing until `adopt` binds the conversation its first send created; an
- * existing conversation uploads as soon as files are added.
+ * existing conversation uploads as soon as files are added. An existing conversation without a draft
+ * in this window first gets back its staged copies (`restoreStaged`), which would otherwise be
+ * invisible yet still count against the daemon's caps.
  */
 export function useConversationAttachments(
   conversationId: string | undefined,
@@ -29,14 +31,21 @@ export function useConversationAttachments(
     const existing = conversationId ? drafts.get(conversationId) : undefined;
     if (existing) return existing;
     const created = new AttachmentDraft(trackedDeps);
-    if (conversationId) created.bind(conversationId);
+    if (conversationId) created.bindExisting(conversationId);
     else if (arrival?.length) created.adoptItems(arrival);
     return created;
   });
+  // Outside the initializer, which may run twice; the draft restores only once.
+  useEffect(() => {
+    void draft.restoreStaged();
+  }, [draft]);
   const items = useSyncExternalStore(draft.subscribe, draft.getSnapshot, draft.getSnapshot);
+  // A send in flight, possibly started by an earlier mount of this page: the tray and Send wait for it.
+  const sendingSnapshot = useCallback(() => draft.sending, [draft]);
+  const sending = useSyncExternalStore(draft.subscribe, sendingSnapshot, sendingSnapshot);
   /** Binds the conversation a new chat's first send created; pending attachments start uploading. */
   const adopt = useCallback((createdId: string) => draft.bind(createdId), [draft]);
-  return { draft, items, adopt };
+  return { draft, items, sending, adopt };
 }
 
 /** Attachments of a composer that never uploads (Home): prepared here, handed to the new chat. */

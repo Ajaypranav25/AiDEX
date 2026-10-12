@@ -109,9 +109,10 @@ function previewRendition(bitmap: ImageBitmap, transparent: boolean): string {
 }
 
 /**
- * Prepares an image for upload. PNG, JPEG, and WebP within 3,750,000 bytes and 2000 px pass through
- * byte for byte; larger ones are downscaled; GIF becomes its first frame (models read only that, and
- * Gemini refuses GIF); BMP, HEIC, and AVIF are converted when this webview can decode them.
+ * Prepares an image for upload. PNG and JPEG within 3,750,000 bytes and 2000 px pass through byte for
+ * byte; larger ones are downscaled; WebP becomes PNG when transparent, else JPEG (some vendors, e.g.
+ * xAI, read only PNG and JPEG); GIF becomes its first frame (models read only that, and Gemini refuses
+ * GIF); BMP, HEIC, and AVIF are converted when this webview can decode them.
  */
 export async function prepareImage(file: Blob, format: SniffedFormat): Promise<PreparedImage> {
   let bitmap: ImageBitmap;

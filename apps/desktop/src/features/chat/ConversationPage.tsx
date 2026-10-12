@@ -61,6 +61,7 @@ import { invokedSkillIds, invokedSkillsProblem } from "./composer/composerText";
 import {
   agentModelOptions,
   carriedAttachments,
+  draftWithInstruction,
   forkTitle,
   type AgentContinuation,
 } from "./continuation/agentContinuation";
@@ -152,6 +153,13 @@ export function ConversationPage({
     null,
   );
   const autoSent = useRef(false);
+  // False once this page is gone (the user opened another screen): a send still finishing then must
+  // not take over the route or touch the page's state.
+  const mounted = useRef(true);
+  // Where focus goes once "Continue here" closes its dialog (the header action that opened it goes
+  // away when the conversation becomes an agent).
+  const focusAfterContinue = useRef<"composer" | "heading" | null>(null);
+  const headingRef = useRef<HTMLHeadingElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const following = useRef(true);
   const [arrivalPrompt] = useState(() => preferences.pendingPrompt);
@@ -311,6 +319,25 @@ export function ConversationPage({
     preferences.setPendingAttachments(null);
   }, []);
   useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    const target = focusAfterContinue.current;
+    if (continuing || !target) return;
+    focusAfterContinue.current = null;
+    // After the dialog has handed focus back to its opener, which may be gone or disabled.
+    const frame = requestAnimationFrame(() => {
+      const field = textareaRef.current;
+      const composerReady = target === "composer" && !!field && !field.disabled;
+      // Without scrolling: a heading focus would jump to the top and stop following the run.
+      (composerReady ? field : headingRef.current)?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [continuing]);
+  useEffect(() => {
     if (!route.id && preferences.loaded && !permissionTouched.current) {
       setPermission(preferences.settings.permission_mode ?? "supervised");
     }
@@ -442,7 +469,8 @@ export function ConversationPage({
     { composer = true, mode: nextMode }: { composer?: boolean; mode?: ConversationMode } = {},
   ) => {
     const attaching = composer && attachments.items.length > 0;
-    if (busy || running || (!text.trim() && !attaching)) return;
+    // `sending`: a send this page started before it was remounted is still in flight.
+    if (busy || running || attachments.sending || (!text.trim() && !attaching)) return;
     setBusy(true);
     setError(undefined);
     try {
@@ -521,26 +549,33 @@ export function ConversationPage({
         ...(attachmentIds.length ? { attachments: attachmentIds } : {}),
       });
       pendingCommand.current = null;
+      // The draft outlives this page (it is kept per conversation), so it is cleared either way.
+      if (composer) attachments.draft.markSent(attachmentIds);
+      if (!mounted.current) {
+        // The user moved on while the attachments uploaded: say so rather than pull them back.
+        notify(config.title ? `Message sent to '${config.title}'.` : "Message sent.");
+        return;
+      }
       if (nextMode) setMode(nextMode);
       if (composer) {
         setDraft("");
-        attachments.draft.markSent(attachmentIds);
         composerMenu.clearPicked();
       }
       replace({ page: config.mode === "agent" ? "agent" : "chat", id });
       session.refetch();
     } catch (caught) {
+      // The attachments this send carried can be removed again (the page may be gone by now).
+      if (attaching) attachments.draft.release();
       const failure = toAidexError(caught);
       // Staged copies are deleted after a day: upload those again instead of failing for good.
-      if (
+      const problem =
         attaching &&
         reasonOf(failure.data) === "attachment_unavailable" &&
         (await attachments.draft.revalidate())
-      )
-        setError(
-          "Some attachments had expired and are uploading again. Send again once they are ready.",
-        );
-      else setError(failure.message);
+          ? "Some attachments had expired and are uploading again. Send again once they are ready."
+          : failure.message;
+      if (mounted.current) setError(problem);
+      else notify(`The message was not sent: ${problem}`, "danger");
     } finally {
       setBusy(false);
     }
@@ -706,7 +741,9 @@ export function ConversationPage({
   };
   /**
    * "Continue here": one `agent.configuration.set` (Agent, project, permission, model), then
-   * `agent.start` with the instruction when there is one. Throws for the dialog to show.
+   * `agent.start` with the instruction when there is one. Throws for the dialog to show when the
+   * switch fails. When only the start fails, the switch stands (the dialog is not offered again), so
+   * the dialog closes and the instruction waits in the composer.
    */
   const continueHere = async (choice: AgentContinuation) => {
     const id = route.id;
@@ -725,16 +762,29 @@ export function ConversationPage({
       session.refetch();
       const instruction = choice.instruction.trim();
       if (instruction) {
-        await call("agent.start", {
-          session_id: id,
-          content: instruction,
-          command_id: continuationCommandId(
-            JSON.stringify({ start: id, instruction }),
-          ),
-        });
+        try {
+          await call("agent.start", {
+            session_id: id,
+            content: instruction,
+            command_id: continuationCommandId(
+              JSON.stringify({ start: id, instruction }),
+            ),
+          });
+        } catch (caught) {
+          setDraft((current) => draftWithInstruction(current, instruction));
+          notify(
+            `Switched to Agent, but the first instruction was not sent (${toAidexError(caught).message}). It is in the composer.`,
+            "danger",
+          );
+          focusAfterContinue.current = "composer";
+          setPopup(null);
+          return;
+        }
         continuationCommand.current = null;
         session.refetch();
       }
+      // A started run keeps the composer disabled, so focus goes to the conversation instead.
+      focusAfterContinue.current = instruction ? "heading" : "composer";
       setPopup(null);
     } finally {
       setBusy(false);
@@ -907,7 +957,7 @@ export function ConversationPage({
       onSubmit={
         resolved.state === "ready" ? (text) => void submit(text) : undefined
       }
-      disabled={busy || running}
+      disabled={busy || running || attachments.sending}
       onFiles={addFiles}
       onLargePaste={external ? undefined : foldPaste}
       attachActions={[
@@ -928,6 +978,7 @@ export function ConversationPage({
             items={attachments.items.map(trayItemOf)}
             onRemove={(key) => attachments.draft.remove(key)}
             onRetry={(key) => attachments.draft.retry(key)}
+            disabled={busy || running || attachments.sending}
           />
         ) : undefined
       }
@@ -999,7 +1050,9 @@ export function ConversationPage({
       <DockLayout width="prose" dock={dock}>
         <div className={styles.conversation}>
           <header className={styles.header}>
-            <h1 tabIndex={-1}>{session.data?.title || "New chat"}</h1>
+            <h1 ref={headingRef} tabIndex={-1}>
+              {session.data?.title || "New chat"}
+            </h1>
             {route.id && (
               <Stack direction="row" gap={1}>
                 {continueAvailable && (
@@ -1228,6 +1281,7 @@ export function ConversationPage({
           models={agentModels}
           modelKeys={[resolved.key]}
           currentModelName={modelName}
+          currentModelState={resolved.state}
           carried={carriedAttachments(
             sessionAttachments.data?.attachments ??
               (session.data?.messages ?? []).flatMap(
