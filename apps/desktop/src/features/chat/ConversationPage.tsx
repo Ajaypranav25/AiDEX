@@ -1,7 +1,24 @@
 import { useEffect, useRef, useState } from "react";
-import { CodeBlock, Composer, Dialog, Notice } from "@aidex/ui/components";
+import {
+  AttachmentTray,
+  CodeBlock,
+  Composer,
+  Dialog,
+  FileDropZone,
+  Notice,
+  TranscriptDivider,
+} from "@aidex/ui/components";
 import { DockLayout } from "@aidex/ui/desktop";
-import { BoxIcon, ChatIcon, FolderIcon, LayersIcon, StopIcon } from "@aidex/ui/icons";
+import {
+  ArrowRightLeftIcon,
+  BotIcon,
+  BoxIcon,
+  ChatIcon,
+  FolderIcon,
+  GitBranchIcon,
+  LayersIcon,
+  StopIcon,
+} from "@aidex/ui/icons";
 import {
   Button,
   Card,
@@ -9,7 +26,6 @@ import {
   Select,
   Stack,
   Text,
-  TextField,
 } from "@aidex/ui/primitives";
 import { call } from "@aidex/client/rpc";
 import { toAidexError } from "@aidex/client/errors";
@@ -35,12 +51,28 @@ import { LocalInferenceNotice } from "../model-manager/LocalInferenceNotice";
 import { HistoryMessages } from "../sessions/HistoryMessages";
 import { ArtifactsDialog } from "./artifacts/ArtifactsDialog";
 import { useArtifactDownload } from "./artifacts/useArtifactDownload";
+import { attachmentSendBlock, reasonOf } from "./attachments/attachmentFiles";
+import { ProjectFileDialog } from "./attachments/ProjectFileDialog";
+import {
+  trayItemOf,
+  useConversationAttachments,
+} from "./attachments/useConversationAttachments";
 import { invokedSkillIds, invokedSkillsProblem } from "./composer/composerText";
+import {
+  agentModelOptions,
+  carriedAttachments,
+  forkTitle,
+  type AgentContinuation,
+} from "./continuation/agentContinuation";
+import { ContinueAsAgentDialog } from "./continuation/ContinueAsAgentDialog";
+import { useShellNeedsFullAccess } from "./continuation/engineCapabilities";
+import { PERMISSION_LABELS, permissionDescription } from "./continuation/permissions";
+import { transcriptDividers } from "./continuation/transcriptDividers";
 import type { SlashCommandId } from "./composer/slashCommands";
 import { useComposerMenu, type SlashCommandState } from "./composer/useComposerMenu";
 import { useWebSearchToggle } from "./composer/useWebSearchToggle";
 import { WebSearchToggle } from "./composer/WebSearchToggle";
-import { Transcript } from "./transcript/Transcript";
+import { Transcript, type TranscriptMarker } from "./transcript/Transcript";
 import {
   TranscriptProvider,
   type ArtifactRef,
@@ -61,17 +93,16 @@ import {
   sessionTargetOf,
 } from "./sessionConfig";
 import styles from "./ConversationPage.module.css";
-const permissionOptions = [
-  { value: "supervised", label: "Supervised" },
-  { value: "auto_accept_edits", label: "Auto-accept edits" },
-  { value: "auto", label: "Auto" },
-  { value: "full_access", label: "Full access" },
-];
+const permissionOptions = (
+  ["supervised", "auto_accept_edits", "auto", "full_access"] as const
+).map((value) => ({ value, label: PERMISSION_LABELS[value] }));
 const modeLabels: Record<ConversationMode, string> = {
   chat: "Chat",
   plan: "Plan",
   agent: "Agent",
 };
+/** Why external runtimes cannot take attachments (the attach button's tooltip and drop overlay). */
+const EXTERNAL_ATTACH_REASON = "Attachments work with AiDEX native models";
 const loadingSession: ResolvedConversationModel = {
   key: null,
   state: "none",
@@ -103,10 +134,9 @@ export function ConversationPage({
   );
   // A new chat's own model choice; existing conversations use their configuration.
   const [draftKey, setDraftKey] = useState<string | null>(null);
-  const [popup, setPopup] = useState<"mode" | "project" | "attach" | null>(
-    null,
-  );
-  const [attachmentPath, setAttachmentPath] = useState("");
+  const [popup, setPopup] = useState<
+    "mode" | "project" | "attach" | "continue" | null
+  >(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
   const createdId = useRef<string | undefined>(undefined);
@@ -114,16 +144,28 @@ export function ConversationPage({
   const createdConfig = useRef<SessionConfig | null>(null);
   const contextTouched = useRef(!!preferences.pendingWorkspaceId);
   const permissionTouched = useRef(false);
-  // A retried send reuses its command id only when content, skills, and web search are unchanged.
+  // A retried send reuses its command id only when content, skills, web search, and attachments are
+  // unchanged.
   const pendingCommand = useRef<{ request: string; id: string } | null>(null);
+  // Continue as Agent: a retried fork or first instruction reuses its command id while unchanged.
+  const continuationCommand = useRef<{ request: string; id: string } | null>(
+    null,
+  );
   const autoSent = useRef(false);
   const endRef = useRef<HTMLDivElement>(null);
   const following = useRef(true);
   const [arrivalPrompt] = useState(() => preferences.pendingPrompt);
+  const [arrivalAttachments] = useState(
+    () => (preferences.pendingAttachments?.length ?? 0) > 0,
+  );
   const shell = useShell();
   const composerRef = useRef<HTMLFormElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const webSearch = useWebSearchToggle(route.id);
+  const attachments = useConversationAttachments(
+    route.id,
+    preferences.pendingAttachments,
+  );
   const [artifactDialog, setArtifactDialog] = useState<{ artifact: ArtifactRef | null } | null>(null);
   const openLink = useOpenLink();
   const downloadArtifact = useArtifactDownload();
@@ -175,11 +217,78 @@ export function ConversationPage({
     ["pending", "running", "waiting_approval"].includes(latestRun.status);
   const lastMessage = session.data?.messages.at(-1);
   const external = target?.kind === "runtime";
+  const attachmentBlock = attachmentSendBlock({
+    items: attachments.items,
+    external,
+    model: resolved.model
+      ? {
+          name: modelName,
+          input: resolved.model.input,
+          vision: resolved.model.capabilities.vision,
+        }
+      : undefined,
+  });
   const extensions = useConversationExtensions({
     sessionId: route.id,
     workspaceId: project?.id,
     messages: session.data?.messages,
   });
+  // "Continue as Agent" (header action, `/agent`, and Agent in the mode dialog) for a Chat or Plan
+  // conversation with history on a native model.
+  const continueAvailable =
+    !!route.id &&
+    !!session.data &&
+    session.data.total_messages > 0 &&
+    session.data.mode !== "agent" &&
+    !external;
+  const continuing = popup === "continue";
+  const shellNeedsFullAccess = useShellNeedsFullAccess(
+    continuing || popup === "mode",
+  );
+  // Sent attachments of the whole conversation (the transcript may show only its tail).
+  const sessionAttachments = useRpc(
+    "attachment.list",
+    { session_id: route.id ?? "", limit: 200 },
+    { enabled: continuing && !!route.id },
+  );
+  const agentModels = continuing
+    ? agentModelOptions({
+        models: catalog.models,
+        findModel: catalog.findModel,
+        providerName: (key) => catalog.providerFor(key)?.name,
+        current: { key: resolved.key, name: modelName, descriptor: resolved.model },
+      })
+    : [];
+  const forkedFrom = session.data?.forked_from;
+  const conversations = useRpc("conversation.list", undefined, {
+    enabled: !!forkedFrom,
+  });
+  const projectName = (id: string) =>
+    workspaces.data?.workspaces.find((w) => w.id === id || w.name === id)?.name;
+  const markers: TranscriptMarker[] = session.data
+    ? transcriptDividers({
+        runs: session.data.runs,
+        session: session.data,
+        projectName,
+        sourceTitle: forkedFrom
+          ? conversations.data?.sessions.find(
+              (item) => item.id === forkedFrom.session_id,
+            )?.title
+          : undefined,
+      }).map((divider) => ({
+        key: divider.key,
+        index: divider.index,
+        node: (
+          <TranscriptDivider
+            label={divider.label}
+            details={divider.details}
+            icon={
+              divider.kind === "fork" ? <GitBranchIcon /> : <ArrowRightLeftIcon />
+            }
+          />
+        ),
+      }))
+    : [];
   useEffect(() => {
     const container = endRef.current?.closest("main");
     if (!container) return;
@@ -199,6 +308,7 @@ export function ConversationPage({
   useEffect(() => {
     preferences.setPendingPrompt(null);
     preferences.setPendingWorkspaceId(null);
+    preferences.setPendingAttachments(null);
   }, []);
   useEffect(() => {
     if (!route.id && preferences.loaded && !permissionTouched.current) {
@@ -287,7 +397,10 @@ export function ConversationPage({
     return buildSessionConfig({
       session: session.data,
       defaults: preferences.settings,
-      title: draft.trim().slice(0, 72),
+      // A message of attachments only is titled by their names.
+      title: (
+        draft.trim() || attachments.items.map((item) => item.name).join(", ")
+      ).slice(0, 72),
       mode: external ? "agent" : (changes.mode ?? mode),
       workspaceId: changes.workspaceId ?? workspaceId,
       isRegisteredWorkspace: (id) =>
@@ -308,15 +421,28 @@ export function ConversationPage({
       setBusy(false);
     }
   };
+  /** Adds picked, pasted, or dropped files; refusals show in the conversation's notice. */
+  const addFiles = (files: File[]) => {
+    void attachments.draft.add(files).then((problems) => {
+      if (problems.length) setError(problems.join(" "));
+    });
+  };
+  /** A paste of 32 KiB or more becomes `pasted-text.txt` (Ctrl/Cmd+Shift+V keeps it inline). */
+  const foldPaste = (text: string) => {
+    const result = attachments.draft.addPaste(text);
+    if ("problem" in result) setError(result.problem);
+    else notify(`Large paste attached as ${result.name}`);
+  };
   /**
-   * Sends `text`. A composer send also carries the attachment and the `$skill` mentions, and clears the
-   * draft; `mode` switches the conversation first (Implement switches a plan to Agent).
+   * Sends `text`. A composer send also carries the attachments and the `$skill` mentions, and clears
+   * the draft; `mode` switches the conversation first (Implement switches a plan to Agent).
    */
   const submit = async (
     text: string,
     { composer = true, mode: nextMode }: { composer?: boolean; mode?: ConversationMode } = {},
   ) => {
-    if (busy || running || !text.trim()) return;
+    const attaching = composer && attachments.items.length > 0;
+    if (busy || running || (!text.trim() && !attaching)) return;
     setBusy(true);
     setError(undefined);
     try {
@@ -328,9 +454,12 @@ export function ConversationPage({
               ? `${modelName} is still loading. Send when it is ready.`
               : `${modelName} is not available right now. Choose another model.`,
         );
+      if (attaching && attachmentBlock) throw new Error(attachmentBlock);
       const config = configuration(nextMode ? { mode: nextMode } : {});
       const native = !isExternalRuntime(config.runtime_id);
-      let content = text.trim();
+      if (attaching && !native)
+        throw new Error(`${EXTERNAL_ATTACH_REASON}. Remove them to send.`);
+      const content = text.trim();
       // External runtimes find their own skills and tools; they get the text unchanged.
       const skills =
         composer && native ? invokedSkillIds(content, extensions.skills, composerMenu.picked) : [];
@@ -338,11 +467,6 @@ export function ConversationPage({
       if (skillsProblem) throw new Error(skillsProblem);
       const searchWeb =
         native && config.mode === "chat" && webSearch.on && extensions.web.available;
-      if (composer && attachmentPath.trim()) {
-        if (!workspaceId)
-          throw new Error("Choose a project before attaching a project file.");
-        content += `\n\nAttached project file ${attachmentPath.trim()}:\n${await readAttachment(workspaceId, attachmentPath.trim())}`;
-      }
       let id = route.id ?? createdId.current;
       if (!id) {
         const created = await call("conversation.create", config);
@@ -350,6 +474,7 @@ export function ConversationPage({
         createdId.current = id;
         createdConfig.current = config;
         webSearch.adopt(id);
+        attachments.adopt(id);
       } else if (!route.id) {
         // Created earlier, but the first send failed: apply any model, mode, or project change since.
         if (
@@ -372,7 +497,16 @@ export function ConversationPage({
           configuration: config,
         });
       }
-      const request = JSON.stringify({ content, skills, searchWeb });
+      // Uploads anything not yet uploaded (a new chat's attachments wait for its conversation).
+      const attachmentIds = attaching
+        ? await attachments.draft.uploadAll(id)
+        : [];
+      const request = JSON.stringify({
+        content,
+        skills,
+        searchWeb,
+        attachments: attachmentIds,
+      });
       const command =
         pendingCommand.current?.request === request
           ? pendingCommand.current
@@ -384,27 +518,39 @@ export function ConversationPage({
         command_id: command.id,
         ...(skills.length ? { skills } : {}),
         ...(searchWeb ? { web_search: true } : {}),
+        ...(attachmentIds.length ? { attachments: attachmentIds } : {}),
       });
       pendingCommand.current = null;
       if (nextMode) setMode(nextMode);
       if (composer) {
         setDraft("");
-        setAttachmentPath("");
+        attachments.draft.markSent(attachmentIds);
         composerMenu.clearPicked();
       }
       replace({ page: config.mode === "agent" ? "agent" : "chat", id });
       session.refetch();
     } catch (caught) {
-      setError(toAidexError(caught).message);
+      const failure = toAidexError(caught);
+      // Staged copies are deleted after a day: upload those again instead of failing for good.
+      if (
+        attaching &&
+        reasonOf(failure.data) === "attachment_unavailable" &&
+        (await attachments.draft.revalidate())
+      )
+        setError(
+          "Some attachments had expired and are uploading again. Send again once they are ready.",
+        );
+      else setError(failure.message);
     } finally {
       setBusy(false);
     }
   };
-  // A prompt handed over from Home sends itself once an explicit or default model is ready; it never
-  // falls through to an arbitrary listed model.
+  // A prompt (and attachments) handed over from Home sends itself once an explicit or default model
+  // is ready; it never falls through to an arbitrary listed model. Attachments the model cannot take
+  // stay in the composer, which says why.
   useEffect(() => {
     if (
-      !arrivalPrompt ||
+      (!arrivalPrompt && !arrivalAttachments) ||
       autoSent.current ||
       route.id ||
       !preferences.loaded ||
@@ -415,9 +561,12 @@ export function ConversationPage({
     )
       return;
     autoSent.current = true;
-    void submit(arrivalPrompt);
+    if (arrivalAttachments && attachmentBlock) return;
+    void submit(arrivalPrompt ?? "");
   }, [
     arrivalPrompt,
+    arrivalAttachments,
+    attachmentBlock,
     route.id,
     preferences.loaded,
     resolved.key,
@@ -498,6 +647,12 @@ export function ConversationPage({
       notify(`Switched to Chat: ${name} cannot use agent tools.`);
   };
   const changeMode = async (value: ConversationMode) => {
+    // A conversation with history continues as an agent through the dialog (project, permission,
+    // tool-capable model).
+    if (value === "agent" && continueAvailable) {
+      setPopup("continue");
+      return;
+    }
     setBusy(true);
     setError(undefined);
     try {
@@ -525,16 +680,118 @@ export function ConversationPage({
           configuration: configuration({ workspaceId: value }),
         });
         setWorkspaceId(value);
-        setAttachmentPath("");
       });
-    else {
-      setWorkspaceId(value);
-      setAttachmentPath("");
+    else setWorkspaceId(value);
+  };
+  /** The command id of a continuation step: reused while the same request is retried. */
+  const continuationCommandId = (request: string) => {
+    const command =
+      continuationCommand.current?.request === request
+        ? continuationCommand.current
+        : { request, id: crypto.randomUUID() };
+    continuationCommand.current = command;
+    return command.id;
+  };
+  /** The full Agent configuration a "Continue as Agent" choice describes. */
+  const agentConfiguration = (choice: AgentContinuation): SessionConfig => {
+    const parsed = parseModelKey(choice.modelKey);
+    if (parsed?.kind !== "native")
+      throw new Error("Choose a model that can use agent tools.");
+    return configuration({
+      mode: "agent",
+      workspaceId: choice.workspaceId,
+      permission: choice.permission,
+      target: modelTargetOf(parsed),
+    });
+  };
+  /**
+   * "Continue here": one `agent.configuration.set` (Agent, project, permission, model), then
+   * `agent.start` with the instruction when there is one. Throws for the dialog to show.
+   */
+  const continueHere = async (choice: AgentContinuation) => {
+    const id = route.id;
+    if (!id) return;
+    setBusy(true);
+    try {
+      await call("agent.configuration.set", {
+        session_id: id,
+        configuration: agentConfiguration(choice),
+      });
+      contextTouched.current = true;
+      permissionTouched.current = true;
+      setMode("agent");
+      setPermission(choice.permission);
+      setWorkspaceId(choice.workspaceId);
+      session.refetch();
+      const instruction = choice.instruction.trim();
+      if (instruction) {
+        await call("agent.start", {
+          session_id: id,
+          content: instruction,
+          command_id: continuationCommandId(
+            JSON.stringify({ start: id, instruction }),
+          ),
+        });
+        continuationCommand.current = null;
+        session.refetch();
+      }
+      setPopup(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+  /**
+   * "Continue in a new Agent chat": `conversation.fork` copies the history and sent attachments into
+   * a new Agent conversation, which opens; the instruction starts there. This conversation stays as
+   * it is. Throws for the dialog to show when the fork fails.
+   */
+  const continueInNewChat = async (choice: AgentContinuation) => {
+    const id = route.id;
+    if (!id || !session.data) return;
+    setBusy(true);
+    try {
+      const config = agentConfiguration(choice);
+      const title = forkTitle(session.data.title);
+      const fork = await call("conversation.fork", {
+        source_id: id,
+        configuration: config,
+        title,
+        command_id: continuationCommandId(
+          JSON.stringify({ fork: id, config, title }),
+        ),
+      });
+      continuationCommand.current = null;
+      const instruction = choice.instruction.trim();
+      if (instruction) {
+        try {
+          await call("agent.start", {
+            session_id: fork.id,
+            content: instruction,
+            command_id: crypto.randomUUID(),
+          });
+        } catch (caught) {
+          // The new chat exists; its composer gets the instruction to send again.
+          preferences.setPendingPrompt(instruction);
+          notify(
+            `The new Agent chat is open, but its first instruction was not sent: ${toAidexError(caught).message}`,
+            "danger",
+          );
+        }
+      }
+      setPopup(null);
+      navigate({ page: "agent", id: fork.id });
+    } finally {
+      setBusy(false);
     }
   };
   const pendingApprovals =
     session.data?.approvals.filter((a) => a.status === "pending") ?? [];
   const runtimeModes = runtimeDriver?.modes ?? ["agent"];
+  // The conversation's own model cannot run as an agent (it has no native tool calling).
+  const agentUnavailable =
+    target?.kind === "runtime"
+      ? !runtimeModes.includes("agent")
+      : resolved.model?.capabilities.tool_calls !== "native";
   const modeOptions = [
     {
       value: "chat",
@@ -549,10 +806,8 @@ export function ConversationPage({
     {
       value: "agent",
       label: "Agent · coding tools",
-      disabled:
-        target?.kind === "runtime"
-          ? !runtimeModes.includes("agent")
-          : resolved.model?.capabilities.tool_calls !== "native",
+      // The Continue as Agent dialog offers a model that can.
+      disabled: agentUnavailable && !continueAvailable,
     },
   ];
   const modeDisabled = (value: ConversationMode) =>
@@ -560,7 +815,13 @@ export function ConversationPage({
   const slashCommandStates: SlashCommandState[] = [
     { id: "chat", disabled: modeDisabled("chat") },
     { id: "plan", disabled: modeDisabled("plan") },
-    { id: "agent", disabled: modeDisabled("agent") },
+    {
+      id: "agent",
+      disabled: modeDisabled("agent"),
+      description: continueAvailable
+        ? "Continue as Agent: choose a project, permissions, and a model"
+        : undefined,
+    },
     {
       id: "web",
       disabled: external || !extensions.web.available || mode !== "chat",
@@ -579,6 +840,7 @@ export function ConversationPage({
   const runSlashCommand = (id: SlashCommandId) => {
     if (id === "new") shell.startNewSession();
     else if (id === "web") webSearch.set(!webSearch.on);
+    else if (id === "agent" && continueAvailable) setPopup("continue");
     else if (id !== mode) void changeMode(id);
   };
   const composerMenu = useComposerMenu({
@@ -604,7 +866,7 @@ export function ConversationPage({
       setError("Choose a project before starting Agent mode.");
       return;
     }
-    if (modeDisabled("agent")) {
+    if (agentUnavailable) {
       setError(`${modelName} cannot use agent tools. Choose a model with tool calling to implement the plan.`);
       return;
     }
@@ -646,19 +908,27 @@ export function ConversationPage({
         resolved.state === "ready" ? (text) => void submit(text) : undefined
       }
       disabled={busy || running}
-      onAttach={() => setPopup("attach")}
+      onFiles={addFiles}
+      onLargePaste={external ? undefined : foldPaste}
+      attachActions={[
+        {
+          id: "project",
+          label: "From project…",
+          icon: <FolderIcon />,
+          onSelect: () => setPopup("attach"),
+        },
+      ]}
+      attachDisabledReason={external ? EXTERNAL_ATTACH_REASON : undefined}
+      canSubmitEmpty={attachments.items.length > 0}
+      submitBlockedReason={attachmentBlock}
       placeholder={mode === "chat" ? "Message AiDEX…" : "Describe the task…"}
       attachments={
-        attachmentPath ? (
-          <span className={styles.attachment}>
-            {attachmentPath}
-            <IconButton
-              size="sm"
-              label="Remove attachment"
-              icon={<StopIcon />}
-              onClick={() => setAttachmentPath("")}
-            />
-          </span>
+        attachments.items.length > 0 ? (
+          <AttachmentTray
+            items={attachments.items.map(trayItemOf)}
+            onRemove={(key) => attachments.draft.remove(key)}
+            onRetry={(key) => attachments.draft.retry(key)}
+          />
         ) : undefined
       }
       toolbarStart={
@@ -721,267 +991,277 @@ export function ConversationPage({
       !inference.model_id ||
       inference.model_id === ownLocalModelId);
   return (
-    <DockLayout width="prose" dock={dock}>
-      <div className={styles.conversation}>
-        <header className={styles.header}>
-          <h1 tabIndex={-1}>{session.data?.title || "New chat"}</h1>
-          {route.id && (
-            <Stack direction="row" gap={1}>
-              <IconButton
-                size="sm"
-                label="Artifacts"
-                icon={<LayersIcon />}
-                aria-haspopup="dialog"
-                onClick={() => setArtifactDialog({ artifact: null })}
-              />
-              <IconButton
-                size="sm"
-                label="Execution details"
-                icon={<BoxIcon />}
-                onClick={() => navigate({ page: "execution", id: route.id })}
-              />
-            </Stack>
-          )}
-        </header>
-        {(error || session.error || catalog.error || localCatalog.error) && (
-          <Notice tone="danger" role="alert">
-            {error ??
-              session.error?.message ??
-              catalog.error ??
-              localCatalog.error?.message}
-          </Notice>
-        )}
-        <LocalInferenceNotice
-          status={inference}
-          onRefresh={catalog.refreshInference}
-        />
-        {(!route.id || session.data) && (
-          <ModelStateNotice
-            state={resolved.state}
-            name={modelName}
-            installedLocalName={installedModel?.name}
-            localName={ownLocalName}
-            hasModels={catalog.models.length > 0}
-            loading={
-              catalog.loading ||
-              (target?.kind === "runtime" && catalog.runtimesLoading)
-            }
-            localNoticeShown={localNoticeShown}
-          />
-        )}
-        {!session.data?.messages.length && !route.id && (
-          <div className={styles.empty}>
-            <ChatIcon size={28} />
-            <h2>What would you like to talk about?</h2>
-            <Text tone="muted">
-              Chat about anything. Add a project only when you need its context.
-            </Text>
-          </div>
-        )}
-        <TranscriptProvider value={transcript}>
-          <Stack gap={5} role="log" aria-label="Conversation">
-            <Transcript
-              messages={session.data?.messages ?? []}
-              options={{ running, complete: true }}
-            />
-          </Stack>
-        </TranscriptProvider>
-        {session.data?.messages_truncated && (
-          <details>
-            <summary>Earlier messages</summary>
-            <HistoryMessages scope={{ session_id: session.data.id }} />
-          </details>
-        )}
-        {latestRun?.error && (!session.data?.workspace_id || project) && (
-          <Notice tone="danger">{latestRun.error}</Notice>
-        )}
-        {latestRun &&
-          ["interrupted", "cancelled"].includes(latestRun.status) && (
-            <Button
-              variant="ghost"
-              disabled={busy}
-              onClick={() =>
-                void act(() => call("run.resume", { id: latestRun.id }))
-              }
-            >
-              Resume task
-            </Button>
-          )}
-        {pendingApprovals.map((approval) => (
-          <Card key={approval.id} padding="md">
-            <Stack gap={3}>
-              <Text>Approval: {approval.tool_name}</Text>
-              <CodeBlock
-                language="json"
-                code={JSON.stringify(approval.arguments, null, 2)}
-              />
-              {approval.preview != null && (
-                <CodeBlock
-                  title="Change preview"
-                  language="json"
-                  code={JSON.stringify(approval.preview, null, 2)}
+    <FileDropZone
+      onFiles={addFiles}
+      disabled={busy || running}
+      disabledReason={external ? EXTERNAL_ATTACH_REASON : undefined}
+    >
+      <DockLayout width="prose" dock={dock}>
+        <div className={styles.conversation}>
+          <header className={styles.header}>
+            <h1 tabIndex={-1}>{session.data?.title || "New chat"}</h1>
+            {route.id && (
+              <Stack direction="row" gap={1}>
+                {continueAvailable && (
+                  <IconButton
+                    size="sm"
+                    label="Continue as Agent"
+                    icon={<BotIcon />}
+                    aria-haspopup="dialog"
+                    disabled={busy || running}
+                    onClick={() => setPopup("continue")}
+                  />
+                )}
+                <IconButton
+                  size="sm"
+                  label="Artifacts"
+                  icon={<LayersIcon />}
+                  aria-haspopup="dialog"
+                  onClick={() => setArtifactDialog({ artifact: null })}
                 />
-              )}
-              {(approval.arguments_truncated || approval.preview_truncated) && (
-                <Notice tone="warning">
-                  Request a smaller action to review it completely.
-                </Notice>
-              )}
-              <Stack direction="row" gap={2}>
-                {[true, false].map((approved) => (
-                  <Button
-                    key={String(approved)}
-                    variant={approved ? "primary" : "outline"}
-                    disabled={
-                      busy ||
-                      (approved &&
-                        (approval.arguments_truncated ||
-                          approval.preview_truncated))
-                    }
-                    onClick={() =>
-                      void act(() =>
-                        call("approval.respond", {
-                          id: approval.id,
-                          fingerprint: approval.fingerprint,
-                          approved,
-                          command_id: crypto.randomUUID(),
-                        }),
-                      )
-                    }
-                  >
-                    {approved ? "Approve once" : "Deny"}
-                  </Button>
-                ))}
+                <IconButton
+                  size="sm"
+                  label="Execution details"
+                  icon={<BoxIcon />}
+                  onClick={() => navigate({ page: "execution", id: route.id })}
+                />
               </Stack>
-            </Stack>
-          </Card>
-        ))}
-        <div ref={endRef} />
-      </div>
-      <Dialog
-        open={popup === "mode"}
-        title="Conversation mode"
-        onClose={() => setPopup(null)}
-      >
-        {error && <Notice tone="danger">{error}</Notice>}
-        <Select
-          label="Mode"
-          disabled={busy || running}
-          value={mode}
-          options={modeOptions}
-          onChange={(event) =>
-            void changeMode(event.target.value as ConversationMode)
-          }
-        />
-        {mode !== "chat" && (
-          <Select
-            label="Permissions"
-            disabled={busy || running || target?.kind === "runtime"}
-            hint={
-              target?.kind === "runtime"
-                ? "External runtimes run with full access."
-                : undefined
-            }
-            value={permission}
-            options={permissionOptions}
-            onChange={(event) => {
-              const value = event.target.value as PermissionMode;
-              permissionTouched.current = true;
-              if (route.id)
-                void act(async () => {
-                  await call("agent.configuration.set", {
-                    session_id: route.id!,
-                    configuration: configuration({ permission: value }),
-                  });
-                  setPermission(value);
-                });
-              else setPermission(value);
-            }}
+            )}
+          </header>
+          {(error || session.error || catalog.error || localCatalog.error) && (
+            <Notice tone="danger" role="alert">
+              {error ??
+                session.error?.message ??
+                catalog.error ??
+                localCatalog.error?.message}
+            </Notice>
+          )}
+          <LocalInferenceNotice
+            status={inference}
+            onRefresh={catalog.refreshInference}
           />
-        )}
-        <Text tone="muted">
-          Plan and Agent require a project. Chat works independently.
-        </Text>
-      </Dialog>
-      <Dialog
-        open={popup === "project" || popup === "attach"}
-        title={popup === "attach" ? "Attach project file" : "Project context"}
-        onClose={() => setPopup(null)}
-      >
-        {error && <Notice tone="danger">{error}</Notice>}
-        <Select
-          label="Project"
-          disabled={busy || running}
-          value={workspaceId}
-          options={[
-            { value: "", label: "No project context" },
-            ...(workspaces.data?.workspaces ?? []).map((w) => ({
-              value: w.id,
-              label: w.name,
-              disabled: w.availability.state !== "available",
-            })),
-          ]}
-          onChange={(event) => chooseProject(event.target.value)}
-        />
-        {popup === "attach" ? (
-          <>
-            <TextField
-              label="Relative file path"
-              value={attachmentPath}
-              onChange={(event) => setAttachmentPath(event.target.value)}
-              disabled={!workspaceId}
+          {(!route.id || session.data) && (
+            <ModelStateNotice
+              state={resolved.state}
+              name={modelName}
+              installedLocalName={installedModel?.name}
+              localName={ownLocalName}
+              hasModels={catalog.models.length > 0}
+              loading={
+                catalog.loading ||
+                (target?.kind === "runtime" && catalog.runtimesLoading)
+              }
+              localNoticeShown={localNoticeShown}
             />
-            <Button
-              disabled={!workspaceId || !attachmentPath.trim()}
-              onClick={() => setPopup(null)}
-            >
-              Attach file
-            </Button>
-          </>
-        ) : (
+          )}
+          {!session.data?.messages.length && !route.id && (
+            <div className={styles.empty}>
+              <ChatIcon size={28} />
+              <h2>What would you like to talk about?</h2>
+              <Text tone="muted">
+                Chat about anything. Add a project only when you need its context.
+              </Text>
+            </div>
+          )}
+          <TranscriptProvider value={transcript}>
+            <Stack gap={5} role="log" aria-label="Conversation">
+              <Transcript
+                messages={session.data?.messages ?? []}
+                options={{ running, complete: true }}
+                markers={markers}
+              />
+            </Stack>
+          </TranscriptProvider>
+          {session.data?.messages_truncated && (
+            <details>
+              <summary>Earlier messages</summary>
+              <HistoryMessages scope={{ session_id: session.data.id }} />
+            </details>
+          )}
+          {latestRun?.error && (!session.data?.workspace_id || project) && (
+            <Notice tone="danger">{latestRun.error}</Notice>
+          )}
+          {latestRun &&
+            ["interrupted", "cancelled"].includes(latestRun.status) && (
+              <Button
+                variant="ghost"
+                disabled={busy}
+                onClick={() =>
+                  void act(() => call("run.resume", { id: latestRun.id }))
+                }
+              >
+                Resume task
+              </Button>
+            )}
+          {pendingApprovals.map((approval) => (
+            <Card key={approval.id} padding="md">
+              <Stack gap={3}>
+                <Text>Approval: {approval.tool_name}</Text>
+                <CodeBlock
+                  language="json"
+                  code={JSON.stringify(approval.arguments, null, 2)}
+                />
+                {approval.preview != null && (
+                  <CodeBlock
+                    title="Change preview"
+                    language="json"
+                    code={JSON.stringify(approval.preview, null, 2)}
+                  />
+                )}
+                {(approval.arguments_truncated || approval.preview_truncated) && (
+                  <Notice tone="warning">
+                    Request a smaller action to review it completely.
+                  </Notice>
+                )}
+                <Stack direction="row" gap={2}>
+                  {[true, false].map((approved) => (
+                    <Button
+                      key={String(approved)}
+                      variant={approved ? "primary" : "outline"}
+                      disabled={
+                        busy ||
+                        (approved &&
+                          (approval.arguments_truncated ||
+                            approval.preview_truncated))
+                      }
+                      onClick={() =>
+                        void act(() =>
+                          call("approval.respond", {
+                            id: approval.id,
+                            fingerprint: approval.fingerprint,
+                            approved,
+                            command_id: crypto.randomUUID(),
+                          }),
+                        )
+                      }
+                    >
+                      {approved ? "Approve once" : "Deny"}
+                    </Button>
+                  ))}
+                </Stack>
+              </Stack>
+            </Card>
+          ))}
+          <div ref={endRef} />
+        </div>
+        <Dialog
+          open={popup === "mode"}
+          title="Conversation mode"
+          onClose={() => setPopup(null)}
+        >
+          {error && <Notice tone="danger">{error}</Notice>}
+          <Select
+            label="Mode"
+            disabled={busy || running}
+            value={mode}
+            options={modeOptions}
+            onChange={(event) =>
+              void changeMode(event.target.value as ConversationMode)
+            }
+          />
+          {mode !== "chat" && (
+            <Select
+              label="Permissions"
+              disabled={busy || running || target?.kind === "runtime"}
+              hint={
+                target?.kind === "runtime"
+                  ? "External runtimes run with full access."
+                  : permissionDescription(permission, { shellNeedsFullAccess })
+              }
+              value={permission}
+              options={permissionOptions}
+              onChange={(event) => {
+                const value = event.target.value as PermissionMode;
+                permissionTouched.current = true;
+                if (route.id)
+                  void act(async () => {
+                    await call("agent.configuration.set", {
+                      session_id: route.id!,
+                      configuration: configuration({ permission: value }),
+                    });
+                    setPermission(value);
+                  });
+                else setPermission(value);
+              }}
+            />
+          )}
+          <Text tone="muted">
+            Plan and Agent require a project. Chat works independently.
+          </Text>
+        </Dialog>
+        <Dialog
+          open={popup === "project"}
+          title="Project context"
+          onClose={() => setPopup(null)}
+        >
+          {error && <Notice tone="danger">{error}</Notice>}
+          <Select
+            label="Project"
+            disabled={busy || running}
+            value={workspaceId}
+            options={[
+              { value: "", label: "No project context" },
+              ...(workspaces.data?.workspaces ?? []).map((w) => ({
+                value: w.id,
+                label: w.name,
+                disabled: w.availability.state !== "available",
+              })),
+            ]}
+            onChange={(event) => chooseProject(event.target.value)}
+          />
           <Text tone="muted">
             Ordinary chats don't need a project. Choose one to include project
             context.
           </Text>
-        )}
-        <Button
-          variant="ghost"
-          onClick={() => navigate({ page: "workspace-create" })}
-        >
-          Add a workspace
-        </Button>
-      </Dialog>
-      {route.id && (
-        <ArtifactsDialog
-          open={artifactDialog !== null}
-          sessionId={route.id}
-          artifact={artifactDialog?.artifact ?? null}
-          onClose={() => setArtifactDialog(null)}
-          onOpenLink={openLink}
-          onDownload={downloadArtifact}
+          <Button
+            variant="ghost"
+            onClick={() => navigate({ page: "workspace-create" })}
+          >
+            Add a workspace
+          </Button>
+        </Dialog>
+        <ContinueAsAgentDialog
+          open={continuing}
+          onClose={() => setPopup(null)}
+          workspaces={workspaces.data?.workspaces ?? []}
+          workspaceIds={[session.data?.workspace_id, preferences.workspaceId]}
+          models={agentModels}
+          modelKeys={[resolved.key]}
+          currentModelName={modelName}
+          carried={carriedAttachments(
+            sessionAttachments.data?.attachments ??
+              (session.data?.messages ?? []).flatMap(
+                (message) => message.attachments ?? [],
+              ),
+          )}
+          composerAttachments={attachments.items.length}
+          shellNeedsFullAccess={shellNeedsFullAccess}
+          onAddWorkspace={() => navigate({ page: "workspace-create" })}
+          onContinueHere={continueHere}
+          onContinueInNewChat={continueInNewChat}
         />
-      )}
-    </DockLayout>
+        <ProjectFileDialog
+          open={popup === "attach"}
+          onClose={() => setPopup(null)}
+          workspaces={workspaces.data?.workspaces ?? []}
+          defaultWorkspaceId={workspaceId}
+          onAttach={(id, path, name) => {
+            const problem = attachments.draft.addProjectFile(id, path, name);
+            if (problem) setError(problem);
+          }}
+          onAddWorkspace={() => navigate({ page: "workspace-create" })}
+        />
+        {route.id && (
+          <ArtifactsDialog
+            open={artifactDialog !== null}
+            sessionId={route.id}
+            artifact={artifactDialog?.artifact ?? null}
+            onClose={() => setArtifactDialog(null)}
+            onOpenLink={openLink}
+            onDownload={downloadArtifact}
+          />
+        )}
+      </DockLayout>
+    </FileDropZone>
   );
-}
-async function readAttachment(
-  workspace_id: string,
-  path: string,
-): Promise<string> {
-  const { callUntyped } = await import("@aidex/client/rpc");
-  const file = (await callUntyped("workspace.files.read", {
-    workspace_id,
-    path,
-  })) as {
-    content: string | null;
-    binary: boolean;
-    truncated: boolean;
-    lossy_utf8: boolean;
-  };
-  if (file.binary || file.content === null)
-    throw new Error("Choose a text file.");
-  if (file.truncated) throw new Error("Choose a smaller file or excerpt.");
-  if (file.lossy_utf8)
-    throw new Error("Convert the file to UTF-8 before attaching.");
-  return file.content;
 }
