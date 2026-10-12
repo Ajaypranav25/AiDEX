@@ -31,6 +31,63 @@ export function highlightMatch(text: string, query: string): [string, string, st
   return [text.slice(0, index), text.slice(index, index + needle.length), text.slice(index + needle.length)];
 }
 
+/**
+ * The row to highlight: the first row when `restart` is set (the menu just opened or its query
+ * changed), otherwise the current row while it is still listed, else the first row. Disabled rows
+ * count like any other, so a best match that can't run is still the highlighted one and Enter cannot
+ * fall through to a lower row. Null when there are no rows.
+ */
+export function resolveCommandMenuActive(
+  items: readonly CommandMenuItem[],
+  activeId: string | null,
+  restart: boolean,
+): string | null {
+  if (!restart && activeId !== null && items.some((item) => item.id === activeId)) return activeId;
+  return items[0]?.id ?? null;
+}
+
+export type CommandMenuKeyAction =
+  /** Not a menu key here: the field handles it as usual. */
+  | { type: "pass" }
+  /** Highlight the row with this id. */
+  | { type: "move"; id: string }
+  /** Run the highlighted row. */
+  | { type: "select"; item: CommandMenuItem }
+  /** The highlighted row can't run: swallow the key and keep the menu open. */
+  | { type: "block" };
+
+/**
+ * What a key pressed in the field does to an open menu (the caller skips Alt, Ctrl, Meta, and IME
+ * presses). ArrowUp/ArrowDown move through every row, disabled ones included, wrapping at the ends.
+ * Enter or Tab runs the highlighted row, or does nothing when that row is disabled; with no highlighted
+ * row, and with Shift held, they reach the field.
+ */
+export function commandMenuKeyAction(
+  items: readonly CommandMenuItem[],
+  activeId: string | null,
+  key: string,
+  shiftKey = false,
+): CommandMenuKeyAction {
+  const index = activeId === null ? -1 : items.findIndex((item) => item.id === activeId);
+  switch (key) {
+    case "ArrowDown":
+    case "ArrowUp": {
+      if (items.length === 0) return { type: "pass" };
+      const down = key === "ArrowDown";
+      const next = index === -1 ? (down ? 0 : items.length - 1) : (index + (down ? 1 : -1) + items.length) % items.length;
+      return { type: "move", id: items[next].id };
+    }
+    case "Enter":
+    case "Tab": {
+      if (shiftKey || index === -1) return { type: "pass" };
+      const item = items[index];
+      return item.disabled ? { type: "block" } : { type: "select", item };
+    }
+    default:
+      return { type: "pass" };
+  }
+}
+
 export type CommandMenuFieldState = {
   /** The menu's `id`. */
   listId: string;

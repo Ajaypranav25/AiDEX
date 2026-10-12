@@ -5,7 +5,13 @@ import { LoaderIcon } from "../../icons/interface";
 import { Badge, type BadgeTone } from "../../primitives/Badge";
 import { Popover, type PopoverPlacement } from "../../primitives/Popover";
 import { cx } from "../../utils/cx";
-import { commandMenuOptionId, flattenCommandMenu, highlightMatch } from "./model";
+import {
+  commandMenuKeyAction,
+  commandMenuOptionId,
+  flattenCommandMenu,
+  highlightMatch,
+  resolveCommandMenuActive,
+} from "./model";
 import a11y from "../content/a11y.module.css";
 import styles from "./CommandMenu.module.css";
 
@@ -23,7 +29,10 @@ export type CommandMenuItem = {
   icon?: ReactNode;
   /** Source or category pill, e.g. "Drive skill". */
   badge?: string | CommandMenuBadge;
-  /** Skipped by the keyboard and not selectable. */
+  /**
+   * Can't run here: dimmed and announced as disabled (`aria-disabled`). It can still be highlighted,
+   * but Enter, Tab, and clicks do nothing on it.
+   */
   disabled?: boolean;
   /** Native tooltip; defaults to the title and description. */
   tooltip?: string;
@@ -78,8 +87,9 @@ const keepFocus = (event: MouseEvent) => event.preventDefault();
 
 /**
  * Anchored suggestion list for a text field, such as the composer's `$` skills menu and `/` command
- * menu. Focus stays in the field: ArrowUp/ArrowDown move the active row, Enter or Tab selects it,
- * and Escape closes. Fully controlled; the app filters and ranks `sections` from `query`.
+ * menu. Focus stays in the field: ArrowUp/ArrowDown move the active row, Enter or Tab selects it (or
+ * does nothing on a disabled row), and Escape closes. Fully controlled; the app filters and ranks
+ * `sections` from `query`, best match first.
  */
 export function CommandMenu({
   open,
@@ -103,25 +113,25 @@ export function CommandMenu({
   className,
 }: CommandMenuProps) {
   const items = useMemo(() => flattenCommandMenu(sections), [sections]);
-  const enabled = useMemo(() => items.filter((item) => !item.disabled), [items]);
-  const activeEnabled = activeId !== null && enabled.some((item) => item.id === activeId);
 
   // Latest values for the document listeners, which stay bound for the whole time the menu is open.
-  const latest = useRef({ enabled, activeId, onActiveChange, onSelect, onClose });
+  const latest = useRef({ items, activeId, onActiveChange, onSelect, onClose });
   useLayoutEffect(() => {
-    latest.current = { enabled, activeId, onActiveChange, onSelect, onClose };
+    latest.current = { items, activeId, onActiveChange, onSelect, onClose };
   });
 
-  // Opening highlights the first enabled row; afterwards the highlight stays put while its row is
-  // still listed and enabled, and moves to the first enabled row otherwise.
-  const wasOpenRef = useRef(false);
-  useEffect(() => {
-    const justOpened = open && !wasOpenRef.current;
-    wasOpenRef.current = open;
-    if (!open || (activeEnabled && !justOpened)) return;
-    const next = enabled[0]?.id ?? null;
+  // Opening, or a new query, highlights the first row even when it is disabled, so Enter never runs a
+  // lower match in place of the best one. Afterwards the highlight stays on its row while the row is
+  // listed and moves to the first row otherwise. A layout effect, so the correction lands before the
+  // next key press can act on a stale row.
+  const previousRef = useRef({ open: false, query });
+  useLayoutEffect(() => {
+    const previous = previousRef.current;
+    previousRef.current = { open, query };
+    if (!open) return;
+    const next = resolveCommandMenuActive(items, activeId, !previous.open || previous.query !== query);
     if (next !== activeId) onActiveChange(next);
-  }, [open, activeEnabled, enabled, activeId, onActiveChange]);
+  }, [open, query, items, activeId, onActiveChange]);
 
   useEffect(() => {
     if (!open) return;
@@ -131,29 +141,15 @@ export function CommandMenu({
       const target = event.target;
       const input = field();
       if (!input || !(target instanceof Node) || !input.contains(target)) return;
-      const { enabled: rows, activeId: current } = latest.current;
-      const index = rows.findIndex((item) => item.id === current);
-      switch (event.key) {
-        case "ArrowDown":
-        case "ArrowUp": {
-          if (rows.length === 0) return;
-          const down = event.key === "ArrowDown";
-          const next = index === -1 ? (down ? 0 : rows.length - 1) : (index + (down ? 1 : -1) + rows.length) % rows.length;
-          // Capture phase: the field's own handlers (caret moves, send on Enter) never see these keys.
-          event.preventDefault();
-          event.stopPropagation();
-          latest.current.onActiveChange(rows[next].id);
-          return;
-        }
-        case "Enter":
-        case "Tab": {
-          if (event.shiftKey || index === -1) return;
-          event.preventDefault();
-          event.stopPropagation();
-          latest.current.onSelect(rows[index]);
-          return;
-        }
-      }
+      const { items: rows, activeId: current } = latest.current;
+      const action = commandMenuKeyAction(rows, current, event.key, event.shiftKey);
+      if (action.type === "pass") return;
+      // Capture phase: the field's own handlers (caret moves, send on Enter, focus moves on Tab) never
+      // see these keys, so Enter or Tab on a disabled row does nothing and the menu stays open.
+      event.preventDefault();
+      event.stopPropagation();
+      if (action.type === "move") latest.current.onActiveChange(action.id);
+      else if (action.type === "select") latest.current.onSelect(action.item);
     };
     // Close when focus leaves the field for somewhere else in the page (switching windows keeps it).
     let frame = 0;
@@ -200,15 +196,17 @@ export function CommandMenu({
     const last = pointerRef.current;
     if (last && last.x === event.clientX && last.y === event.clientY) return;
     pointerRef.current = { x: event.clientX, y: event.clientY };
-    if (!item.disabled && item.id !== activeId) onActiveChange(item.id);
+    // Disabled rows highlight too, as with the arrow keys; clicking one still does nothing.
+    if (item.id !== activeId) onActiveChange(item.id);
   };
 
   const empty = items.length === 0;
+  const unavailable = items.filter((item) => item.disabled).length;
   const status = empty
     ? loading
       ? loadingText
       : emptyText
-    : `${enabled.length} ${enabled.length === 1 ? "result" : "results"}`;
+    : `${items.length} ${items.length === 1 ? "result" : "results"}${unavailable > 0 ? `, ${unavailable} unavailable` : ""}`;
   const highlight = query.replace(/^[$/]+/, "").trim();
 
   return (

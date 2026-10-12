@@ -26,16 +26,8 @@ import {
 } from "@aidex/ui/icons";
 import type { SkillId, SkillSummary } from "@aidex/client/dto/skills";
 import { detectComposerTrigger, replaceRange, type ComposerTrigger } from "./composerText";
-import { normalizeQuery } from "./searchRanking";
 import { searchSkills, skillScopeLabels } from "./skillSearch";
-import {
-  exactSlashCommand,
-  searchSlashMatches,
-  slashCommands,
-  type SlashCommand,
-  type SlashCommandId,
-  type SlashMatch,
-} from "./slashCommands";
+import { searchSlashMatches, slashCommands, type SlashCommand, type SlashCommandId } from "./slashCommands";
 
 /** A built-in `/` command as the conversation can run it right now. */
 export type SlashCommandState = {
@@ -71,13 +63,15 @@ export type ComposerMenu = {
   suggestions: CommandMenuFieldState;
   /** For the composer's `onSelectionChange` prop. */
   onSelectionChange: (caret: number) => void;
-  /** For the composer's `onKeyDown` prop: Enter does not send while the menu lists only rows that can't run. */
+  /** For the composer's `onKeyDown` prop: Enter never sends while the menu's highlighted row can't run. */
   onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   /** Skills picked from a menu, by name, so a send keeps the exact skill that was picked. */
   picked: ReadonlyMap<string, SkillId>;
   /** Forgets picked skills after a send. */
   clearPicked: () => void;
 };
+
+type MenuView = { sections: CommandMenuSection[]; emptyText: string; open: boolean };
 
 const MANAGE_SKILLS_ID = "manage-skills";
 
@@ -140,13 +134,15 @@ export function useComposerMenu({
     () =>
       slashCommands.flatMap((command) => {
         const state = commands.find((candidate) => candidate.id === command.id);
-        return state ? [{ ...command, description: state.description ?? command.description }] : [];
+        return state
+          ? [{ ...command, description: state.description ?? command.description, disabled: !!state.disabled }]
+          : [];
       }),
     [commands],
   );
 
-  const { sections, emptyText, open } = useMemo(() => {
-    const closed = { sections: [] as CommandMenuSection[], emptyText: "", open: false };
+  const { sections, emptyText, open } = useMemo<MenuView>(() => {
+    const closed: MenuView = { sections: [], emptyText: "", open: false };
     if (!trigger || disabled || isDismissed) return closed;
     if (trigger.kind === "skill") {
       if (!skillsEnabled) return closed;
@@ -190,26 +186,21 @@ export function useComposerMenu({
         sections: [],
       };
     }
-    // A typed command that can't run here stays the only row, so Enter never picks another one.
-    const exact = exactSlashCommand(commandList, trigger.query);
-    const matches: SlashMatch[] =
-      exact && commands.find((candidate) => candidate.id === exact.id)?.disabled
-        ? [{ type: "command", command: exact }]
-        : searchSlashMatches(commandList, skillsEnabled ? skills : [], trigger.query);
+    // A typed command that can't run here (e.g. `/w` for a disabled `/web`) ranks first and the menu
+    // highlights it even though it is disabled, so Enter neither runs a lower row nor sends the text.
     const commandItems: CommandMenuItem[] = [];
     const skillItems: CommandMenuItem[] = [];
-    for (const match of matches) {
-      if (match.type === "command") {
-        const state = commands.find((candidate) => candidate.id === match.command.id);
+    for (const match of searchSlashMatches(commandList, skillsEnabled ? skills : [], trigger.query)) {
+      if (match.type === "command")
         commandItems.push({
           id: `command:${match.command.id}`,
           title: match.command.command,
           prefix: "/",
           description: match.command.description,
           icon: commandIcons[match.command.id],
-          disabled: state?.disabled,
+          disabled: match.command.disabled,
         });
-      } else skillItems.push(skillItem(match.skill, `slash-skill:${match.skill.id}`, true));
+      else skillItems.push(skillItem(match.skill, `slash-skill:${match.skill.id}`, true));
     }
     return {
       open: true,
@@ -219,7 +210,7 @@ export function useComposerMenu({
         { id: "skills", label: "Skills", items: skillItems },
       ],
     };
-  }, [trigger?.kind, trigger?.query, disabled, isDismissed, skillsEnabled, skills, skillsLoading, commandList, commands]);
+  }, [trigger?.kind, trigger?.query, disabled, isDismissed, skillsEnabled, skills, skillsLoading, commandList]);
 
   // Tell the page a menu opened (once per opening), e.g. to refresh skills.
   const openKind = open ? (trigger?.kind ?? null) : null;
@@ -277,24 +268,20 @@ export function useComposerMenu({
 
   const clearPicked = useCallback(() => setPicked(new Map()), []);
 
-  // The menu takes Enter only for an enabled row. When the typed text starts the name of a command that
-  // can't run here and no listed row can, Enter would fall through to the composer and send the
-  // command text as a message, so it does nothing instead. Text that only matches a disabled command's
-  // description (e.g. `/context`) still sends as before.
-  const listed = sections.flatMap((section) => section.items);
-  const typed = trigger?.kind === "command" ? normalizeQuery(trigger.query, /^\/+/) : "";
-  const onlyDisabled =
+  // The menu swallows a plain Enter on a highlighted row that can't run, but lets Ctrl, Alt, and Meta +
+  // Enter through to the composer, which would send the command text as a message; those do nothing
+  // too. With an enabled row highlighted, or no rows listed (e.g. `/context` while Plan can't run),
+  // Enter works as before.
+  const activeDisabled =
     open &&
-    !!typed &&
-    listed.length > 0 &&
-    listed.every((item) => item.disabled) &&
-    listed.some((item) => item.title.startsWith(typed));
+    activeId !== null &&
+    sections.some((section) => section.items.some((item) => item.id === activeId && item.disabled));
   const onKeyDown = useCallback(
     (event: KeyboardEvent<HTMLTextAreaElement>) => {
       if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
-      if (onlyDisabled) event.preventDefault();
+      if (activeDisabled) event.preventDefault();
     },
-    [onlyDisabled],
+    [activeDisabled],
   );
 
   const menu = (

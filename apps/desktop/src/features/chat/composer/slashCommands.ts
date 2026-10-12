@@ -6,7 +6,13 @@ import { scoreSkill } from "./skillSearch";
 
 export type SlashCommandId = "chat" | "plan" | "agent" | "web" | "new";
 
-export type SlashCommand = { id: SlashCommandId; command: string; description: string };
+export type SlashCommand = {
+  id: SlashCommandId;
+  command: string;
+  description: string;
+  /** Can't run in this conversation; listed only while the query is empty or starts its name. */
+  disabled?: boolean;
+};
 
 export const slashCommands: readonly SlashCommand[] = [
   { id: "chat", command: "chat", description: "Switch to Chat: answers without agent tools" },
@@ -27,6 +33,11 @@ function scoreSlashMatch(match: SlashMatch, query: string, namesOnly: boolean): 
     // A partly typed "/ski" still lists every skill, after real matches.
     return "skill".startsWith(query) ? Number.MAX_SAFE_INTEGER : null;
   }
+  // The menu highlights its first row even when that row can't run, and Enter then does nothing. A
+  // command that can't run is therefore listed only while the query starts its name (where it ranks
+  // first, as the command being typed): text that merely contains it or mentions it in a description,
+  // such as `/context` for Plan, never lists a row that would hold Enter back from sending.
+  if (match.command.disabled && !match.command.command.startsWith(query)) return null;
   const byName = scoreMatch(match.command.command, query, {
     exact: 0,
     prefix: 2,
@@ -47,16 +58,11 @@ function scoreSlashMatch(match: SlashMatch, query: string, namesOnly: boolean): 
   ]);
 }
 
-/** The command `query` (as typed after `/`) names exactly, if any. */
-export function exactSlashCommand(commands: readonly SlashCommand[], rawQuery: string): SlashCommand | undefined {
-  const query = normalizeQuery(rawQuery, /^\/+/);
-  return query ? commands.find((command) => command.command === query) : undefined;
-}
-
 /**
  * Commands and skills matching the text typed after `/`; an empty query lists everything in order.
  * Once the query starts a command's name, other commands no longer match through their descriptions,
- * so `/chat` never puts `/new` ("Start a new chat") ahead of a `/chat` that cannot run.
+ * so `/chat` never puts `/new` ("Start a new chat") ahead of a `/chat` that cannot run. The menu shows
+ * commands above skills, so a typed command that can't run is its first row (see `scoreSlashMatch`).
  */
 export function searchSlashMatches(
   commands: readonly SlashCommand[],
