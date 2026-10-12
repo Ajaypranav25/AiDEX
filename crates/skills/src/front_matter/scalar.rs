@@ -86,66 +86,108 @@ pub(super) fn plain_scalar(lines: &[Line<'_>], start: usize, rest: &str) -> (Sca
 /// Scan a quoted scalar at the start of `text`: the unescaped value and the byte
 /// length consumed, or `None` when the closing quote is missing.
 fn scan_quoted(text: &str) -> Result<Option<(String, usize)>, &'static str> {
-    let mut chars = text.char_indices();
-    let Some((_, quote)) = chars.next() else {
+    let Some(mut scan) = QuotedScan::new(text) else {
         return Ok(None);
     };
-    let mut out = String::new();
-    while let Some((at, ch)) = chars.next() {
-        if quote == '\'' {
-            if ch == '\'' {
-                if text[at + 1..].starts_with('\'') {
-                    chars.next();
-                    out.push('\'');
-                    continue;
-                }
-                return Ok(Some((out, at + 1)));
-            }
-            out.push(ch);
-            continue;
-        }
-        match ch {
-            '"' => return Ok(Some((out, at + 1))),
-            '\\' => {
-                let (_, escape) = chars.next().ok_or("unterminated escape sequence")?;
-                let simple = match escape {
-                    'n' => Some('\n'),
-                    't' | '\t' => Some('\t'),
-                    'r' => Some('\r'),
-                    '0' => Some('\0'),
-                    'a' => Some('\u{7}'),
-                    'b' => Some('\u{8}'),
-                    'e' => Some('\u{1b}'),
-                    'f' => Some('\u{c}'),
-                    'v' => Some('\u{b}'),
-                    'N' => Some('\u{85}'),
-                    '_' => Some('\u{a0}'),
-                    'L' => Some('\u{2028}'),
-                    'P' => Some('\u{2029}'),
-                    ' ' | '"' | '\\' | '/' => Some(escape),
-                    _ => None,
-                };
-                if let Some(ch) = simple {
-                    out.push(ch);
-                    continue;
-                }
-                let digits = match escape {
-                    'x' => 2,
-                    'u' => 4,
-                    'U' => 8,
-                    _ => return Err("invalid escape sequence in a double-quoted value"),
-                };
-                let mut code = 0_u32;
-                for _ in 0..digits {
-                    let (_, digit) = chars.next().ok_or("unterminated escape sequence")?;
-                    code = code * 16 + digit.to_digit(16).ok_or("invalid hexadecimal escape")?;
-                }
-                out.push(char::from_u32(code).ok_or("escape is not a Unicode scalar value")?);
-            }
-            _ => out.push(ch),
-        }
+    Ok(scan.feed(text)?.map(|end| (scan.out, end)))
+}
+
+/// A resumable scan of a quoted scalar. A value spread over many lines is fed the
+/// growing text after each appended line and continues where it stopped, so every
+/// byte is decoded once (linear in the length, however many lines there are).
+///
+/// Stopping never leaves a character half-decoded: an escape cut off by the end of
+/// the text is an error, and a single quote there closes the value, exactly as a
+/// scan of the whole text from the start would decide.
+struct QuotedScan {
+    quote: char,
+    out: String,
+    /// Byte offset where the next [`QuotedScan::feed`] continues.
+    pos: usize,
+}
+
+impl QuotedScan {
+    /// A scan of the quoted value opened by the first character of `text`.
+    fn new(text: &str) -> Option<Self> {
+        let quote = text.chars().next()?;
+        Some(Self {
+            quote,
+            out: String::new(),
+            pos: quote.len_utf8(),
+        })
     }
-    Ok(None)
+
+    /// Continue over `text` (what earlier calls saw, with more appended): the byte
+    /// length up to and including the closing quote, or `None` when `text` ends first.
+    fn feed(&mut self, text: &str) -> Result<Option<usize>, &'static str> {
+        let base = self.pos;
+        let quote = self.quote;
+        let out = &mut self.out;
+        let mut chars = text[base..].char_indices().map(|(at, ch)| (base + at, ch));
+        while let Some((at, ch)) = chars.next() {
+            if quote == '\'' {
+                if ch == '\'' {
+                    if text[at + 1..].starts_with('\'') {
+                        chars.next();
+                        out.push('\'');
+                        continue;
+                    }
+                    return Ok(Some(at + 1));
+                }
+                out.push(ch);
+                continue;
+            }
+            match ch {
+                '"' => return Ok(Some(at + 1)),
+                '\\' => decode_escape(&mut chars, out)?,
+                _ => out.push(ch),
+            }
+        }
+        self.pos = text.len();
+        Ok(None)
+    }
+}
+
+/// Decode the escape after a `\` in a double-quoted value into `out`.
+fn decode_escape(
+    chars: &mut impl Iterator<Item = (usize, char)>,
+    out: &mut String,
+) -> Result<(), &'static str> {
+    let (_, escape) = chars.next().ok_or("unterminated escape sequence")?;
+    let simple = match escape {
+        'n' => Some('\n'),
+        't' | '\t' => Some('\t'),
+        'r' => Some('\r'),
+        '0' => Some('\0'),
+        'a' => Some('\u{7}'),
+        'b' => Some('\u{8}'),
+        'e' => Some('\u{1b}'),
+        'f' => Some('\u{c}'),
+        'v' => Some('\u{b}'),
+        'N' => Some('\u{85}'),
+        '_' => Some('\u{a0}'),
+        'L' => Some('\u{2028}'),
+        'P' => Some('\u{2029}'),
+        ' ' | '"' | '\\' | '/' => Some(escape),
+        _ => None,
+    };
+    if let Some(ch) = simple {
+        out.push(ch);
+        return Ok(());
+    }
+    let digits = match escape {
+        'x' => 2,
+        'u' => 4,
+        'U' => 8,
+        _ => return Err("invalid escape sequence in a double-quoted value"),
+    };
+    let mut code = 0_u32;
+    for _ in 0..digits {
+        let (_, digit) = chars.next().ok_or("unterminated escape sequence")?;
+        code = code * 16 + digit.to_digit(16).ok_or("invalid hexadecimal escape")?;
+    }
+    out.push(char::from_u32(code).ok_or("escape is not a Unicode scalar value")?);
+    Ok(())
 }
 
 /// A quoted scalar starting with `rest`; it may continue on indented lines,
@@ -157,10 +199,14 @@ pub(super) fn parse_quoted(
     rest: &str,
 ) -> Result<(String, usize), FrontMatterError> {
     let mut text = rest.to_owned();
+    let mut scan = QuotedScan::new(&text)
+        .ok_or_else(|| FrontMatterError::at(key_line, "unterminated quoted value"))?;
     let mut index = start;
     loop {
-        if let Some((value, end)) =
-            scan_quoted(&text).map_err(|message| FrontMatterError::at(key_line, message))?
+        // Only the text appended since the last pass is scanned.
+        if let Some(end) = scan
+            .feed(&text)
+            .map_err(|message| FrontMatterError::at(key_line, message))?
         {
             let after = text[end..].trim();
             if !after.is_empty() && !after.starts_with('#') {
@@ -169,7 +215,7 @@ pub(super) fn parse_quoted(
                     "unexpected text after a quoted value",
                 ));
             }
-            return Ok((value, index));
+            return Ok((scan.out, index));
         }
         let line = lines
             .get(index)

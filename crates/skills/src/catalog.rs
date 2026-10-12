@@ -59,6 +59,11 @@ pub struct SkillDetail {
     pub body: Option<String>,
     #[serde(default)]
     pub front_matter: Vec<FrontMatterEntry>,
+    /// Credential-like text was hidden in the `body` (or in the `description` or
+    /// `version`) returned here. Saving these values back with `skill.save` would
+    /// replace the hidden text with the redaction marker: edit the file instead.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub body_redacted: bool,
 }
 
 /// The instructions of an enabled, valid skill, for injection. `body` is
@@ -225,26 +230,38 @@ impl SkillCatalog {
                 summary,
                 body: None,
                 front_matter: Vec::new(),
+                body_redacted: false,
             });
         }
         match Self::read(skill) {
-            Ok((front_matter, body)) => Ok(SkillDetail {
-                summary,
-                body: Some(redact(&body)),
-                front_matter: front_matter
-                    .into_iter()
-                    .map(|(key, value)| FrontMatterEntry {
-                        key,
-                        value: redact_value(value),
-                    })
-                    .collect(),
-            }),
+            Ok((front_matter, body)) => {
+                let shown = redact(&body);
+                // What an editor would save back: the body, description, and version.
+                let body_redacted = shown != body
+                    || front_matter.iter().any(|(key, value)| {
+                        matches!(key.as_str(), "description" | "version")
+                            && redact_value(value.clone()) != *value
+                    });
+                Ok(SkillDetail {
+                    summary,
+                    body: Some(shown),
+                    front_matter: front_matter
+                        .into_iter()
+                        .map(|(key, value)| FrontMatterEntry {
+                            key,
+                            value: redact_value(value),
+                        })
+                        .collect(),
+                    body_redacted,
+                })
+            }
             Err(error) => {
                 summary.error = Some(redact(&error));
                 Ok(SkillDetail {
                     summary,
                     body: None,
                     front_matter: Vec::new(),
+                    body_redacted: false,
                 })
             }
         }

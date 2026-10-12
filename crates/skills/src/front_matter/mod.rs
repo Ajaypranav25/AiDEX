@@ -13,7 +13,7 @@ mod scalar;
 #[cfg(test)]
 mod tests;
 
-use std::fmt;
+use std::{fmt, ops::Range};
 
 use serde::{Deserialize, Serialize};
 
@@ -160,41 +160,10 @@ impl FrontMatter {
 
     fn parse_at(text: &str, first_line: usize) -> Result<Self, FrontMatterError> {
         let lines = split_lines(text, first_line);
-        let mut entries: Vec<(String, FrontMatterValue)> = Vec::new();
-        let mut seen: Vec<String> = Vec::new();
-        let mut index = 0;
-        while index < lines.len() {
-            let line = &lines[index];
-            if line.is_ignorable() {
-                index += 1;
-                continue;
-            }
-            if line.indent > 0 {
-                return Err(FrontMatterError::at(line.number, "unexpected indentation"));
-            }
-            if line.is_list_item() {
-                return Err(FrontMatterError::at(
-                    line.number,
-                    "a list item must follow a key",
-                ));
-            }
-            let (key, rest) = split_key(line)?;
-            if seen.iter().any(|existing| existing == key) {
-                return Err(FrontMatterError::at(
-                    line.number,
-                    format!("duplicate key `{key}`"),
-                ));
-            }
-            if seen.len() >= MAX_KEYS {
-                return Err(FrontMatterError::at(line.number, "too many keys"));
-            }
-            seen.push(key.to_owned());
-            let (value, next) = parse_value(&lines, index + 1, line.number, rest)?;
-            index = next;
-            if let Some(value) = value {
-                entries.push((key.to_owned(), value));
-            }
-        }
+        let entries = parse_keys(&lines)?
+            .into_iter()
+            .filter_map(|key| Some((key.key.to_owned(), key.value?)))
+            .collect();
         Ok(Self { entries })
     }
 
@@ -222,6 +191,89 @@ impl FrontMatter {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+}
+
+/// One top-level key: its value (`None` for null or unsupported values) and the
+/// lines it spans, from the key's line up to the next unread line.
+struct KeySpan<'a> {
+    key: &'a str,
+    value: Option<FrontMatterValue>,
+    lines: Range<usize>,
+}
+
+/// Every top-level key of `lines`, in file order.
+fn parse_keys<'a>(lines: &[Line<'a>]) -> Result<Vec<KeySpan<'a>>, FrontMatterError> {
+    let mut keys: Vec<KeySpan<'a>> = Vec::new();
+    let mut index = 0;
+    while index < lines.len() {
+        let line = &lines[index];
+        if line.is_ignorable() {
+            index += 1;
+            continue;
+        }
+        if line.indent > 0 {
+            return Err(FrontMatterError::at(line.number, "unexpected indentation"));
+        }
+        if line.is_list_item() {
+            return Err(FrontMatterError::at(
+                line.number,
+                "a list item must follow a key",
+            ));
+        }
+        let (key, rest) = split_key(line)?;
+        if keys.iter().any(|existing| existing.key == key) {
+            return Err(FrontMatterError::at(
+                line.number,
+                format!("duplicate key `{key}`"),
+            ));
+        }
+        if keys.len() >= MAX_KEYS {
+            return Err(FrontMatterError::at(line.number, "too many keys"));
+        }
+        let (value, next) = parse_value(lines, index + 1, line.number, rest)?;
+        keys.push(KeySpan {
+            key,
+            value,
+            lines: index..next,
+        });
+        index = next;
+    }
+    Ok(keys)
+}
+
+/// The front matter of a `SKILL.md` as written, without the top-level keys in
+/// `drop` (each with its value's lines): every other line (other keys, values this
+/// parser skips such as nested mappings, comments) is kept verbatim, each ending in
+/// `\n`. `None` when the text has no front matter.
+pub(crate) fn front_matter_without(
+    text: &str,
+    drop: &[&str],
+) -> Result<Option<String>, FrontMatterError> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let Some((front, _)) = split(text)? else {
+        return Ok(None);
+    };
+    let lines = split_lines(front, 2);
+    let dropped: Vec<Range<usize>> = parse_keys(&lines)?
+        .into_iter()
+        .filter(|key| drop.contains(&key.key))
+        .map(|key| key.lines)
+        .collect();
+    // `front` ends with the line break before the closing `---`: the last split
+    // "line" is that break's empty remainder, not a line of its own.
+    let count = if front.is_empty() || front.ends_with('\n') {
+        lines.len().saturating_sub(1)
+    } else {
+        lines.len()
+    };
+    let mut kept = String::new();
+    for (index, line) in lines.iter().enumerate().take(count) {
+        if !dropped.iter().any(|span| span.contains(&index)) {
+            kept.push_str(line.raw);
+            kept.push('\n');
+        }
+    }
+    Ok(Some(kept))
 }
 
 /// `key: rest` with `key` in `[A-Za-z0-9_.-]+`.

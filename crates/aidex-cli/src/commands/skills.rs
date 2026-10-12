@@ -148,6 +148,9 @@ fn print_detail(detail: &SkillDetail) {
     if let Some(error) = &summary.error {
         println!("  error:       {}", one_line(error, 1024));
     }
+    if detail.body_redacted {
+        println!("  note:        text that looks like a credential is hidden below");
+    }
     if !detail.front_matter.is_empty() {
         println!("front matter:");
         for entry in &detail.front_matter {

@@ -29,8 +29,8 @@ mod state;
 pub use authoring::{SkillDraft, render_skill_file};
 pub use catalog::{FrontMatterEntry, SkillBody, SkillCatalog, SkillDetail, SkillSummary};
 pub use discover::{
-    ExtraSkillRoot, MAX_ROOT_ENTRIES, MAX_SKILLS, MAX_SKILLS_PER_ROOT, PROJECT_SKILLS_DIR,
-    REPO_SKILLS_DIRS, SkillIssue, SkillWorkspace,
+    ExtraSkillRoot, MAX_ROOT_ENTRIES, MAX_SKILLS, MAX_SKILLS_PER_ROOT, MAX_WORKSPACE_SKILLS,
+    PROJECT_SKILLS_DIR, REPO_SKILLS_DIRS, SkillIssue, SkillWorkspace,
 };
 pub use error::SkillError;
 pub use front_matter::{FrontMatter, FrontMatterError, FrontMatterValue, SkillDocument};

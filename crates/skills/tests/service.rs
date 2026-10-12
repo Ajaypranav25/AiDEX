@@ -263,6 +263,125 @@ fn drive_skills_are_saved_replaced_and_deleted() {
 }
 
 #[test]
+fn replacing_a_drive_skill_keeps_its_other_front_matter() {
+    let drive = drive();
+    let (service, _events) = service(&drive.paths);
+    let file = write(
+        &drive.paths.skills(),
+        "deploy",
+        "SKILL.md",
+        concat!(
+            "---\r\n",
+            "# Only I run this one.\r\n",
+            "name: deploy\r\n",
+            "description: >\r\n",
+            "  Old deploy\r\n",
+            "  steps\r\n",
+            "disable-model-invocation: true\r\n",
+            "user-invocable: false\r\n",
+            "allowed-tools:\r\n",
+            "  - Bash(git push:*)\r\n",
+            "  - Read\r\n",
+            "version: 0.9\r\n",
+            "display-name: Deploy it\r\n",
+            "metadata:\r\n",
+            "  owner: ops\r\n",
+            "---\r\n",
+            "Old body.\r\n",
+        ),
+    );
+    let before = service
+        .catalog(None, &[])
+        .unwrap()
+        .summary(&id("drive:deploy"))
+        .unwrap();
+    assert!(
+        !before.model_invocable && !before.user_invocable,
+        "{before:?}"
+    );
+
+    let saved = service
+        .save_drive_skill(&SkillDraft {
+            version: Some("1.0".into()),
+            ..draft("deploy", "Deploy the app", "New body.")
+        })
+        .unwrap();
+    assert!(saved.error.is_none(), "{saved:?}");
+    assert_eq!(saved.description, "Deploy the app");
+    assert_eq!(saved.version.as_deref(), Some("1.0"));
+    assert_eq!(saved.display_name, "Deploy it");
+    // Who may invoke the skill is unchanged by editing it.
+    assert!(!saved.model_invocable && !saved.user_invocable, "{saved:?}");
+    let detail = service
+        .catalog(None, &[])
+        .unwrap()
+        .inspect(&id("drive:deploy"))
+        .unwrap();
+    assert_eq!(detail.body.as_deref(), Some("New body."));
+    let keys: Vec<&str> = detail
+        .front_matter
+        .iter()
+        .map(|entry| entry.key.as_str())
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            "name",
+            "description",
+            "version",
+            "disable-model-invocation",
+            "user-invocable",
+            "allowed-tools",
+            "display-name"
+        ]
+    );
+    let text = fs::read_to_string(&file).unwrap();
+    // Keys this parser skips (a nested mapping) and comments are kept as written.
+    assert!(text.contains("\nmetadata:\n  owner: ops\n---\n"), "{text}");
+    assert!(text.contains("# Only I run this one.\n"), "{text}");
+    assert!(text.contains("  - Bash(git push:*)\n"), "{text}");
+    assert!(
+        !text.contains("Old deploy") && !text.contains("0.9"),
+        "{text}"
+    );
+
+    // Saving again keeps them again; a draft without a version drops it.
+    let again = service
+        .save_drive_skill(&draft("deploy", "Deploy it again", "Body."))
+        .unwrap();
+    assert!(!again.model_invocable && !again.user_invocable && again.version.is_none());
+    assert!(fs::read_to_string(&file).unwrap().contains("metadata:"));
+}
+
+#[test]
+fn replacing_keeps_front_matter_only_when_it_reads_the_same() {
+    let drive = drive();
+    let (service, _events) = service(&drive.paths);
+    // Front matter that cannot be parsed has nothing to keep: the file is replaced.
+    write(
+        &drive.paths.skills(),
+        "broken",
+        "SKILL.md",
+        "---\nname: broken\ndescription: [unclosed\n---\nOld.\n",
+    );
+    let fixed = service
+        .save_drive_skill(&draft("broken", "Fixed", "New."))
+        .unwrap();
+    assert!(fixed.error.is_none(), "{fixed:?}");
+
+    // A kept key that is invalid would leave the new file broken: refused, unchanged.
+    let original = "---\nname: odd\ndescription: d\nuser-invocable: maybe\n---\nOld.\n";
+    let file = write(&drive.paths.skills(), "odd", "SKILL.md", original);
+    let error = service
+        .save_drive_skill(&draft("odd", "New", "New."))
+        .unwrap_err();
+    assert_eq!(error.reason(), "invalid_skill", "{error}");
+    assert!(error.to_string().contains("user-invocable"), "{error}");
+    assert!(!error.to_string().contains("maybe"), "{error}");
+    assert_eq!(fs::read_to_string(&file).unwrap(), original);
+}
+
+#[test]
 fn saving_refuses_a_linked_skill_directory() {
     let drive = drive();
     let (service, _events) = service(&drive.paths);

@@ -12,8 +12,9 @@ use aidex_events::{EventKind, EventScope, EventSink, ExtensionKind};
 use crate::{
     ExtraSkillRoot, SkillCatalog, SkillDraft, SkillError, SkillId, SkillScope, SkillSummary,
     SkillWorkspace,
-    authoring::render_skill_file,
-    fsio::{self, Entry},
+    authoring::{render_replacement, render_skill_file},
+    fsio::{self, Entry, ReadFailure},
+    manifest::MAX_SKILL_FILE_BYTES,
     name::is_skill_name,
     state::{SkillState, state_path},
 };
@@ -118,9 +119,11 @@ impl SkillService {
 
     /// Create or replace the drive skill `draft.name` (`skills/<name>/SKILL.md`,
     /// written atomically). A drive skill declaring that name in another
-    /// directory is replaced in place.
+    /// directory is replaced in place. A replaced skill keeps every front matter
+    /// key the draft does not set (`name`, `description`, `version`), such as who
+    /// may invoke it and its `allowed-tools`.
     pub fn save_drive_skill(&self, draft: &SkillDraft) -> Result<SkillSummary, SkillError> {
-        let text = render_skill_file(draft)?;
+        let mut text = render_skill_file(draft)?;
         let _guard = self.lock();
         let skills = self.paths.skills();
         let root = self
@@ -134,10 +137,20 @@ impl SkillService {
                 if existing.linked {
                     return Err(SkillError::UnsafePath(existing.dir.clone()));
                 }
-                let file = existing
-                    .file
-                    .clone()
-                    .unwrap_or_else(|| existing.dir.join("SKILL.md"));
+                let file = match &existing.file {
+                    Some(file) => {
+                        match fsio::read_text(file, MAX_SKILL_FILE_BYTES) {
+                            Ok(current) => text = render_replacement(draft, &current)?,
+                            // Too large or not text: nothing to keep, it is replaced whole.
+                            Err(ReadFailure::TooLarge | ReadFailure::NotUtf8) => {}
+                            Err(ReadFailure::Io(error)) => {
+                                return Err(SkillError::io(file, &error));
+                            }
+                        }
+                        file.clone()
+                    }
+                    None => existing.dir.join("SKILL.md"),
+                };
                 (existing.dir.clone(), file)
             }
             Err(SkillError::NotFound(_)) => {

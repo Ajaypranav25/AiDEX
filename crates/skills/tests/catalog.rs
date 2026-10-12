@@ -6,8 +6,8 @@ mod common;
 use std::fs;
 
 use aidex_skills::{
-    ExtraSkillRoot, MAX_BODY_BYTES, MAX_SKILL_FILE_BYTES, SkillCatalog, SkillError, SkillId,
-    SkillScope, SkillSummary,
+    ExtraSkillRoot, MAX_BODY_BYTES, MAX_SKILL_FILE_BYTES, MAX_SKILLS_PER_ROOT,
+    MAX_WORKSPACE_SKILLS, SkillCatalog, SkillError, SkillId, SkillScope, SkillSummary,
 };
 use common::{dir_link, drive, fake_token, file_link, skill, skill_text, workspace, write};
 
@@ -391,6 +391,9 @@ fn bodies_and_details_are_redacted() {
     );
     assert_eq!(json["front_matter"][3]["value"], true);
     assert!(!json.to_string().contains(&token));
+    // Saving the shown text back would store the marker: the detail says so.
+    assert!(detail.body_redacted);
+    assert_eq!(json["body_redacted"], true);
 
     // A skill renamed on disk after listing is refused rather than injected.
     write(
@@ -414,6 +417,46 @@ fn bodies_and_details_are_redacted() {
 }
 
 #[test]
+fn details_say_when_editable_text_was_redacted() {
+    let drive = drive();
+    let token = fake_token();
+    skill(&drive.paths.skills(), "clean", "Nothing hidden");
+    write(
+        &drive.paths.skills(),
+        "described",
+        "SKILL.md",
+        &skill_text("described", &format!("Uses {token}"), "Plain body."),
+    );
+    write(
+        &drive.paths.skills(),
+        "tooled",
+        "SKILL.md",
+        &format!("---\nname: tooled\ndescription: d\nnote: \"{token}\"\n---\nPlain body.\n"),
+    );
+    let catalog = SkillCatalog::discover(&drive.paths, None, &[]).unwrap();
+
+    let clean = catalog.inspect(&id("drive:clean")).unwrap();
+    assert!(!clean.body_redacted);
+    let json = serde_json::to_value(&clean).unwrap();
+    assert!(json.get("body_redacted").is_none(), "{json}");
+    // Older payloads without the field still parse.
+    let parsed: aidex_skills::SkillDetail = serde_json::from_value(json).unwrap();
+    assert_eq!(parsed, clean);
+
+    // The description is saved back by an editor too.
+    assert!(
+        catalog
+            .inspect(&id("drive:described"))
+            .unwrap()
+            .body_redacted
+    );
+    // Other front matter is kept from the file on save, so hiding it there is harmless.
+    let tooled = catalog.inspect(&id("drive:tooled")).unwrap();
+    assert!(!tooled.body_redacted);
+    assert!(!serde_json::to_string(&tooled).unwrap().contains(&token));
+}
+
+#[test]
 fn invalid_state_files_fail_discovery_without_echoing_values() {
     let drive = drive();
     skill(&drive.paths.skills(), "notes", "d");
@@ -427,4 +470,81 @@ fn invalid_state_files_fail_discovery_without_echoing_values() {
     let error = SkillCatalog::discover(&drive.paths, None, &[]).unwrap_err();
     assert_eq!(error.reason(), "invalid_state_file");
     assert!(!error.to_string().contains(&token), "{error}");
+}
+
+#[test]
+fn workspace_skills_never_crowd_out_drive_and_plugin_skills() {
+    let drive = drive();
+    let (ws_dir, ws) = workspace("wsp_many");
+    let root = ws_dir.path();
+    for index in 0..MAX_SKILLS_PER_ROOT {
+        skill(&root.join(".aidex/skills"), &format!("p{index:03}"), "d");
+        skill(&root.join(".agents/skills"), &format!("a{index:03}"), "d");
+    }
+    skill(&drive.paths.skills(), "review", "Drive review");
+    let plugin_skills = drive.paths.plugins().join("acme").join("skills");
+    skill(&plugin_skills, "deploy", "Plugin deploy");
+    let extra = [ExtraSkillRoot {
+        scope: SkillScope::Plugin,
+        root: plugin_skills,
+        owner: "acme".into(),
+    }];
+
+    let catalog = SkillCatalog::discover(&drive.paths, Some(&ws), &extra).unwrap();
+    let skills = catalog.summaries();
+    assert_eq!(by_name(&skills, "review").id, "drive:review");
+    assert_eq!(by_name(&skills, "deploy").id, "plugin:deploy");
+    let workspace = skills
+        .iter()
+        .filter(|skill| skill.scope.is_workspace())
+        .count();
+    assert_eq!(workspace, MAX_WORKSPACE_SKILLS);
+    assert_eq!(skills.len(), MAX_WORKSPACE_SKILLS + 2);
+    assert!(
+        catalog
+            .issues()
+            .iter()
+            .any(|issue| issue.location == ".agents/skills"),
+        "{:?}",
+        catalog.issues()
+    );
+    let enabled: Vec<&str> = catalog.enabled().map(|skill| skill.id.as_str()).collect();
+    assert_eq!(enabled, ["plugin:deploy", "drive:review"]);
+}
+
+#[test]
+fn roots_of_unusable_entries_stop_being_parsed() {
+    let drive = drive();
+    let skills_dir = drive.paths.skills();
+    // Directory names with no usable fallback (no ASCII letters or digits) and
+    // skill files that declare no name.
+    for index in 0..(2 * MAX_SKILLS_PER_ROOT + 8) {
+        let unusable: String = format!("{index:03}")
+            .chars()
+            .map(|digit| char::from_u32(0x3b1 + digit.to_digit(10).unwrap()).unwrap())
+            .collect();
+        write(
+            &skills_dir,
+            &format!("_{unusable}"),
+            "SKILL.md",
+            "---\ndescription: d\n---\nx\n",
+        );
+    }
+    let catalog = SkillCatalog::discover(&drive.paths, None, &[]).unwrap();
+    assert!(catalog.summaries().is_empty());
+    let issues = catalog.issues();
+    assert_eq!(
+        issues.len(),
+        2 * MAX_SKILLS_PER_ROOT + 1,
+        "one per parsed file"
+    );
+    assert!(
+        issues
+            .last()
+            .unwrap()
+            .error
+            .contains("skill files; the rest are ignored"),
+        "{:?}",
+        issues.last()
+    );
 }

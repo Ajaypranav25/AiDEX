@@ -37,6 +37,13 @@ pub const MAX_ROOT_ENTRIES: usize = 4096;
 pub const MAX_SKILLS_PER_ROOT: usize = 256;
 /// Skills in one catalog.
 pub const MAX_SKILLS: usize = 512;
+/// Skills taken from all of a workspace's roots together (project and repo,
+/// disabled by default), so they can never crowd the user's drive and plugin
+/// skills out of the catalog.
+pub const MAX_WORKSPACE_SKILLS: usize = MAX_SKILLS / 2;
+/// Skill files read and parsed from one root, counting those without a usable
+/// name, so a root of unusable entries cannot make discovery parse thousands.
+const MAX_PARSED_PER_ROOT: usize = 2 * MAX_SKILLS_PER_ROOT;
 /// Entries read from one skill directory while looking for `SKILL.md`.
 const MAX_SKILL_DIR_ENTRIES: usize = 1024;
 
@@ -145,7 +152,13 @@ pub(crate) fn discover(
     }
 
     let mut found: Vec<Found> = Vec::new();
+    let mut workspace_kept = 0;
     for root in &roots {
+        let workspace = root.scope.is_workspace();
+        if workspace && workspace_kept >= MAX_WORKSPACE_SKILLS {
+            issues.push(workspace_budget_issue(root));
+            continue;
+        }
         for candidate in scan_root(root, &mut issues) {
             if let Some(existing) = found
                 .iter()
@@ -165,6 +178,10 @@ pub(crate) fn discover(
                 }
                 continue;
             }
+            if workspace && workspace_kept >= MAX_WORKSPACE_SKILLS {
+                issues.push(workspace_budget_issue(root));
+                break;
+            }
             if found.len() >= MAX_SKILLS {
                 issues.push(SkillIssue {
                     scope: root.scope,
@@ -173,10 +190,23 @@ pub(crate) fn discover(
                 });
                 return Ok(Discovery { found, issues });
             }
+            if workspace {
+                workspace_kept += 1;
+            }
             found.push(candidate);
         }
     }
     Ok(Discovery { found, issues })
+}
+
+fn workspace_budget_issue(root: &Root) -> SkillIssue {
+    SkillIssue {
+        scope: root.scope,
+        location: root.label.clone(),
+        error: format!(
+            "the workspace has more than {MAX_WORKSPACE_SKILLS} skills; the rest are ignored"
+        ),
+    }
 }
 
 /// Resolve `segments` below a trusted `base`, recording an issue for links.
@@ -291,6 +321,7 @@ fn scan_root(root: &Root, issues: &mut Vec<SkillIssue>) -> Vec<Found> {
     }
     names.sort();
     let mut found = Vec::new();
+    let mut parsed = 0;
     for name in names {
         let lossy = name.to_string_lossy().into_owned();
         if lossy.starts_with('.') {
@@ -302,6 +333,11 @@ fn scan_root(root: &Root, issues: &mut Vec<SkillIssue>) -> Vec<Found> {
             Ok(Entry::Dir) => match find_skill_file(&dir) {
                 None => continue,
                 Some(Ok((file_name, file, size))) => {
+                    if found.len() >= MAX_SKILLS_PER_ROOT || parsed >= MAX_PARSED_PER_ROOT {
+                        issues.push(root_full_issue(root, found.len()));
+                        break;
+                    }
+                    parsed += 1;
                     let manifest = load_manifest(&file, size, name.to_str());
                     Candidate {
                         location: format!("{location}/{file_name}"),
@@ -341,14 +377,7 @@ fn scan_root(root: &Root, issues: &mut Vec<SkillIssue>) -> Vec<Found> {
             continue;
         };
         if found.len() >= MAX_SKILLS_PER_ROOT {
-            issues.push(SkillIssue {
-                scope: root.scope,
-                location: root.label.clone(),
-                error: format!(
-                    "`{}` has more than {MAX_SKILLS_PER_ROOT} skills; the rest are ignored",
-                    root.label
-                ),
-            });
+            issues.push(root_full_issue(root, found.len()));
             break;
         }
         found.push(Found {
@@ -364,6 +393,26 @@ fn scan_root(root: &Root, issues: &mut Vec<SkillIssue>) -> Vec<Found> {
         });
     }
     found
+}
+
+/// The issue for a root whose further skills are ignored: it already gave
+/// [`MAX_SKILLS_PER_ROOT`] skills, or [`MAX_PARSED_PER_ROOT`] skill files were read.
+fn root_full_issue(root: &Root, kept: usize) -> SkillIssue {
+    SkillIssue {
+        scope: root.scope,
+        location: root.label.clone(),
+        error: if kept >= MAX_SKILLS_PER_ROOT {
+            format!(
+                "`{}` has more than {MAX_SKILLS_PER_ROOT} skills; the rest are ignored",
+                root.label
+            )
+        } else {
+            format!(
+                "`{}` has more than {MAX_PARSED_PER_ROOT} skill files; the rest are ignored",
+                root.label
+            )
+        },
+    }
 }
 
 struct Candidate {

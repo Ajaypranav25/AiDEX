@@ -6,7 +6,7 @@ use aidex_events::redact_text;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    SkillError,
+    FrontMatterValue, SkillDocument, SkillError, SkillManifest, front_matter,
     manifest::{MAX_BODY_BYTES, MAX_DESCRIPTION_CHARS, MAX_VERSION_CHARS},
     name::is_skill_name,
 };
@@ -50,9 +50,71 @@ fn quoted(text: &str) -> String {
     out
 }
 
+/// The front matter keys a draft sets; a replaced skill keeps every other key.
+const DRAFT_KEYS: [&str; 3] = ["name", "description", "version"];
+
 /// Validate `draft` and render its `SKILL.md`. Text that looks like it holds a
 /// credential is refused: skills are stored unencrypted on the drive.
 pub fn render_skill_file(draft: &SkillDraft) -> Result<String, SkillError> {
+    render(draft, "")
+}
+
+/// Validate `draft` and render the `SKILL.md` that replaces the skill file
+/// `existing`. Every top-level front matter key the draft does not set (`name`,
+/// `description`, `version`) is kept as written, so editing a skill never drops
+/// who may invoke it (`user-invocable`, `disable-model-invocation`), its
+/// `allowed-tools`, its display name, or keys AiDEX does not read. A file without
+/// front matter, or whose front matter cannot be parsed, is replaced whole.
+pub(crate) fn render_replacement(draft: &SkillDraft, existing: &str) -> Result<String, SkillError> {
+    let (Ok(old), Ok(Some(kept))) = (
+        SkillDocument::parse(existing),
+        front_matter::front_matter_without(existing, &DRAFT_KEYS),
+    ) else {
+        return render(draft, "");
+    };
+    let file = render(draft, &kept)?;
+    // The kept lines come from the file being replaced; make sure they mean the same
+    // in the new file and that the draft's own keys still read back as written.
+    let cannot_keep = |problem: &str| {
+        SkillError::Invalid(format!(
+            "the skill's other front matter cannot be kept ({problem}); edit its SKILL.md directly"
+        ))
+    };
+    let new = SkillDocument::parse(&file).map_err(|error| cannot_keep(&error.to_string()))?;
+    let manifest = SkillManifest::from_front_matter(new.front_matter.as_ref(), None)
+        .map_err(|error| cannot_keep(&error))?;
+    let others = |document: &SkillDocument| -> Vec<(String, FrontMatterValue)> {
+        document
+            .front_matter
+            .as_ref()
+            .map(|front_matter| {
+                front_matter
+                    .entries()
+                    .iter()
+                    .filter(|(key, _)| !DRAFT_KEYS.contains(&key.as_str()))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let version = draft
+        .version
+        .as_deref()
+        .map(str::trim)
+        .filter(|version| !version.is_empty());
+    if manifest.name != draft.name
+        || manifest.description != draft.description.trim()
+        || manifest.version.as_deref() != version
+        || others(&new) != others(&old)
+    {
+        return Err(cannot_keep("it would read differently"));
+    }
+    Ok(file)
+}
+
+/// Render `draft` with `kept` (whole front matter lines, each ending in `\n`) after
+/// the draft's own keys.
+fn render(draft: &SkillDraft, kept: &str) -> Result<String, SkillError> {
     if !is_skill_name(&draft.name) {
         return Err(SkillError::Invalid(
             "`name` must be 1-64 lowercase letters, digits, or `-`, starting with a letter or digit"
@@ -116,6 +178,7 @@ pub fn render_skill_file(draft: &SkillDraft) -> Result<String, SkillError> {
     if let Some(version) = version {
         file.push_str(&format!("version: {}\n", quoted(version)));
     }
+    file.push_str(kept);
     file.push_str("---\n\n");
     file.push_str(body);
     file.push('\n');

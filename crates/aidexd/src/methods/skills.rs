@@ -404,6 +404,53 @@ mod tests {
     }
 
     #[test]
+    fn editing_a_drive_skill_keeps_its_settings_and_flags_hidden_text() {
+        let fixture = fixture();
+        let skills = fixture.services.paths().skills();
+        write_skill(
+            &skills,
+            "deploy",
+            "---\nname: deploy\ndescription: Deploy\ndisable-model-invocation: true\nuser-invocable: false\nallowed-tools: [Bash]\n---\nShip it.\n",
+        );
+        let shown = fixture
+            .router
+            .call(&fixture.context, SHOW, json!({"id": "drive:deploy"}))
+            .unwrap();
+        assert!(shown.get("body_redacted").is_none(), "{shown}");
+
+        let saved: SkillSummary = fixture.call(
+            SAVE,
+            json!({"name": "deploy", "description": "Deploy the app", "body": "Ship it carefully."}),
+        );
+        assert_eq!(saved.description, "Deploy the app");
+        assert!(!saved.model_invocable && !saved.user_invocable, "{saved:?}");
+        let detail: SkillDetail = fixture.call(SHOW, json!({"id": "drive:deploy"}));
+        assert_eq!(detail.body.as_deref(), Some("Ship it carefully."));
+        assert!(
+            detail
+                .front_matter
+                .iter()
+                .any(|entry| entry.key == "allowed-tools")
+        );
+
+        // A body shown with credential-like text hidden is flagged for editors.
+        write_skill(
+            &skills,
+            "db",
+            &format!(
+                "---\nname: db\ndescription: Database\n---\nRun with {}.\n",
+                token()
+            ),
+        );
+        let shown = fixture
+            .router
+            .call(&fixture.context, SHOW, json!({"id": "drive:db"}))
+            .unwrap();
+        assert_eq!(shown["body_redacted"], true);
+        assert!(!shown.to_string().contains(&token()), "{shown}");
+    }
+
+    #[test]
     fn workspace_skills_resolve_through_the_registry_and_start_disabled() {
         let fixture = fixture();
         let project = tempfile::tempdir().unwrap();

@@ -155,6 +155,95 @@ fn multi_line_plain_and_quoted_scalars_fold() {
 }
 
 #[test]
+fn multi_line_quoted_scalars_decode_across_lines() {
+    let front = parse(concat!(
+        "escapes: \"\\u00e9\\t\n",
+        "  \\x41 \\\"b\\\"\" # comment\n",
+        "single: 'it''s\n",
+        "  ''quoted'''\n",
+        "closed: 'a'\n",
+    ));
+    assert_eq!(front.get("escapes"), Some(&text("é\t A \"b\"")));
+    assert_eq!(front.get("single"), Some(&text("it's 'quoted'")));
+    assert_eq!(front.get("closed"), Some(&text("a")));
+    for (front, line) in [
+        ("cut: \"a\\\n  u\"\n", 1),
+        ("cut: \"a\\u00\n  e9\"\n", 1),
+        ("after: \"a\n  b\" c\n", 1),
+    ] {
+        let error = FrontMatter::parse(front).unwrap_err();
+        assert_eq!(error.line, Some(line), "{front}: {error}");
+    }
+}
+
+#[test]
+fn front_matter_without_keys_keeps_every_other_line_as_written() {
+    let file = concat!(
+        "\u{feff}---\r\n",
+        "# heading comment\r\n",
+        "name: deploy\r\n",
+        "description: |\r\n",
+        "  line one\r\n",
+        "\r\n",
+        "  line two\r\n",
+        "tools: [a, \"b\"]\r\n",
+        "version: 'v\r\n",
+        "  1'\r\n",
+        "metadata:\r\n",
+        "  nested: map\r\n",
+        "list:\r\n",
+        "- x\r\n",
+        "---\r\n",
+        "Body.\r\n",
+    );
+    let kept = front_matter_without(file, &["name", "description", "version"])
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        kept,
+        "# heading comment\ntools: [a, \"b\"]\nmetadata:\n  nested: map\nlist:\n- x\n"
+    );
+    let reparsed = parse(&kept);
+    assert_eq!(
+        reparsed.entries(),
+        [
+            ("tools".to_owned(), list(&["a", "b"])),
+            ("list".to_owned(), list(&["x"])),
+        ]
+    );
+    // Dropping nothing keeps the whole block; an empty block keeps nothing.
+    assert_eq!(
+        front_matter_without("---\nname: a\n---\n", &[]).unwrap(),
+        Some("name: a\n".to_owned())
+    );
+    assert_eq!(
+        front_matter_without("---\n---\nbody\n", &["name"]).unwrap(),
+        Some(String::new())
+    );
+    assert_eq!(
+        front_matter_without("no front matter\n", &["name"]).unwrap(),
+        None
+    );
+    assert!(front_matter_without("---\n  bad: indent\n---\n", &["name"]).is_err());
+}
+
+#[test]
+fn many_line_quoted_scalars_parse_in_linear_time() {
+    // Rescanning the value after every appended line made this quadratic.
+    let blank_lines = 200_000;
+    let front = format!("description: \"x\n{}  y\"\n", "\n".repeat(blank_lines));
+    let started = std::time::Instant::now();
+    let parsed = parse(&front);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(2),
+        "{:?}",
+        started.elapsed()
+    );
+    let expected = format!("x{}y", "\n".repeat(blank_lines));
+    assert_eq!(parsed.get("description"), Some(&text(&expected)));
+}
+
+#[test]
 fn malformed_front_matter_reports_lines_without_values() {
     let secret = "sk-proj-SECRETVALUE";
     for (front, line) in [
