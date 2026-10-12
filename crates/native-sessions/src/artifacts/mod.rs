@@ -8,22 +8,21 @@
 //! plaintext. Metadata (name, kind, MIME type, plan status, ...) and bytes are
 //! sealed with the store's record key, so artifacts are unavailable while the
 //! vault is locked, exactly like session history.
-mod blobs;
-mod crypto;
 mod model;
 
-pub(crate) use blobs::BlobDir;
 pub use model::{
     ARTIFACT_LIST_LIMIT, ARTIFACT_PAGE_BYTES, ArtifactChunk, ArtifactEncoding, ArtifactKind,
     ArtifactMeta, ArtifactPage, INLINE_ARTIFACT_BYTES, MAX_ARTIFACT_BYTES,
     MAX_ARTIFACT_LANGUAGE_BYTES, MAX_ARTIFACT_NAME_BYTES, NewArtifact, PlanStatus,
 };
 
+use crate::sealed::{self, Content, Domain, PageError, Stored};
 use crate::{SessionStore, StoreError, digest, id, now};
 use chacha20poly1305::XChaCha20Poly1305;
-use crypto::{SEGMENT_BYTES, sealed_len, segment_span};
 use rusqlite::{Connection, OptionalExtension, params};
 use zeroize::Zeroizing;
+
+const DOMAIN: Domain = Domain::Artifact;
 
 /// Schema migration run on every open; older daemons ignore the table.
 pub(crate) const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS artifacts(id TEXT PRIMARY KEY,session_id TEXT NOT NULL,meta BLOB NOT NULL,content BLOB,blob TEXT); CREATE INDEX IF NOT EXISTS artifacts_by_session ON artifacts(session_id);";
@@ -171,36 +170,25 @@ impl SessionStore {
         let row = row(&db, id)?;
         let meta = open_meta(&cipher, id, &row.session_id, &row.meta)?;
         let size = meta.size;
-        if offset > size {
-            return Err("invalid artifact offset: beyond the artifact size".into());
-        }
         let utf8 = meta.encoding == ArtifactEncoding::Utf8;
-        let wanted = (offset + limit).min(size);
-        // A UTF-8 character is at most four bytes: read past the page end to find it.
-        let fetched = if utf8 { (wanted + 4).min(size) } else { wanted };
-        let window = self.plaintext(&db, &cipher, &meta, row.blob.as_deref(), offset, fetched)?;
-        let continuation = |at: u64| at < fetched && window[(at - offset) as usize] & 0xC0 == 0x80;
-        let mut end = wanted;
-        if utf8 {
-            if continuation(offset) {
+        let page = sealed::page(size, offset, limit, utf8, |start, end| {
+            self.plaintext(&db, &cipher, &meta, row.blob.as_deref(), start, end)
+        })?;
+        let (bytes, next_offset) = match page {
+            Ok(page) => page,
+            Err(PageError::Beyond) => {
+                return Err("invalid artifact offset: beyond the artifact size".into());
+            }
+            Err(PageError::InsideCharacter) => {
                 return Err("invalid artifact offset: inside a UTF-8 character".into());
             }
-            while end > offset && continuation(end) {
-                end -= 1;
-            }
-            if end == offset && offset < size {
-                end += 1;
-                while continuation(end) {
-                    end += 1;
-                }
-            }
-        }
+        };
         Ok(ArtifactChunk {
             id: meta.id,
-            bytes: window[..(end - offset) as usize].to_vec(),
+            bytes,
             encoding: meta.encoding,
             offset,
-            next_offset: (end < size).then_some(end),
+            next_offset,
             total_bytes: size,
             sha256: meta.sha256,
         })
@@ -323,7 +311,7 @@ impl SessionStore {
 
     fn artifact_cipher(&self) -> Result<XChaCha20Poly1305, StoreError> {
         let key = self.key()?;
-        crypto::cipher(key.expose())
+        sealed::cipher(key.expose())
     }
 
     /// Seal content as inline column bytes (≤ 1 MiB) or as a blob file.
@@ -334,7 +322,7 @@ impl SessionStore {
         sha256: &str,
         bytes: &[u8],
     ) -> Result<(Option<Vec<u8>>, Option<String>), StoreError> {
-        let sealed = crypto::seal_content(cipher, id, sha256, bytes)?;
+        let sealed = DOMAIN.seal_content(cipher, id, sha256, bytes)?;
         if bytes.len() <= INLINE_ARTIFACT_BYTES {
             Ok((Some(sealed), None))
         } else {
@@ -355,45 +343,34 @@ impl SessionStore {
         if start >= end {
             return Ok(Zeroizing::new(vec![]));
         }
-        let size = meta.size;
-        let (first, last) = (start / SEGMENT_BYTES, (end - 1) / SEGMENT_BYTES);
-        let (from, _) = segment_span(first, size);
-        let (last_start, last_len) = segment_span(last, size);
-        let len = last_start + last_len - from;
-        let sealed = match blob {
-            Some(address) => self.blobs.read(address, sealed_len(size), from, len)?,
+        let content = Content {
+            domain: DOMAIN,
+            id: &meta.id,
+            sha256: &meta.sha256,
+            size: meta.size,
+        };
+        match blob {
+            Some(address) => content.window(
+                cipher,
+                &Stored::Blob {
+                    dir: &self.blobs,
+                    address,
+                },
+                start,
+                end,
+            ),
             None => {
-                let content: Option<Vec<u8>> = db
+                let inline: Option<Vec<u8>> = db
                     .query_row(
                         "SELECT content FROM artifacts WHERE id=?",
                         [&meta.id],
                         |r| r.get(0),
                     )
                     .map_err(sql)?;
-                let content = content.unwrap_or_default();
-                if content.len() as u64 != sealed_len(size) {
-                    return Err("truncated encrypted artifact".into());
-                }
-                content[from as usize..(from + len) as usize].to_vec()
+                let inline = inline.unwrap_or_default();
+                content.window(cipher, &Stored::Inline(&inline), start, end)
             }
-        };
-        let mut plain = Zeroizing::new(Vec::with_capacity((len) as usize));
-        for index in first..=last {
-            let (at, segment_len) = segment_span(index, size);
-            let at = (at - from) as usize;
-            plain.extend_from_slice(&crypto::open_segment(
-                cipher,
-                &meta.id,
-                &meta.sha256,
-                size,
-                index,
-                &sealed[at..at + segment_len as usize],
-            )?);
         }
-        let skip = (start - first * SEGMENT_BYTES) as usize;
-        Ok(Zeroizing::new(
-            plain[skip..skip + (end - start) as usize].to_vec(),
-        ))
     }
 }
 
@@ -479,11 +456,7 @@ fn supersede_active_plans(
 
 fn seal_meta(cipher: &XChaCha20Poly1305, meta: &ArtifactMeta) -> Result<Vec<u8>, StoreError> {
     let plain = Zeroizing::new(serde_json::to_vec(meta).map_err(|e| e.to_string())?);
-    crypto::seal(
-        cipher,
-        &crypto::meta_aad(&meta.id, &meta.session_id),
-        &plain,
-    )
+    DOMAIN.seal_record(cipher, &meta.id, &meta.session_id, &plain)
 }
 
 fn open_meta(
@@ -492,7 +465,7 @@ fn open_meta(
     session_id: &str,
     sealed: &[u8],
 ) -> Result<ArtifactMeta, StoreError> {
-    let plain = crypto::open(cipher, &crypto::meta_aad(id, session_id), sealed)?;
+    let plain = DOMAIN.open_record(cipher, id, session_id, sealed)?;
     let meta: ArtifactMeta =
         serde_json::from_slice(&plain).map_err(|_| "invalid encrypted artifact metadata")?;
     if meta.id != id || meta.session_id != session_id {
