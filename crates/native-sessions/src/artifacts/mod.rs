@@ -28,6 +28,11 @@ use zeroize::Zeroizing;
 /// Schema migration run on every open; older daemons ignore the table.
 pub(crate) const SCHEMA: &str = "CREATE TABLE IF NOT EXISTS artifacts(id TEXT PRIMARY KEY,session_id TEXT NOT NULL,meta BLOB NOT NULL,content BLOB,blob TEXT); CREATE INDEX IF NOT EXISTS artifacts_by_session ON artifacts(session_id);";
 
+/// Run on every open: rows of sessions deleted by a daemon that predates the
+/// table (it deletes only `runs` and `sessions`).
+pub(crate) const PURGE_ORPHANS: &str =
+    "DELETE FROM artifacts WHERE session_id NOT IN (SELECT id FROM sessions)";
+
 /// Plaintext columns of one artifact row (the sealed content is read separately).
 struct Row {
     session_id: String,
@@ -392,9 +397,10 @@ impl SessionStore {
     }
 }
 
+/// An artifact row whose session still exists.
 fn row(db: &Connection, id: &str) -> Result<Row, StoreError> {
     db.query_row(
-        "SELECT session_id,meta,blob FROM artifacts WHERE id=?",
+        "SELECT a.session_id,a.meta,a.blob FROM artifacts a JOIN sessions s ON s.id=a.session_id WHERE a.id=?",
         [id],
         |r| {
             Ok(Row {

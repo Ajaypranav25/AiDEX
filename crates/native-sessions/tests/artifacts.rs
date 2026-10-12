@@ -617,6 +617,55 @@ fn foreign_runs_and_tampered_bytes_are_refused() {
 }
 
 #[test]
+fn artifacts_of_sessions_deleted_by_an_older_daemon_are_purged_on_open() {
+    let f = Fixture::new();
+    let session = f.session();
+    let keep = f.session();
+    let new = |s: &str, bytes: Vec<u8>| {
+        f.store
+            .create_artifact(s, None, artifact("a", ArtifactKind::WebPage, bytes))
+            .unwrap()
+    };
+    let inline = new(&session, b"inline".to_vec());
+    let big = new(&session, vec![b'w'; INLINE_ARTIFACT_BYTES + 10]);
+    let kept = new(&keep, vec![b'k'; INLINE_ARTIFACT_BYTES + 10]);
+    assert_eq!(f.blob_files().len(), 2);
+    // An older daemon's `SessionStore::delete` knows nothing of artifacts.
+    let (database, blobs) = (f.database(), f.blob_dir());
+    let db = rusqlite::Connection::open(&database).unwrap();
+    db.execute("DELETE FROM runs WHERE session_id=?", [session.as_str()])
+        .unwrap();
+    db.execute("DELETE FROM sessions WHERE id=?", [session.as_str()])
+        .unwrap();
+    for id in [&inline.id, &big.id] {
+        assert!(
+            f.store.artifact(id).unwrap_err().contains("not found"),
+            "rows of a deleted session are not readable by id"
+        );
+        assert!(f.store.read_artifact(id, 0, 10).is_err());
+    }
+    drop(f.store);
+    let reopened = SessionStore::open(&database, f.vault.clone()).unwrap();
+    let rows: i64 = db
+        .query_row(
+            "SELECT COUNT(*) FROM artifacts WHERE session_id=?",
+            [session.as_str()],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(rows, 0);
+    assert_eq!(
+        std::fs::read_dir(blobs).unwrap().count(),
+        1,
+        "the orphaned blob is swept"
+    );
+    assert_eq!(
+        read_all(&reopened, &kept.id, ARTIFACT_PAGE_BYTES).len(),
+        INLINE_ARTIFACT_BYTES + 10
+    );
+}
+
+#[test]
 fn orphaned_blobs_are_swept_and_older_tables_stay_readable() {
     let f = Fixture::new();
     let session = f.session();

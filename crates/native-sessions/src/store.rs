@@ -46,6 +46,10 @@ impl SessionStore {
         db.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,status TEXT NOT NULL,payload BLOB NOT NULL); CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, session_id TEXT NOT NULL,status TEXT NOT NULL); CREATE TABLE IF NOT EXISTS memory(id TEXT PRIMARY KEY,workspace TEXT NOT NULL,payload BLOB NOT NULL); UPDATE runs SET status='interrupted' WHERE status IN ('pending','running','waiting_approval'); UPDATE sessions SET status='interrupted' WHERE status IN ('pending','running','waiting_approval');").map_err(|e|e.to_string())?;
         db.execute_batch(crate::artifacts::SCHEMA)
             .map_err(|e| e.to_string())?;
+        // A daemon that predates artifacts deletes sessions without their
+        // artifact rows; drop them so the sweep below reclaims their blobs.
+        db.execute(crate::artifacts::PURGE_ORPHANS, [])
+            .map_err(|e| e.to_string())?;
         let blobs = crate::artifacts::BlobDir::beside(path);
         blobs.sweep(|address| {
             db.query_row(
