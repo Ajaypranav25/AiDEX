@@ -27,16 +27,17 @@ export function Workspace() {
 
 function WorkspaceScreens() {
   const { route, navigate } = useNavigation();
-  const { setPendingPrompt, setPendingWorkspaceId, settings } = usePreferences();
+  const { setPendingPrompt, setPendingWorkspaceId, setPendingAttachments, settings } = usePreferences();
   // A new chat resets its draft and optional project context.
   const [sessionKey, setSessionKey] = useState(0);
 
   const startNewSession = useCallback(() => {
     setPendingPrompt(null);
     setPendingWorkspaceId(null);
+    setPendingAttachments(null);
     navigate({ page: "chat" });
     setSessionKey((key) => key + 1);
-  }, [navigate, setPendingPrompt, setPendingWorkspaceId]);
+  }, [navigate, setPendingPrompt, setPendingWorkspaceId, setPendingAttachments]);
 
   const openProviders = useCallback(
     () => navigate({ page: "models", tab: "providers" }),

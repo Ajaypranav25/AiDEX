@@ -11,6 +11,7 @@ import { DEFAULT_ACCENT, applyAccent } from "@aidex/ui/themes";
 import { call } from "@aidex/client/rpc";
 import { toAidexError } from "@aidex/client/errors";
 import type { AppPreferences } from "@aidex/client/dto/preferences";
+import type { DraftAttachment } from "../../features/chat/attachments/attachmentDraft";
 import { useRpc } from "../../hooks/useRpc";
 
 type Preferences = {
@@ -24,6 +25,9 @@ type Preferences = {
   setPendingPrompt: (prompt: string | null) => void;
   pendingWorkspaceId: string | null;
   setPendingWorkspaceId: (id: string | null) => void;
+  /** Attachments handed from Home to the new chat with `pendingPrompt` (in memory only). */
+  pendingAttachments: readonly DraftAttachment[] | null;
+  setPendingAttachments: (items: readonly DraftAttachment[] | null) => void;
   settings: AppPreferences;
   updateSettings: (patch: Partial<AppPreferences>) => Promise<void>;
   loaded: boolean;
@@ -59,6 +63,9 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
   const [pendingWorkspaceId, setPendingWorkspaceId] = useState<string | null>(
     null,
   );
+  const [pendingAttachments, setPendingAttachments] = useState<
+    readonly DraftAttachment[] | null
+  >(null);
   useEffect(() => {
     if (query.data) setSettings(query.data);
   }, [query.data]);
@@ -116,6 +123,8 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
       setPendingPrompt,
       pendingWorkspaceId,
       setPendingWorkspaceId,
+      pendingAttachments,
+      setPendingAttachments,
       settings,
       updateSettings,
       loaded: !!query.data,
@@ -127,6 +136,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
       updateSettings,
       pendingPrompt,
       pendingWorkspaceId,
+      pendingAttachments,
       query.data,
       query.error,
       error,

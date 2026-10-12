@@ -36,13 +36,6 @@
   font-weight: 500;
   color: var(--aidex-color-text);
 }
-.attachment {
-  display: inline-flex;
-  align-items: center;
-  max-width: 100%;
-  gap: 8px;
-  font-size: 12px;
-}
 @media (max-width: 900px) {
   .conversation {
     padding: 16px;
