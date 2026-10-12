@@ -7,8 +7,8 @@ use url::Url;
 use crate::{
     FetchedPage, WebClient, WebError,
     client::{EgressPurpose, Payload},
-    html::{extract, truncate_chars},
-    http::{ContentRule, Limits, Overflow, Response},
+    html::{extract_until, truncate_chars},
+    http::{ContentRule, Limits, Overflow, Response, check_cancel},
     target::{self, LocalTargets, Origin},
 };
 
@@ -46,7 +46,7 @@ pub(crate) fn run(
             cancel,
         )?;
         if !response.is_redirect() {
-            return Ok(page(requested, current, response, options.max_text_bytes));
+            return page(requested, current, response, options.max_text_bytes, cancel);
         }
         if hop >= options.max_redirects {
             return Err(WebError::TooManyRedirects(options.max_redirects));
@@ -79,7 +79,13 @@ fn next_hop(current: &Url, location: Option<&str>) -> Result<Url, WebError> {
     target::parse_http_url(next.as_str())
 }
 
-fn page(requested: Url, final_url: Url, response: Response, max_text: usize) -> FetchedPage {
+fn page(
+    requested: Url,
+    final_url: Url,
+    response: Response,
+    max_text: usize,
+    cancel: &CancelToken,
+) -> Result<FetchedPage, WebError> {
     let media_type = response.media_type.clone().unwrap_or_default();
     let html = matches!(media_type.as_str(), "text/html" | "application/xhtml+xml");
     let charset = response
@@ -88,14 +94,21 @@ fn page(requested: Url, final_url: Url, response: Response, max_text: usize) -> 
         .or_else(|| html.then(|| sniff_charset(&response.body)).flatten());
     let decoded = decode(&response.body, charset.as_deref());
     let (title, text, cut) = if html {
-        let readable = extract(&decoded, Some(&final_url), max_text);
+        let readable = extract_until(&decoded, Some(&final_url), max_text, &|| {
+            cancel.is_stopped()
+        });
+        // Extraction stops early once the fetch is cancelled or times out; that
+        // is the fetch's error, not a page cut at the text limit.
+        if readable.truncated {
+            check_cancel(cancel)?;
+        }
         (readable.title, readable.text, readable.truncated)
     } else {
         let text = decoded.replace("\r\n", "\n");
         let cut = text.len() > max_text;
         (None, truncate_bytes(&text, max_text), cut)
     };
-    FetchedPage {
+    Ok(FetchedPage {
         url: requested.into(),
         final_url: final_url.into(),
         status: response.status,
@@ -103,7 +116,7 @@ fn page(requested: Url, final_url: Url, response: Response, max_text: usize) -> 
         title: title.map(|title| truncate_chars(&title, 512)),
         text,
         truncated: response.truncated || cut,
-    }
+    })
 }
 
 fn truncate_bytes(text: &str, max: usize) -> String {
@@ -229,6 +242,33 @@ mod tests {
             Some("iso-8859-1")
         );
         assert_eq!(sniff_charset(b"<p>no declaration</p>"), None);
+    }
+
+    #[test]
+    fn a_fetch_stopped_during_extraction_reports_why() {
+        let url = Url::parse("https://example.com/").unwrap();
+        let response = || Response {
+            status: 200,
+            location: None,
+            media_type: Some("text/html".into()),
+            charset: None,
+            body: "<p>word</p>".repeat(20_000).into_bytes(),
+            truncated: false,
+        };
+        let cancelled = CancelToken::new();
+        cancelled.cancel();
+        assert!(matches!(
+            page(url.clone(), url.clone(), response(), 1 << 20, &cancelled),
+            Err(WebError::Cancelled)
+        ));
+        let expired = CancelToken::new().with_deadline(std::time::Instant::now());
+        assert!(matches!(
+            page(url.clone(), url.clone(), response(), 1 << 20, &expired),
+            Err(WebError::Timeout)
+        ));
+        let fetched = page(url.clone(), url, response(), 1 << 20, &CancelToken::new()).unwrap();
+        assert!(!fetched.truncated);
+        assert!(fetched.text.starts_with("word\n\nword"));
     }
 
     #[test]

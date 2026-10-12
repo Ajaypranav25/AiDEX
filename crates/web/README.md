@@ -14,7 +14,7 @@ missing file means the defaults.
 | `version` | `1` | File format version. |
 | `enabled` | `false` | Master switch: web tools are offered to agents only when on. |
 | `provider` | `"duckduckgo"` | `brave`, `tavily`, `exa`, `searxng`, or `duckduckgo`. |
-| `endpoint` | none | SearXNG base URL (`https://`, or `http://` to a loopback host); no query or fragment. |
+| `endpoint` | none | SearXNG base URL (`https://`, or `http://` to a loopback host); no query or fragment. Kept, but unused, while another provider is chosen. |
 | `secret_name` | none | Vault secret *name* of the provider key (never the value). Refused for DuckDuckGo. |
 | `max_results` | `5` | Results per search, 1 to 10. |
 | `fetch_enabled` | `true` | Whether `web.fetch` is offered alongside search. |
@@ -37,6 +37,11 @@ Keys live in the vault with the consumer `process:web`
 | Exa | `POST https://api.exa.ai/search` (JSON, highlights as snippets) | `x-api-key` header |
 | SearXNG | `GET <endpoint>/search?q=&format=json&pageno=1` | optional, `Authorization: Bearer` |
 | DuckDuckGo | `GET https://html.duckduckgo.com/html/?q=` (HTML) | none |
+
+`WebSettings::search_url()` is the URL a search contacts: the provider's
+built-in URL, or `<endpoint>/search` for SearXNG. Callers that check the
+destination ahead of time (the harness's `network.request` policy check) use
+it, so the checked host is the host the request goes to.
 
 `WebClient::search(query, max_results, cancel)` returns at most 10
 `SearchResult { title, url, snippet, published?, source }`. Titles and snippets
@@ -75,9 +80,16 @@ step releases no key and opens no socket. HTTP 401/403 are `unauthorized`, 429
   `application/xhtml+xml` only.
 - HTML becomes readable text: title, `#` headings, paragraphs, nested lists,
   fenced `pre` blocks, inline code, table rows, and links as `[text](url)`
-  resolved against the page (or `<base>`); scripts, styles, hidden elements,
-  forms, and media are dropped. Latin-1/Windows-1252 bodies are decoded by
-  their declared charset; everything else as UTF-8.
+  resolved against the page (or the first `<base href>`, as in browsers); a
+  link or base URL over 8 KiB stays plain text. Scripts, styles, hidden
+  elements, forms, and media are dropped. Latin-1/Windows-1252 bodies are
+  decoded by their declared charset; everything else as UTF-8.
+- Extraction is linear in the body size whatever the markup (a new `<a>`
+  closes an open one, as in HTML parsing; a link's URL is resolved only when
+  the link has text; list indentation stops growing after 16 levels), and it
+  checks the fetch's cancel token and deadline every few hundred tokens: a
+  fetch cancelled or timed out during extraction fails as `cancelled` or
+  `timeout`.
 
 ## Embedding
 

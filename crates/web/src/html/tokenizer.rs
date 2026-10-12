@@ -209,7 +209,14 @@ impl<'a> Iterator for Tokenizer<'a> {
                     self.position += 4;
                     self.skip_past("-->");
                 }
-                Some(b'!') if rest.len() >= 9 && rest[..9].eq_ignore_ascii_case("<![CDATA[") => {
+                // Bytes, not a `str` slice: byte 9 may fall inside a multi-byte character.
+                // A match means bytes 0..9 are ASCII, so `rest[9..]` is on a boundary.
+                Some(b'!')
+                    if rest
+                        .as_bytes()
+                        .get(..9)
+                        .is_some_and(|head| head.eq_ignore_ascii_case(b"<![CDATA[")) =>
+                {
                     let body = &rest[9..];
                     let length = body.find("]]>").unwrap_or(body.len());
                     self.position += 9 + length;
@@ -297,5 +304,69 @@ mod tests {
             .collect();
         assert_eq!(text, "1 < 2 and <3 x<y end ");
         assert!(matches!(found.last(), Some(Token::Start { name, .. }) if name == "div"));
+    }
+
+    #[test]
+    fn declarations_followed_by_multi_byte_text_do_not_panic() {
+        assert_eq!(tokens("<!中文注释>x"), vec![Token::Text("x")]);
+        assert_eq!(tokens("a <!––– b"), vec![Token::Text("a ")]);
+        assert!(tokens("<!ééééé").is_empty());
+        assert_eq!(tokens("<![cdata[é]]>"), vec![Token::Text("é")]);
+        assert_eq!(tokens("<![CDATA[中"), vec![Token::Text("中")]);
+        assert_eq!(tokens("<!-中文>y"), vec![Token::Text("y")]);
+        assert_eq!(tokens("<?中文注释?>z"), vec![Token::Text("z")]);
+        // A multi-byte character at every byte offset after `<!`.
+        for pad in 0..12 {
+            let html = format!("<!{}\u{1f600}\u{e9}>x", "-".repeat(pad));
+            let found = tokens(&html);
+            assert!(found.len() <= 1, "{html}: {found:?}");
+        }
+    }
+
+    #[test]
+    fn markup_cut_off_at_the_end_does_not_panic() {
+        for html in [
+            "<",
+            "<!",
+            "<!-",
+            "<!--",
+            "<!--x",
+            "<![CDATA",
+            "<![CDATA[",
+            "<?",
+        ] {
+            let found = tokens(html);
+            assert!(
+                found.iter().all(|token| matches!(token, Token::Text("<"))),
+                "{html}: {found:?}"
+            );
+        }
+        assert_eq!(tokens("x<!-"), vec![Token::Text("x")]);
+        assert_eq!(tokens("</"), vec![Token::Text("<"), Token::Text("/")]);
+        assert_eq!(tokens("</é>"), vec![Token::Text("<"), Token::Text("/é>")]);
+        assert_eq!(tokens("</ a>"), vec![Token::Text("<"), Token::Text("/ a>")]);
+        assert_eq!(tokens("</a"), vec![Token::End { name: "a".into() }]);
+        assert_eq!(tokens("</aé"), vec![Token::End { name: "aé".into() }]);
+        assert_eq!(tokens("</p é=\"x"), vec![Token::End { name: "p".into() }]);
+        assert_eq!(
+            tokens("<a/"),
+            vec![Token::Start {
+                name: "a".into(),
+                attributes: vec![],
+                self_closing: false,
+            }]
+        );
+        // Raw text that ends inside a candidate end tag.
+        assert_eq!(
+            tokens("<script>中</scr"),
+            vec![
+                Token::Start {
+                    name: "script".into(),
+                    attributes: vec![],
+                    self_closing: false,
+                },
+                Token::Text("中</scr"),
+            ]
+        );
     }
 }

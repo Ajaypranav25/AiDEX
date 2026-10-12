@@ -132,22 +132,14 @@ fn search_url(client: &WebClient, provider: SearchProvider) -> Result<(Url, Orig
     if let Some(url) = client.search_url() {
         return Ok((url.clone(), Origin::Configured));
     }
-    match provider.default_url() {
-        Some(url) => Url::parse(url)
-            .map(|url| (url, Origin::BuiltIn))
-            .map_err(|_| WebError::Protocol("the built-in provider URL is invalid".into())),
-        None => {
-            let endpoint = client.settings().endpoint.as_deref().ok_or_else(|| {
-                WebError::NotConfigured(format!("{provider} needs an endpoint URL"))
-            })?;
-            let url = crate::target::parse_http_url(&format!(
-                "{}/search",
-                endpoint.trim_end_matches('/')
-            ))
-            .map_err(|error| WebError::InvalidSettings(format!("endpoint: {error}")))?;
-            Ok((url, Origin::Configured))
-        }
-    }
+    // The same URL the harness policy-checks (`WebSettings::search_url`).
+    let url = client.settings().search_url()?;
+    let origin = if provider.default_url().is_some() {
+        Origin::BuiltIn
+    } else {
+        Origin::Configured
+    };
+    Ok((url, origin))
 }
 
 /// The search URL with the provider's query parameters.

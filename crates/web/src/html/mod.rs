@@ -7,4 +7,4 @@ pub(crate) mod tokenizer;
 
 pub use entities::decode as decode_entities;
 pub(crate) use extract::truncate_chars;
-pub use extract::{Readable, extract, plain_text};
+pub use extract::{Readable, extract, extract_until, plain_text};

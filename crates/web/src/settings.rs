@@ -111,6 +111,22 @@ impl WebSettings {
         Ok(())
     }
 
+    /// The URL a search with these settings contacts (before query parameters):
+    /// the provider's built-in URL, or `<endpoint>/search` for a provider without
+    /// one (SearXNG). An endpoint kept from an earlier provider choice is ignored,
+    /// so policy checks and requests always name the same host.
+    pub fn search_url(&self) -> Result<url::Url, WebError> {
+        if let Some(url) = self.provider.default_url() {
+            return url::Url::parse(url)
+                .map_err(|_| WebError::Protocol("the built-in provider URL is invalid".into()));
+        }
+        let endpoint = self.endpoint.as_deref().ok_or_else(|| {
+            WebError::NotConfigured(format!("{} needs an endpoint URL", self.provider))
+        })?;
+        target::parse_http_url(&format!("{}/search", endpoint.trim_end_matches('/')))
+            .map_err(|error| WebError::InvalidSettings(format!("endpoint: {error}")))
+    }
+
     /// Why a search with these settings cannot run yet, if anything is
     /// missing (the vault and network are not consulted).
     pub fn missing(&self) -> Option<WebError> {
@@ -486,5 +502,32 @@ mod tests {
         settings.endpoint = Some("https://searx.example".into());
         assert_eq!(settings.missing(), None);
         assert_eq!(WebSettings::default().missing(), None);
+    }
+
+    #[test]
+    fn search_urls_ignore_endpoints_of_hosted_providers() {
+        let mut settings = WebSettings {
+            provider: SearchProvider::Searxng,
+            endpoint: Some("http://localhost:8888/".into()),
+            ..WebSettings::default()
+        };
+        assert_eq!(
+            settings.search_url().unwrap().as_str(),
+            "http://localhost:8888/search"
+        );
+        // An endpoint left from a SearXNG setup is not where a hosted provider's
+        // searches go.
+        for provider in SearchProvider::ALL {
+            if let Some(built_in) = provider.default_url() {
+                settings.provider = provider;
+                assert_eq!(settings.search_url().unwrap().as_str(), built_in);
+            }
+        }
+        settings.provider = SearchProvider::Searxng;
+        settings.endpoint = None;
+        assert!(matches!(
+            settings.search_url(),
+            Err(WebError::NotConfigured(_))
+        ));
     }
 }
