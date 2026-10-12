@@ -16,10 +16,11 @@ use aidex_drive::DrivePaths;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AccountMetadata, ConfigError, CredentialResolver, EgressGate, HealthStatus, HttpOptions,
-    ModelConfig, ModelDescriptor, ModelEvent, ModelObserver, ModelProvider, ModelRef, NoopObserver,
-    OpenAiCompatibleProvider, ProviderAccountsConfig, ProviderConfig, ProviderDescriptor,
-    ProviderError, ProviderErrorKind, ProviderHealth, ProviderId, ProvidersConfig,
+    AccountMetadata, ConfigError, ContentPart, CredentialResolver, EgressGate, HealthStatus,
+    HttpOptions, ModelConfig, ModelDescriptor, ModelEvent, ModelInput, ModelObserver,
+    ModelProvider, ModelRef, NoopObserver, OpenAiCompatibleProvider, PartLimits,
+    ProviderAccountsConfig, ProviderConfig, ProviderDescriptor, ProviderError, ProviderErrorKind,
+    ProviderHealth, ProviderId, ProvidersConfig,
     config::{PROVIDER_ACCOUNTS_FILE, PROVIDERS_FILE, prepare_config_file, write_toml},
 };
 
@@ -764,6 +765,46 @@ impl ProviderRegistry {
             .iter()
             .find(|provider| &provider.id == id)
             .cloned()
+    }
+
+    /// The descriptor of `model`'s provider (enabled or not) and the preset
+    /// its account was created from: what input decisions depend on.
+    fn input_account(
+        &self,
+        model: &ModelDescriptor,
+    ) -> Option<(ProviderDescriptor, Option<String>)> {
+        let inner = self.read();
+        let id = &model.model.provider_id;
+        let entry = inner.providers.get(id)?;
+        let preset = inner
+            .accounts
+            .get(id)
+            .and_then(|metadata| metadata.preset_id.clone());
+        Some((entry.provider.descriptor().clone(), preset))
+    }
+
+    /// Whether `model` reads images and PDFs through its provider account
+    /// ([`crate::model_input`]); neither for an unknown provider. Opens no
+    /// connection.
+    pub fn model_input(&self, model: &ModelDescriptor) -> ModelInput {
+        self.input_account(model)
+            .map(|(provider, preset)| crate::model_input(&provider, preset.as_deref(), model))
+            .unwrap_or_default()
+    }
+
+    /// Whether `part` can be sent to `model` ([`crate::accepts_part`]);
+    /// `false` for an unknown provider.
+    pub fn accepts_part(&self, model: &ModelDescriptor, part: &ContentPart) -> bool {
+        self.input_account(model).is_some_and(|(provider, preset)| {
+            crate::accepts_part(&provider, preset.as_deref(), model, part)
+        })
+    }
+
+    /// The vendor limits on image and PDF parts for `model`
+    /// ([`crate::part_limits`]); `None` for an unknown provider.
+    pub fn part_limits(&self, model: &ModelDescriptor) -> Option<PartLimits> {
+        self.input_account(model)
+            .map(|(provider, preset)| crate::part_limits(&provider, preset.as_deref(), model))
     }
 
     fn enabled_providers(&self) -> Vec<(ProviderId, Arc<dyn ModelProvider>)> {

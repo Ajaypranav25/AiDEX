@@ -1,6 +1,8 @@
 //! Protocol-specific cloud providers sharing bounded HTTP transport.
 mod bedrock;
 mod events;
+#[cfg(test)]
+mod golden_tests;
 mod listing;
 mod requests;
 

@@ -116,16 +116,33 @@ pub(crate) fn hint_for(id: &str) -> Option<Hint> {
     if is_gpt_family(key) {
         return Some(Hint::chat_model(Some(128_000)).with_json().with_vision());
     }
-    if is_o_series(key) {
-        return Some(Hint::chat_model(Some(128_000)).with_json());
+    if let Some((major, suffix)) = o_series(key) {
+        let hint = Hint::chat_model(Some(128_000)).with_json();
+        // o1 (not -mini/-preview), o1-pro, o3, o3-pro, o4-mini and later
+        // models read images; o3-mini and later -mini models are text-only.
+        let vision = major == 1 || major == 4 || !suffix.starts_with("-mini");
+        return Some(if vision { hint.with_vision() } else { hint });
     }
     if key.starts_with("gemini-") {
         return Some(Hint::chat_model(None).with_json().with_vision());
     }
-    if let Some(rest) = key.strip_prefix("grok-")
-        && leading_number(rest).is_some_and(|major| major >= 2)
+    if let Some(rest) = key.strip_prefix("grok-") {
+        let major = leading_number(rest);
+        let vision = key.contains("vision") || major.is_some_and(|major| major >= 4);
+        if major.is_some_and(|major| major >= 2) {
+            let hint = Hint::chat_model(Some(131_072)).with_json();
+            return Some(if vision { hint.with_vision() } else { hint });
+        }
+        if vision {
+            return Some(Hint::default().with_vision());
+        }
+    }
+    // Llama 3.2 Vision and the natively multimodal Llama 4.
+    if ((key.starts_with("llama-3.2") || key.starts_with("llama3.2")) && key.contains("vision"))
+        || key.starts_with("llama-4")
+        || key.starts_with("llama4")
     {
-        return Some(Hint::chat_model(Some(131_072)).with_json());
+        return Some(Hint::default().with_vision());
     }
     match key {
         "deepseek-chat" => return Some(Hint::chat_model(Some(64_000))),
@@ -149,7 +166,12 @@ pub(crate) fn hint_for(id: &str) -> Option<Hint> {
     .iter()
     .any(|family| key.starts_with(family))
     {
-        return Some(Hint::chat_model(Some(32_000)));
+        let hint = Hint::chat_model(Some(32_000));
+        return Some(if key.starts_with("pixtral") {
+            hint.with_vision()
+        } else {
+            hint
+        });
     }
     if key.starts_with("kimi-k2") {
         return Some(Hint::chat_model(Some(128_000)));
@@ -196,24 +218,22 @@ fn is_gpt_family(key: &str) -> bool {
         || leading_number(rest).is_some_and(|major| (5..=9).contains(&major))
 }
 
-/// `o1` (not `o1-mini`/`o1-preview`), `o3*`, `o4*`, and later o-series models.
-fn is_o_series(key: &str) -> bool {
-    let Some(rest) = key.strip_prefix('o') else {
-        return false;
-    };
+/// `o1` (not `o1-mini`/`o1-preview`), `o3*`, `o4*`, and later o-series
+/// models, as `(major, suffix)` (`"o3-mini"` gives `(3, "-mini")`).
+fn o_series(key: &str) -> Option<(u32, &str)> {
+    let rest = key.strip_prefix('o')?;
     let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
-    let Ok(major) = rest[..digits].parse::<u32>() else {
-        return false;
-    };
+    let major = rest[..digits].parse::<u32>().ok()?;
     let suffix = &rest[digits..];
     if !(suffix.is_empty() || suffix.starts_with('-')) {
-        return false;
+        return None;
     }
-    if major == 1 {
+    let listed = if major == 1 {
         !(suffix.starts_with("-mini") || suffix.starts_with("-preview"))
     } else {
         major >= 3
-    }
+    };
+    listed.then_some((major, suffix))
 }
 
 /// The decimal number at the start of `text` (`"5.1-mini"` gives 5), when
@@ -358,6 +378,61 @@ mod tests {
         assert_eq!(embedding.chat, Some(false));
         assert_eq!(hint_for("codex-mini-latest"), None, "stays a chat model");
         assert_eq!(hint_for("gpt-4-turbo"), None);
+    }
+
+    #[test]
+    fn vision_hints_follow_each_family() {
+        let vision = |id: &str| hint_for(id).and_then(|hint| hint.vision);
+        for id in [
+            "o1",
+            "o1-pro",
+            "o1-2024-12-17",
+            "o3",
+            "o3-pro",
+            "openai/o3-2025-04-16",
+            "o4-mini",
+            "o4-mini-2025-04-16",
+            "o5",
+            "o5-pro",
+            "pixtral-large-latest",
+            "mistralai/pixtral-12b-2409",
+            "grok-4",
+            "x-ai/grok-4-fast",
+            "grok-2-vision-1212",
+            "grok-vision-beta",
+            "meta-llama/Llama-3.2-11B-Vision-Instruct",
+            "llama3.2-vision:11b",
+            "meta-llama/llama-4-scout-17b-16e-instruct",
+            "llama4:maverick",
+        ] {
+            assert_eq!(vision(id), Some(true), "{id}");
+        }
+        for id in [
+            "o3-mini",
+            "o3-mini-2025-01-31",
+            "openai/o3-mini-high",
+            "o5-mini",
+            "grok-3",
+            "grok-3-mini",
+            "mistral-large-latest",
+            "codestral-latest",
+            "deepseek-chat",
+        ] {
+            assert_ne!(vision(id), Some(true), "{id}");
+        }
+        for id in [
+            "meta-llama/llama-3.2-3b-instruct",
+            "llama-3.1-70b",
+            "grok-beta",
+        ] {
+            assert_eq!(hint_for(id), None, "{id}");
+        }
+        let mut o3_mini = DiscoveredModel::new(ModelId::new("o3-mini").unwrap());
+        apply(&mut o3_mini);
+        assert_eq!(o3_mini.vision, None, "o3-mini does not read images");
+        let llama = hint_for("llama-4-scout").unwrap();
+        assert_eq!(llama.context_window, None);
+        assert_eq!(llama.tool_calls, None);
     }
 
     #[test]
