@@ -17,7 +17,7 @@ use crate::{
 use aidex_auth::AuthError;
 use aidex_providers::{
     AccountMetadata, AuthConfig, Locality, ModelConfig, ModelDescriptor, ModelEvent, ModelId,
-    ModelListing, ModelRef, PresetLink, PresetLinkError, ProviderConfig, ProviderEntry,
+    ModelInput, ModelListing, ModelRef, PresetLink, PresetLinkError, ProviderConfig, ProviderEntry,
     ProviderError, ProviderFailure, ProviderHealth, ProviderId, ProviderKind, ProviderPatch,
     RegistryError,
 };
@@ -47,11 +47,31 @@ pub const NETWORK_STATUS: &str = "network.status";
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct ModelList {
-    pub models: Vec<ModelDescriptor>,
+    pub models: Vec<ListedModel>,
     /// Providers whose listing failed (offline refusal, unreachable, ...).
     pub failures: Vec<ProviderFailure>,
     pub default_model: Option<ModelRef>,
     pub network: NetworkState,
+}
+
+/// One `model.list` entry: the model's descriptor plus the image and PDF
+/// input it accepts through its provider account. `input` is computed on
+/// every listing and never persisted (`providers.toml` and the descriptor
+/// stay readable by older daemons).
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct ListedModel {
+    #[serde(flatten)]
+    pub descriptor: ModelDescriptor,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<ModelInput>,
+}
+
+impl std::ops::Deref for ListedModel {
+    type Target = ModelDescriptor;
+
+    fn deref(&self) -> &ModelDescriptor {
+        &self.descriptor
+    }
 }
 
 /// Params of `model.list`; absent, `null`, `[]`, and `{}` all mean the
@@ -372,8 +392,15 @@ fn list(services: &Services, params: ModelListParams) -> Result<ModelList, RpcEr
         None if params.refresh => models.registry().refresh_models(None),
         None => models.registry().models(),
     };
+    let registry = models.registry();
     Ok(ModelList {
-        models: list,
+        models: list
+            .into_iter()
+            .map(|descriptor| ListedModel {
+                input: Some(registry.model_input(&descriptor)),
+                descriptor,
+            })
+            .collect(),
         failures,
         default_model: models.registry().default_model(),
         network: models.network(),
@@ -922,6 +949,77 @@ mod tests {
                 Some(ErrorCode::InvalidParams)
             );
         }
+    }
+
+    #[test]
+    fn model_list_reports_the_image_and_pdf_input_of_each_account() {
+        let (_root, services, router, context) = fixture();
+        register_fake(&services);
+        add_custom(
+            &router,
+            &context,
+            json!({
+                "preset_id": "openai-chat",
+                "models": [
+                    {"id": "vision-a", "context_window": 8192, "vision": true},
+                    {"id": "text-a", "context_window": 8192},
+                ],
+            }),
+        );
+        // Another compatible server reads images but no PDFs.
+        add_custom(
+            &router,
+            &context,
+            json!({
+                "id": "other",
+                "preset_id": "custom",
+                "models": [{"id": "vision-b", "context_window": 8192, "vision": true}],
+            }),
+        );
+        let raw = router.call(&context, MODEL_LIST, json!({})).unwrap();
+        let input = |provider: &str, model: &str| {
+            raw["models"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|m| m["model"]["provider_id"] == provider && m["model"]["model_id"] == model)
+                .map(|m| m["input"].clone())
+                .unwrap_or_else(|| panic!("{provider}/{model} listed: {raw}"))
+        };
+        assert_eq!(
+            input("custom", "vision-a"),
+            json!({"images": true, "pdf": true})
+        );
+        assert_eq!(
+            input("custom", "text-a"),
+            json!({"images": false, "pdf": false})
+        );
+        assert_eq!(
+            input("other", "vision-b"),
+            json!({"images": true, "pdf": false})
+        );
+        assert_eq!(
+            input("local", "coder"),
+            json!({"images": false, "pdf": false})
+        );
+        let list: ModelList = serde_json::from_value(raw.clone()).unwrap();
+        let vision = list
+            .models
+            .iter()
+            .find(|m| m.model.to_string() == "custom/vision-a")
+            .unwrap();
+        assert!(
+            vision.capabilities.vision,
+            "entries deref to the descriptor"
+        );
+        assert_eq!(
+            vision.input,
+            Some(ModelInput {
+                images: true,
+                pdf: true
+            })
+        );
+        assert_eq!(serde_json::to_value(&list).unwrap(), raw);
     }
 
     #[test]

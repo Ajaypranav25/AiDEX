@@ -27,3 +27,13 @@ export function toDate(value: Date | string | number | null | undefined): Date |
 export function formatDateTime(date: Date): string {
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
+
+/**
+ * Attachment size label: "3.2 MB" from 1 MiB up, otherwise whole kilobytes rounded up ("48 KB"),
+ * so a small file never reads as "0 KB". Invalid input gives "".
+ */
+export function formatAttachmentSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return "";
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.max(1, Math.ceil(bytes / 1024))} KB`;
+}

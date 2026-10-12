@@ -194,7 +194,8 @@ export function downloadText(text: string, fileName: string, mime = "text/markdo
   saveBlob(new Blob([text], { type: mime }), fileName);
 }
 
-function saveBlob(blob: Blob, fileName: string): void {
+/** Saves a blob as a file through an anchor download. */
+export function saveBlob(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;

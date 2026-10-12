@@ -1,12 +1,12 @@
 //! Typed RPC adapters for native sessions, runs, and approvals.
-use crate::methods::native_view as view;
+use crate::methods::{attachments::attachment_error, native_view as view};
 use crate::{
     errors::{ErrorCode, RpcError},
     router::{Router, RouterError},
     rpc::{expect_no_params, parse_params, to_result},
     services::Services,
 };
-use aidex_native_sessions::{Mode, SessionConfig};
+use aidex_native_sessions::{MAX_ATTACHMENTS_PER_MESSAGE, Mode, SessionConfig};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
@@ -37,14 +37,34 @@ pub struct SendParams {
     /// modes follow the web settings). Never stored in the configuration.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub web_search: Option<bool>,
+    /// Staged attachment ids (`attachment.upload.*`, `attachment.from_workspace`)
+    /// to send with this message, in order; at most
+    /// [`MAX_ATTACHMENTS_PER_MESSAGE`]. `content` may then be blank.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attachments: Option<Vec<String>>,
 }
-/// Map a start failure: invoked skills that cannot be used are
-/// `invalid_params` with `data.reason = "skill_unavailable"`, a web switch
-/// that cannot be honoured is `unavailable` with `"web_unavailable"`.
+/// Start refusals that are the caller's to fix, carried as `<reason>: <detail>`
+/// by the harness: `invalid_params` with that `data.reason`.
+const START_REASONS: [&str; 3] = [
+    "skill_unavailable",
+    aidex_harness::ATTACHMENTS_UNSUPPORTED,
+    aidex_harness::CONTEXT_TOO_LARGE_FOR_RUNTIME,
+];
+/// Map a start failure: invoked skills that cannot be used, attachments the
+/// model or runtime cannot take, and transcripts too large for a runtime are
+/// `invalid_params` with `data.reason` (`skill_unavailable`,
+/// `attachments_unsupported`, `context_too_large_for_runtime`, or an
+/// attachment reason such as `attachment_unavailable`); a web switch that
+/// cannot be honoured is `unavailable` with `"web_unavailable"`.
 fn start_error(message: String) -> RpcError {
-    if let Some(detail) = message.strip_prefix("skill_unavailable: ") {
-        return RpcError::invalid_params(aidex_events::redact_text(detail).into_owned())
-            .with_data(json!({"reason": "skill_unavailable"}));
+    for reason in START_REASONS {
+        if let Some(detail) = message
+            .strip_prefix(reason)
+            .and_then(|rest| rest.strip_prefix(": "))
+        {
+            return RpcError::invalid_params(aidex_events::redact_text(detail).into_owned())
+                .with_data(json!({ "reason": reason }));
+        }
     }
     if let Some(detail) = message.strip_prefix("web_unavailable: ") {
         return RpcError::new(
@@ -53,7 +73,25 @@ fn start_error(message: String) -> RpcError {
         )
         .with_data(json!({"reason": "web_unavailable"}));
     }
-    native_error(message)
+    attachment_error(message)
+}
+/// Refusals of `attachments` the daemon can decide from the parameters alone.
+fn check_send_attachments(p: &SendParams) -> Result<Vec<String>, RpcError> {
+    let attachments = p.attachments.clone().unwrap_or_default();
+    let unavailable = |message: &str| {
+        RpcError::invalid_params(message).with_data(json!({"reason": "attachment_unavailable"}))
+    };
+    if attachments.len() > MAX_ATTACHMENTS_PER_MESSAGE {
+        return Err(unavailable(&format!(
+            "at most {MAX_ATTACHMENTS_PER_MESSAGE} attachments can be sent with one message"
+        )));
+    }
+    if !attachments.is_empty() && p.parent_run_id.is_some() {
+        return Err(unavailable(
+            "attachments can only be sent with a conversation message",
+        ));
+    }
+    Ok(attachments)
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -109,7 +147,10 @@ pub(crate) fn native_error(message: String) -> RpcError {
     };
     RpcError::new(code, aidex_events::redact_text(&message).into_owned())
 }
-fn validate_workspace(services: &Services, config: &SessionConfig) -> Result<(), RpcError> {
+pub(crate) fn validate_workspace(
+    services: &Services,
+    config: &SessionConfig,
+) -> Result<(), RpcError> {
     if let Some(reference) = &config.workspace_id {
         let id = aidex_core::EntityId::new(reference)
             .map_err(|e| RpcError::invalid_params(e.to_string()))?;
@@ -138,15 +179,23 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
             &s.native().store().create(config).map_err(native_error)?,
             None,
             None,
+            &view::MessageExtras::default(),
         )
     })?;
     let s = services.clone();
     router.register("conversation.get", move |_, p| {
         let p: view::GetParams = parse_params(p)?;
+        let detail = s.native().store().get(&p.id).map_err(native_error)?;
+        let attachments = s
+            .native()
+            .store()
+            .message_attachments(&p.id)
+            .map_err(native_error)?;
         view::session(
-            &s.native().store().get(&p.id).map_err(native_error)?,
+            &detail,
             p.message_offset,
             p.message_limit,
+            &view::MessageExtras::of(&detail, attachments),
         )
     })?;
     let s = services.clone();
@@ -186,6 +235,7 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
             if method == "agent.start" && config.mode != Mode::Agent {
                 return Err(RpcError::invalid_params("agent.start requires agent mode"));
             }
+            let attachments = check_send_attachments(&p)?;
             let skills = p.skills.unwrap_or_default();
             if skills.len() > aidex_harness::MAX_INVOKED_SKILLS {
                 return Err(RpcError::invalid_params(format!(
@@ -198,6 +248,7 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
             let options = aidex_harness::RunOptions {
                 skills,
                 web_search: p.web_search.unwrap_or(false),
+                attachments,
             };
             to_result(&view::run(
                 &s.native()
@@ -329,6 +380,7 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
     })?;
     crate::methods::workspace_live::register(router, services)?;
     crate::methods::native_history::register(router, services)?;
+    crate::methods::native_fork::register(router, services)?;
     Ok(())
 }
 #[cfg(test)]

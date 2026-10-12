@@ -6,9 +6,9 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use crate::{
-    ASSUMED_CONTEXT_WINDOW, CapabilitySource, ChatMessage, ChatRequest, ChatResponse, CostHint,
-    FinishReason, Locality, ModelCapabilities, ModelConfig, ModelDescriptor, ModelId, ModelRef,
-    ModelRole, ProviderError, ProviderId, ResponseFormat, Role, StreamEvent, ToolCall,
+    ASSUMED_CONTEXT_WINDOW, CapabilitySource, ChatMessage, ChatRequest, ChatResponse, ContentPart,
+    CostHint, FinishReason, Locality, ModelCapabilities, ModelConfig, ModelDescriptor, ModelId,
+    ModelRef, ModelRole, ProviderError, ProviderId, ResponseFormat, Role, StreamEvent, ToolCall,
     ToolCallSupport, ToolChoice, Usage,
 };
 
@@ -17,6 +17,29 @@ const MAX_LISTED_MODELS: usize = 1000;
 
 /// The JSON body for `POST /chat/completions`.
 pub(crate) fn request_body(request: &ChatRequest, stream: bool) -> Vec<u8> {
+    request_body_with(request, stream, false)
+}
+
+/// Whether `host` is OpenRouter's API, which needs its file-parser plugin
+/// pinned to the model's native PDF reading.
+pub(crate) fn is_openrouter(host: &str) -> bool {
+    let host = host.to_ascii_lowercase();
+    host == "openrouter.ai" || host.ends_with(".openrouter.ai")
+}
+
+/// A PDF filename for OpenAI file inputs, which expect the extension.
+pub(crate) fn pdf_filename(name: &str) -> String {
+    if name.to_ascii_lowercase().ends_with(".pdf") {
+        name.to_owned()
+    } else {
+        format!("{name}.pdf")
+    }
+}
+
+/// [`request_body`]; with `openrouter`, a request carrying PDF parts pins
+/// OpenRouter's `file-parser` plugin to the `native` engine, so the document
+/// is never routed to a third-party parser.
+pub(crate) fn request_body_with(request: &ChatRequest, stream: bool, openrouter: bool) -> Vec<u8> {
     let mut body = Map::new();
     body.insert("model".into(), json!(request.model.as_str()));
     body.insert(
@@ -82,6 +105,18 @@ pub(crate) fn request_body(request: &ChatRequest, stream: bool) -> Vec<u8> {
     if !request.stop.is_empty() {
         body.insert("stop".into(), json!(request.stop));
     }
+    if openrouter
+        && request
+            .messages
+            .iter()
+            .flat_map(|message| &message.parts)
+            .any(ContentPart::is_pdf)
+    {
+        body.insert(
+            "plugins".into(),
+            json!([{ "id": "file-parser", "pdf": { "engine": "native" } }]),
+        );
+    }
     // Serializing a `Value` cannot fail.
     serde_json::to_vec(&Value::Object(body)).unwrap_or_default()
 }
@@ -119,6 +154,26 @@ fn message(message: &ChatMessage) -> Value {
         Role::Tool => {
             wire.insert("tool_call_id".into(), json!(message.tool_call_id));
             wire.insert("content".into(), json!(message.content));
+        }
+        // Messages without parts keep plain string content: some compatible
+        // servers reject content arrays.
+        Role::User if !message.parts.is_empty() => {
+            let mut content = Vec::with_capacity(message.parts.len() + 1);
+            if !message.content.is_empty() {
+                content.push(json!({ "type": "text", "text": message.content }));
+            }
+            for part in &message.parts {
+                content.push(match part {
+                    ContentPart::Image { .. } => {
+                        json!({ "type": "image_url", "image_url": { "url": part.data_url() } })
+                    }
+                    ContentPart::Pdf { name, .. } => json!({
+                        "type": "file",
+                        "file": { "filename": pdf_filename(name), "file_data": part.data_url() },
+                    }),
+                });
+            }
+            wire.insert("content".into(), Value::Array(content));
         }
         _ => {
             wire.insert("content".into(), json!(message.content));
@@ -720,6 +775,83 @@ mod tests {
     }
 
     #[test]
+    fn user_parts_become_content_arrays_and_openrouter_pins_native_pdfs() {
+        use crate::parts::fixtures::{pdf, png};
+        use base64::Engine as _;
+        let b64 = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+        let image = || ContentPart::image("image/png", png(2, 2));
+        let image_url = format!("data:image/png;base64,{}", b64(&png(2, 2)));
+        let request = ChatRequest::new(
+            ModelId::new("m").unwrap(),
+            vec![
+                ChatMessage::system("sys"),
+                ChatMessage::user("look")
+                    .with_parts(vec![image(), ContentPart::pdf("spec", pdf(), 1)]),
+                ChatMessage::assistant(""),
+                ChatMessage::user("").with_parts(vec![image()]),
+                ChatMessage::user("plain"),
+            ],
+        );
+        let body: Value = serde_json::from_slice(&request_body(&request, true)).unwrap();
+        assert_eq!(
+            body["messages"][1]["content"],
+            json!([
+                {"type": "text", "text": "look"},
+                {"type": "image_url", "image_url": {"url": image_url}},
+                {"type": "file", "file": {
+                    "filename": "spec.pdf",
+                    "file_data": format!("data:application/pdf;base64,{}", b64(&pdf())),
+                }},
+            ])
+        );
+        // Messages without parts keep today's exact form.
+        assert_eq!(
+            body["messages"][0],
+            json!({"role": "system", "content": "sys"})
+        );
+        assert_eq!(
+            body["messages"][2],
+            json!({"role": "assistant", "content": ""})
+        );
+        assert_eq!(
+            body["messages"][3]["content"],
+            json!([{"type": "image_url", "image_url": {"url": image_url}}])
+        );
+        assert_eq!(
+            body["messages"][4],
+            json!({"role": "user", "content": "plain"})
+        );
+        assert!(body.get("plugins").is_none());
+
+        let routed: Value =
+            serde_json::from_slice(&request_body_with(&request, true, true)).unwrap();
+        assert_eq!(
+            routed["plugins"],
+            json!([{"id": "file-parser", "pdf": {"engine": "native"}}])
+        );
+        let images_only = ChatRequest::new(
+            ModelId::new("m").unwrap(),
+            vec![ChatMessage::user("x").with_parts(vec![image()])],
+        );
+        let routed: Value =
+            serde_json::from_slice(&request_body_with(&images_only, true, true)).unwrap();
+        assert!(routed.get("plugins").is_none());
+        for host in ["openrouter.ai", "OpenRouter.AI", "eu.openrouter.ai"] {
+            assert!(is_openrouter(host), "{host}");
+        }
+        for host in [
+            "openrouter.ai.example.com",
+            "notopenrouter.ai",
+            "api.openai.com",
+            "127.0.0.1",
+        ] {
+            assert!(!is_openrouter(host), "{host}");
+        }
+        assert_eq!(pdf_filename("a.PDF"), "a.PDF");
+        assert_eq!(pdf_filename("notes"), "notes.pdf");
+    }
+
+    #[test]
     fn model_listings_report_known_context_fields() {
         let models = parse_models(
             r#"{"object":"list","data":[
@@ -727,6 +859,7 @@ mod tests {
                 {"id":"meta-llama/Llama-3.1-8B","max_model_len":131072},
                 {"id":"qwen","meta":{"n_ctx_train":32768}},
                 {"id":"bad id with spaces"},
+                {"id":"~x-ai/grok-latest"},
                 {"id":"router/x","context_length":8192}
             ]}"#,
         )

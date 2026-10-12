@@ -284,6 +284,7 @@ dependencies = [
  "aidex-providers",
  "aidex-vault",
  "chacha20poly1305",
+ "flate2",
  "getrandom 0.3.4",
  "rusqlite",
  "serde",
@@ -356,6 +357,7 @@ version = "0.1.0"
 dependencies = [
  "aidex-core",
  "aidex-drive",
+ "base64 0.22.1",
  "crc32fast",
  "getrandom 0.3.4",
  "hmac",
@@ -557,6 +559,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "url",
+ "zeroize",
 ]
 
 [[package]]

@@ -190,11 +190,18 @@ impl OpenAiClient {
         let result = transport::check_cancel(cancel)
             .and_then(|()| request.validate())
             .and_then(|()| {
+                crate::input::check_request(crate::ProviderKind::OpenaiCompatible, request)
+            })
+            .and_then(|()| {
                 let exchange = Exchange::start(
                     &self.agent,
                     HttpRequest {
                         url: self.base.join("chat/completions"),
-                        method: Method::Post(wire::request_body(request, true)),
+                        method: Method::Post(wire::request_body_with(
+                            request,
+                            true,
+                            wire::is_openrouter(self.base.host()),
+                        )),
                         authorization,
                         headers: Vec::new(),
                         stream: true,

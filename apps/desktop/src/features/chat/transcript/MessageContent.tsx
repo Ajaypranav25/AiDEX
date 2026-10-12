@@ -11,13 +11,16 @@ import { SparklesIcon } from "@aidex/ui/icons";
 import { Button, Stack, Text } from "@aidex/ui/primitives";
 import { call } from "@aidex/client/rpc";
 import { toAidexError } from "@aidex/client/errors";
+import { ATTACHMENT_ONLY_CONTENT } from "@aidex/client/dto/attachments";
 import type { ContentChunk, HistoryScope, Message } from "@aidex/client/dto/sessions";
+import { SentAttachments } from "../attachments/SentAttachments";
 import { skillNameOf } from "../composer/composerText";
 import { useTranscript } from "./TranscriptContext";
 
 /**
- * One chat message: user text with `$skill` chips, assistant text as Markdown, other tool output as
- * text. Calls not listed in `hiddenCalls` show their arguments; long content reads in pages.
+ * One chat message: user text with `$skill` chips and the attachments sent with it, assistant text as
+ * Markdown, other tool output as text. Calls not listed in `hiddenCalls` show their arguments; long
+ * content reads in pages.
  */
 export function MessageContent({
   message,
@@ -38,6 +41,9 @@ export function MessageContent({
       .then(setChunk)
       .catch((caught) => setError(toAidexError(caught).message));
   const text = chunk?.content ?? message.content;
+  const attachments = message.role === "user" ? (message.attachments ?? []) : [];
+  // A message sent with attachments only stores a fixed marker as its text.
+  const attachmentsOnly = attachments.length > 0 && message.content === ATTACHMENT_ONLY_CONTENT;
   return (
     <ChatMessage
       role={message.role === "user" ? "user" : "assistant"}
@@ -48,9 +54,14 @@ export function MessageContent({
           <Markdown source={text} onOpenLink={openLink} />
         ) : null
       ) : message.role === "user" ? (
-        <Text>
-          <UserText text={text} skills={message.skills} />
-        </Text>
+        <>
+          {attachments.length > 0 && <SentAttachments attachments={attachments} />}
+          {!attachmentsOnly && (
+            <Text>
+              <UserText text={text} skills={message.skills} />
+            </Text>
+          )}
+        </>
       ) : (
         <Text>{text}</Text>
       )}

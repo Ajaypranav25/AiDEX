@@ -245,6 +245,9 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
     router.register(LOCK, move |_context, params| {
         expect_no_params(&params)?;
         shared.native().cancel_all();
+        // In-flight attachment uploads end with the vault: their partial
+        // sealed files are deleted and later chunks are refused.
+        shared.native().store().abort_all_uploads();
         let vault_id = shared.vault().status().vault_id;
         let outcome = shared.vault().lock();
         if let (true, Some(vault_id)) = (outcome.was_unlocked, vault_id) {

@@ -53,6 +53,8 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
             .emergency_stop(reason, &Principal::LocalUser)
             .map_err(|error| broker_error(&error))?;
         if params.lock_vault {
+            // Attachment uploads in flight end with the vault (files deleted).
+            shared.native().store().abort_all_uploads();
             let vault_id = shared.vault().status().vault_id;
             let outcome = shared.vault().lock();
             report.vault_locked = true;

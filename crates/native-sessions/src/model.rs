@@ -117,6 +117,20 @@ pub struct Run {
     /// Index of the run's user message in the session history (root runs).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message_index: Option<usize>,
+    /// Attachment ids sent with the run's user message, in order. A cache
+    /// only: the attachments table is authoritative (an older daemon drops
+    /// this field when it re-saves the session).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<String>,
+    /// Session mode when the run began (`None` for runs from before the field).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<Mode>,
+    /// Session permission mode when the run began.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<PermissionMode>,
+    /// Session workspace when the run began.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
 }
 /// Per-request options of a new run. Nothing here is persisted in the
 /// session configuration.
@@ -126,11 +140,32 @@ pub struct RunOptions {
     pub skills: Vec<String>,
     /// Offer web tools in Chat mode for this run.
     pub web_search: bool,
+    /// Staged attachment ids to send with the user message, in order (root
+    /// runs only). They join the command fingerprint only when present.
+    pub attachments: Vec<String>,
 }
 impl RunOptions {
     pub fn is_empty(&self) -> bool {
-        self.skills.is_empty() && !self.web_search
+        self.skills.is_empty() && !self.web_search && self.attachments.is_empty()
     }
+}
+/// Where a forked conversation came from: its first `message_count` messages
+/// are a copy of `session_id`'s history.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ForkOrigin {
+    pub session_id: String,
+    pub message_count: usize,
+}
+/// A [`fork`](crate::SessionStore::fork) of a conversation into a new one.
+#[derive(Clone, Debug)]
+pub struct ForkRequest {
+    /// Configuration of the new conversation (validated like `create`).
+    pub configuration: SessionConfig,
+    /// Replaces the configuration's title when present.
+    pub title: Option<String>,
+    /// Makes a retried fork return the conversation the first call created
+    /// (1-128 bytes).
+    pub command_id: Option<String>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Approval {
@@ -191,6 +226,9 @@ pub struct SessionDetail {
     pub commands: BTreeMap<String, CommandRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_ref: Option<serde_json::Value>,
+    /// Set on a conversation created by [`fork`](crate::SessionStore::fork).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forked_from: Option<ForkOrigin>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SessionSummary {

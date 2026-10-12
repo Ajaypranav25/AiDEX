@@ -1,10 +1,14 @@
 //! Bounded wire projections. Complete encrypted records never get truncated.
 use crate::errors::RpcError;
-use aidex_native_sessions::{Approval, Checkpoint, Run, SessionConfig, SessionDetail};
+use crate::methods::attachments::{AttachmentRef, attachment_ref};
+use aidex_native_sessions::{
+    Approval, AttachmentMeta, Checkpoint, ForkOrigin, Mode, PermissionMode, Run, SessionConfig,
+    SessionDetail,
+};
 use aidex_providers::{ChatMessage, Role};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 pub const WIRE_BUDGET: usize = 900 * 1024;
 pub const CHUNK_LIMIT: usize = 64 * 1024;
 
@@ -25,6 +29,18 @@ pub struct RunView {
     pub has_runtime_ref: bool,
     pub transcript_omitted: bool,
     pub pending_call_count: usize,
+    /// Index of the run's user message in the conversation history (root runs).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub message_index: Option<usize>,
+    /// Conversation mode, permission mode and project when the run began;
+    /// absent for runs recorded before these fields existed (or re-saved by
+    /// an older daemon).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<Mode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub permission_mode: Option<PermissionMode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct CheckpointView {
@@ -60,6 +76,9 @@ pub struct MessageView {
     /// started with `skills`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub skills: Option<Vec<String>>,
+    /// Attachments sent with this user message, in the order they were sent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub attachments: Option<Vec<AttachmentRef>>,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct ApprovalView {
@@ -100,6 +119,10 @@ pub struct SessionView {
     pub checkpoints_truncated: bool,
     pub runtime_ref_omitted: bool,
     pub commands_omitted: bool,
+    /// Set on a conversation created by `conversation.fork`: its first
+    /// `message_count` messages are a copy of `session_id`'s history.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub forked_from: Option<ForkOrigin>,
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct ContentChunk {
@@ -185,6 +208,10 @@ pub fn run(r: &Run) -> RunView {
         has_runtime_ref: r.runtime_ref.is_some(),
         transcript_omitted: true,
         pending_call_count: r.pending_calls.len(),
+        message_index: r.message_index,
+        mode: r.mode,
+        permission_mode: r.permission_mode,
+        workspace_id: r.workspace_id.clone(),
     }
 }
 pub fn checkpoint(c: &Checkpoint) -> CheckpointView {
@@ -209,11 +236,40 @@ pub fn skill_index(s: &SessionDetail) -> SkillIndex {
         .filter_map(|r| Some((r.message_index?, r.skills.clone())))
         .collect()
 }
-/// [`message`] with the skills invoked by that message, if any.
-pub fn message_with_skills(m: &ChatMessage, index: usize, skills: &SkillIndex) -> MessageView {
+/// Sent attachments by the session-history index of their user message.
+pub type AttachmentIndex = HashMap<usize, Vec<AttachmentRef>>;
+/// What session history adds to its user messages: invoked skills (from the
+/// runs) and sent attachments (from the attachments table, which is
+/// authoritative).
+#[derive(Clone, Debug, Default)]
+pub struct MessageExtras {
+    pub skills: SkillIndex,
+    pub attachments: AttachmentIndex,
+}
+impl MessageExtras {
+    /// The extras of `s`, with its sent attachments as listed by
+    /// `SessionStore::message_attachments`.
+    pub fn of(s: &SessionDetail, attachments: BTreeMap<usize, Vec<AttachmentMeta>>) -> Self {
+        Self {
+            skills: skill_index(s),
+            attachments: attachments
+                .into_iter()
+                .map(|(index, metas)| (index, metas.iter().map(attachment_ref).collect()))
+                .collect(),
+        }
+    }
+}
+/// [`message`] with the skills invoked and the attachments sent with that
+/// message, if any (user messages only).
+pub fn message_with_extras(m: &ChatMessage, index: usize, extras: &MessageExtras) -> MessageView {
     let mut view = message(m, index);
     if m.role == Role::User {
-        view.skills = skills.get(&index).cloned();
+        view.skills = extras.skills.get(&index).cloned();
+        view.attachments = extras
+            .attachments
+            .get(&index)
+            .filter(|refs| !refs.is_empty())
+            .cloned();
     }
     view
 }
@@ -241,6 +297,7 @@ pub fn message(m: &ChatMessage, index: usize) -> MessageView {
         tool_calls_truncated: m.tool_calls.len() > 4,
         tool_call_id: m.tool_call_id.as_ref().map(|id| prefix(id, 256)),
         skills: None,
+        attachments: None,
     }
 }
 pub fn approval(a: &Approval) -> ApprovalView {
@@ -272,13 +329,13 @@ pub fn session(
     s: &SessionDetail,
     offset: Option<usize>,
     limit: Option<usize>,
+    extras: &MessageExtras,
 ) -> Result<Value, RpcError> {
     let limit = page_limit(limit)?;
     let offset = offset
         .unwrap_or_else(|| s.messages.len().saturating_sub(limit))
         .min(s.messages.len());
     let end = (offset + limit).min(s.messages.len());
-    let skills = skill_index(s);
     let view = SessionView {
         id: s.id.clone(),
         configuration: s.configuration.clone(),
@@ -287,7 +344,7 @@ pub fn session(
         messages: s.messages[offset..end]
             .iter()
             .enumerate()
-            .map(|(n, m)| message_with_skills(m, offset + n, &skills))
+            .map(|(n, m)| message_with_extras(m, offset + n, extras))
             .collect(),
         messages_offset: offset,
         total_messages: s.messages.len(),
@@ -318,6 +375,7 @@ pub fn session(
         checkpoints_truncated: s.checkpoints.len() > 100,
         runtime_ref_omitted: s.runtime_ref.is_some(),
         commands_omitted: true,
+        forked_from: s.forked_from.clone(),
     };
     bounded(
         serde_json::to_value(view).map_err(|e| RpcError::invalid_params(e.to_string()))?,
@@ -328,7 +386,7 @@ pub fn history(
     messages: &[ChatMessage],
     offset: usize,
     limit: Option<usize>,
-    skills: &SkillIndex,
+    extras: &MessageExtras,
 ) -> Result<Value, RpcError> {
     let limit = page_limit(limit)?;
     if offset > messages.len() {
@@ -338,7 +396,7 @@ pub fn history(
     }
     let end = (offset + limit).min(messages.len());
     bounded(
-        json!({"messages":messages[offset..end].iter().enumerate().map(|(n,m)|message_with_skills(m,offset+n,skills)).collect::<Vec<_>>(),"offset":offset,"total_messages":messages.len(),"next_offset":(end<messages.len()).then_some(end),"truncated":end<messages.len()}),
+        json!({"messages":messages[offset..end].iter().enumerate().map(|(n,m)|message_with_extras(m,offset+n,extras)).collect::<Vec<_>>(),"offset":offset,"total_messages":messages.len(),"next_offset":(end<messages.len()).then_some(end),"truncated":end<messages.len()}),
         false,
     )
 }

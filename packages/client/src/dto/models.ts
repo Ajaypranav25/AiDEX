@@ -133,7 +133,15 @@ export type ProviderModel = {
   cost: CostHint | null;
   min_ram_bytes: number | null;
   source: CapabilitySource;
+  /**
+   * Image and PDF input the model accepts through its provider account, computed on every
+   * `model.list` (never persisted). Absent from daemons that predate attachments.
+   */
+  input?: ModelInput;
 };
+
+/** Whether a model reads image and PDF attachments. */
+export type ModelInput = { images: boolean; pdf: boolean };
 
 export type NetworkState = "online" | "offline";
 
