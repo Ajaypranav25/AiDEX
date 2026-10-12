@@ -224,6 +224,87 @@ fn invalid_content_added_after_install_revokes_trust() {
     assert!(drive.store.enabled_contributions().unwrap().is_empty());
 }
 
+/// Keeps one file unreadable while it is alive.
+struct Unreadable {
+    #[cfg(windows)]
+    _handle: fs::File,
+    #[cfg(unix)]
+    path: std::path::PathBuf,
+}
+
+impl Unreadable {
+    fn new(path: &std::path::Path) -> Self {
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            // No sharing: every other open of the file fails until this handle closes.
+            let handle = fs::OpenOptions::new()
+                .read(true)
+                .share_mode(0)
+                .open(path)
+                .unwrap();
+            Self { _handle: handle }
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(path, fs::Permissions::from_mode(0o000)).unwrap();
+            Self {
+                path: path.to_path_buf(),
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for Unreadable {
+    fn drop(&mut self) {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&self.path, fs::Permissions::from_mode(0o644));
+    }
+}
+
+#[test]
+fn unreadable_files_contribute_nothing_but_keep_trust() {
+    let drive = drive();
+    let (_base, source) = plugin_folder("code-review");
+    let hash = drive
+        .store
+        .install(&source, false)
+        .unwrap()
+        .plugin
+        .summary
+        .installed_sha256;
+    drive.store.trust("code-review", &hash, true).unwrap();
+    assert_eq!(drive.store.enabled_contributions().unwrap().len(), 1);
+
+    let root = drive.paths.plugins().join("code-review");
+    let locked = Unreadable::new(&root.join("scripts/check.py"));
+    if fs::read(root.join("scripts/check.py")).is_ok() {
+        // Running with privileges that ignore file permissions (e.g. root).
+        return;
+    }
+    // Unverified files contribute nothing, however often they are checked...
+    assert!(drive.store.enabled_contributions().unwrap().is_empty());
+    assert!(drive.store.enabled_contributions().unwrap().is_empty());
+    let shown = drive.store.show("code-review").unwrap().summary;
+    assert!(!shown.enabled && !shown.trusted, "{shown:?}");
+    // ...but an I/O error is not evidence of tampering: trust and enablement stay.
+    let provenance = fs::read_to_string(drive.paths.config().join(PROVENANCE_FILE)).unwrap();
+    assert!(provenance.contains("enabled = true"), "{provenance}");
+    assert!(
+        provenance.contains(&format!("trusted_sha256 = \"{hash}\"")),
+        "{provenance}"
+    );
+    assert_eq!(drive.events.names(), ["extension.enabled"]);
+
+    drop(locked);
+    let contributions = drive.store.enabled_contributions().unwrap();
+    assert_eq!(contributions.len(), 1);
+    assert_eq!(contributions[0].name, "code-review");
+    assert!(drive.store.show("code-review").unwrap().summary.enabled);
+}
+
 #[test]
 fn plugins_without_skills_or_mcp_contribute_their_root_only() {
     let drive = drive();

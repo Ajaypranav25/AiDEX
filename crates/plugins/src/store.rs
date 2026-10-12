@@ -501,7 +501,8 @@ impl PluginStore {
 
     /// The skills and MCP files of every enabled plugin whose current tree the user
     /// trusted. Enabled plugins that fail verification are disabled, lose their trust,
-    /// and contribute nothing.
+    /// and contribute nothing; a plugin whose files cannot be read this time keeps its
+    /// trust and stays enabled, but contributes nothing until a check verifies it again.
     pub fn enabled_contributions(&self) -> Result<Vec<PluginContribution>, PluginError> {
         let _guard = self.guard();
         let mut provenance = self.load()?;
@@ -514,7 +515,9 @@ impl PluginStore {
         {
             let checked = self.check(record);
             revocations.push((record.name.clone(), enforce(record, &checked)));
-            if !record.enabled {
+            // Only files this check proved intact and trusted contribute: unreadable
+            // ones keep their trust (see `enforce`) but contribute nothing now.
+            if !record.enabled || !trust_is_valid(record, &checked) {
                 continue;
             }
             let root = self.plugin_dir(&record.name);

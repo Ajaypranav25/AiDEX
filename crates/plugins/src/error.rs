@@ -112,11 +112,12 @@ impl fmt::Display for PluginError {
             ),
             Self::InvalidManifest(message) => write!(f, "invalid plugin manifest: {message}"),
             Self::UnsafeContent { path, reason } => {
-                write!(f, "refused plugin content `{path}`: {reason}")
+                write!(f, "refused plugin content `{}`: {reason}", shown_path(path))
             }
             Self::Executable { path } => write!(
                 f,
-                "refused plugin content `{path}`: plugins may not ship executables unless `.mcp.json` declares them as a server command"
+                "refused plugin content `{}`: plugins may not ship executables unless `.mcp.json` declares them as a server command",
+                shown_path(path)
             ),
             Self::TooLarge(message) => write!(f, "plugin is too large: {message}"),
             Self::HashMismatch { name } => write!(
@@ -140,3 +141,45 @@ impl fmt::Display for PluginError {
 }
 
 impl std::error::Error for PluginError {}
+
+/// A refused path comes from the refused plugin and may hold any character: control
+/// characters (terminal escapes, carriage returns, line breaks) are shown escaped, so
+/// the message cannot drive a terminal or fake lines wherever it is printed.
+fn shown_path(path: &str) -> String {
+    let mut shown = String::with_capacity(path.len());
+    for c in path.chars() {
+        if c.is_control() {
+            shown.extend(c.escape_debug());
+        } else {
+            shown.push(c);
+        }
+    }
+    shown
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refused_paths_cannot_drive_the_terminal() {
+        let hostile = "a\u{1b}]52;c;eA==\u{7}\r\nfake\tb";
+        for error in [
+            PluginError::unsafe_content(hostile, "character '\\u{1b}' is not allowed"),
+            PluginError::Executable {
+                path: hostile.into(),
+            },
+        ] {
+            let message = error.to_string();
+            assert!(!message.chars().any(char::is_control), "{message:?}");
+            assert!(
+                message.contains(r"`a\u{1b}]52;c;eA==\u{7}\r\nfake\tb`"),
+                "{message}"
+            );
+        }
+        assert_eq!(
+            PluginError::unsafe_content("bin/tool.exe", "r").to_string(),
+            "refused plugin content `bin/tool.exe`: r"
+        );
+    }
+}

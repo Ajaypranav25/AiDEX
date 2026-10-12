@@ -28,7 +28,8 @@ use crate::{
 pub const MCP_JSON: &str = ".mcp.json";
 /// The skills directory at the plugin root.
 pub const SKILLS_DIR: &str = "skills";
-const SKILL_FILES: [&str; 2] = ["SKILL.md", "skill.md"];
+/// The skill file name, matched in any ASCII letter case as skill discovery does.
+const SKILL_FILE: &str = "skill.md";
 const README_FILES: [&str; 3] = ["README.md", "readme.md", "README"];
 /// Claude Code plugin components AiDEX never loads or runs.
 const UNSUPPORTED_COMPONENTS: [&str; 4] = ["agents", "commands", "hooks", "output-styles"];
@@ -224,8 +225,12 @@ fn server(name: &str, config: &Value) -> Result<McpServerEntry, PluginError> {
         Some(Value::Array(args)) if args.len() <= MAX_MCP_ARGS => args
             .iter()
             .map(|arg| match arg {
+                // Arguments may hold tabs or line breaks (`-c` scripts); the review
+                // shows them with control characters replaced (see `display`).
                 Value::String(arg) if arg.len() <= MAX_MCP_TEXT_BYTES => Ok(display(arg)),
-                _ => Err(invalid("`args` must be strings")),
+                _ => Err(invalid(&format!(
+                    "`args` must be strings of at most {MAX_MCP_TEXT_BYTES} bytes"
+                ))),
             })
             .collect::<Result<_, _>>()?,
         Some(_) => {
@@ -299,9 +304,14 @@ pub(crate) fn bundled_path(command: &str) -> Option<String> {
     validate_relative(&relative).ok().map(|()| relative)
 }
 
-/// Redacted, bounded text for display.
+/// Redacted, bounded text for display. Control characters (terminal escapes, carriage
+/// returns, ...) become U+FFFD so plugin text cannot drive a terminal or hide lines.
 fn display(text: &str) -> String {
-    truncate(&redact_text(text), MAX_TEXT_BYTES)
+    let visible: String = redact_text(text)
+        .chars()
+        .map(|c| if c.is_control() { '\u{fffd}' } else { c })
+        .collect();
+    truncate(&visible, MAX_TEXT_BYTES)
 }
 
 fn truncate(text: &str, max: usize) -> String {
@@ -315,23 +325,23 @@ fn truncate(text: &str, max: usize) -> String {
     format!("{}…", &text[..end])
 }
 
-/// Skill directories under `skills/` that hold a `SKILL.md` (or `skill.md`).
+/// Skill directories under `skills/` that hold a skill file, chosen exactly as skill
+/// discovery (`aidex_skills`) chooses it, so the review lists every skill that loads:
+/// hidden directories are skipped, and the file is `SKILL.md`, else `skill.md`, else
+/// another letter case of it.
 fn skills(root: &Path) -> Result<(Vec<SkillEntry>, bool), PluginError> {
     let dir = root.join(SKILLS_DIR);
     if !is_real_dir(&dir) {
         return Ok((Vec::new(), false));
     }
     let mut names = sorted_names(&dir)?;
-    names.retain(|name| is_real_dir(&dir.join(name)));
+    names.retain(|name| !name.starts_with('.') && is_real_dir(&dir.join(name)));
     let mut skills = Vec::new();
     let mut truncated = false;
     for name in names {
         let skill_dir = dir.join(&name);
         let present = sorted_names(&skill_dir)?;
-        let Some(file) = SKILL_FILES
-            .iter()
-            .find(|file| present.iter().any(|name| name == *file))
-        else {
+        let Some(file) = skill_file(&present) else {
             continue;
         };
         if skills.len() == MAX_LISTED_SKILLS {
@@ -351,6 +361,20 @@ fn skills(root: &Path) -> Result<(Vec<SkillEntry>, bool), PluginError> {
         });
     }
     Ok((skills, truncated))
+}
+
+/// The skill file among a directory's entry names: `SKILL.md`, else `skill.md`, else
+/// any other ASCII letter case of `skill.md` (the first in name order).
+fn skill_file(present: &[String]) -> Option<&str> {
+    present
+        .iter()
+        .filter(|entry| entry.eq_ignore_ascii_case(SKILL_FILE))
+        .min_by_key(|entry| match entry.as_str() {
+            "SKILL.md" => 0,
+            "skill.md" => 1,
+            _ => 2,
+        })
+        .map(String::as_str)
 }
 
 /// Best-effort `name` and `description` scalars from YAML front matter.
@@ -409,8 +433,20 @@ fn readme(root: &Path) -> Result<(Option<String>, bool), PluginError> {
     };
     let text = String::from_utf8_lossy(&bytes);
     // A cut multi-byte character becomes U+FFFD; drop it.
-    let text = text.trim_end_matches('\u{fffd}');
-    Ok((Some(redact_text(text).into_owned()), truncated))
+    let text = text.trim_end_matches('\u{fffd}').replace("\r\n", "\n");
+    // Keep line breaks and tabs; other control characters (terminal escapes, lone
+    // carriage returns) become U+FFFD.
+    let text: String = redact_text(&text)
+        .chars()
+        .map(|c| {
+            if c.is_control() && c != '\n' && c != '\t' {
+                '\u{fffd}'
+            } else {
+                c
+            }
+        })
+        .collect();
+    Ok((Some(text), truncated))
 }
 
 /// Up to `max` leading bytes of a regular file and whether more exist.
@@ -487,6 +523,20 @@ mod tests {
 
         let bare = parse_mcp_json(br#"{"x": {"command": "./run.cmd"}}"#).unwrap();
         assert_eq!(bare[0].bundled_command.as_deref(), Some("run.cmd"));
+        // Control characters cannot disguise what the review shows.
+        let escapes = json!({"mcpServers": {"x": {
+            "command": "sh",
+            "args": ["-c", "evil\r  x (stdio): npx\u{1b}[2K", "a\tb"]
+        }}});
+        let shown = parse_mcp_json(escapes.to_string().as_bytes()).unwrap();
+        assert_eq!(
+            shown[0].args,
+            [
+                "-c",
+                "evil\u{fffd}  x (stdio): npx\u{fffd}[2K",
+                "a\u{fffd}b"
+            ]
+        );
         for bad in [
             &br#"[]"#[..],
             br#"{"mcpServers": []}"#,
@@ -532,5 +582,27 @@ mod tests {
             front_matter("---\ndescription: >\n  folded\n---\n"),
             (None, None)
         );
+        assert_eq!(
+            front_matter("---\nname: a\u{1b}[2Kb\ndescription: x\u{7}y\n---\n"),
+            (Some("a\u{fffd}[2Kb".into()), Some("x\u{fffd}y".into()))
+        );
+    }
+
+    #[test]
+    fn skill_files_match_any_letter_case() {
+        let names = |list: &[&str]| list.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert_eq!(
+            skill_file(&names(&["Skill.md", "notes.md"])),
+            Some("Skill.md")
+        );
+        assert_eq!(
+            skill_file(&names(&["SKILL.md", "skill.md"])),
+            Some("SKILL.md")
+        );
+        assert_eq!(
+            skill_file(&names(&["Skill.md", "skill.md"])),
+            Some("skill.md")
+        );
+        assert_eq!(skill_file(&names(&["README.md", "skill.mdx"])), None);
     }
 }

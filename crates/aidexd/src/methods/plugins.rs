@@ -9,11 +9,12 @@
 
 use crate::{
     errors::RpcError,
+    methods::native_view::WIRE_BUDGET,
     router::{Router, RouterError},
     rpc::{expect_no_params, parse_params, to_result},
     services::Services,
 };
-use aidex_plugins::PluginError;
+use aidex_plugins::{PluginDetail, PluginError};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::{path::Path, sync::Arc};
@@ -75,6 +76,49 @@ pub fn plugin_error(error: PluginError) -> RpcError {
     RpcError::service(error.code(), error.to_string()).with_data(data)
 }
 
+fn encoded_len<T: Serialize>(value: &T) -> usize {
+    serde_json::to_vec(value).map_or(usize::MAX, |bytes| bytes.len())
+}
+
+/// Fit a plugin review into `budget` bytes of JSON. The README goes first, then
+/// skills from the end (`skills_truncated`), and as a last resort the contents
+/// (with an error saying so). The summary (name, counts, tree hash, trust) is always
+/// kept, so a committed install is never reported as a failure and the plugin can
+/// still be reviewed and trusted by its hash.
+fn bounded_detail(detail: &mut PluginDetail, budget: usize) {
+    let mut total = encoded_len(detail);
+    if total <= budget {
+        return;
+    }
+    let Some(contents) = detail.contents.as_mut() else {
+        return;
+    };
+    if contents.readme.take().is_some() {
+        contents.readme_truncated = true;
+        total = encoded_len(detail);
+        if total <= budget {
+            return;
+        }
+    }
+    let Some(contents) = detail.contents.as_mut() else {
+        return;
+    };
+    while total > budget {
+        let Some(skill) = contents.skills.pop() else {
+            break;
+        };
+        contents.skills_truncated = true;
+        total = total.saturating_sub(encoded_len(&skill).saturating_add(1));
+    }
+    if encoded_len(detail) > budget {
+        detail.contents = None;
+        detail
+            .summary
+            .error
+            .get_or_insert_with(|| "the plugin's contents are too large to list for review".into());
+    }
+}
+
 pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<(), RouterError> {
     let shared = Arc::clone(services);
     router.register(LIST, move |_context, params| {
@@ -84,17 +128,21 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
     let shared = Arc::clone(services);
     router.register(SHOW, move |_context, params| {
         let params: NameParams = parse_params(params)?;
-        to_result(&shared.plugins().show(&params.name).map_err(plugin_error)?)
+        let mut detail = shared.plugins().show(&params.name).map_err(plugin_error)?;
+        bounded_detail(&mut detail, WIRE_BUDGET);
+        to_result(&detail)
     })?;
     let shared = Arc::clone(services);
     router.register(INSTALL, move |_context, params| {
         let params: InstallParams = parse_params(params)?;
-        let outcome = shared
+        let mut outcome = shared
             .plugins()
             .install(Path::new(params.source_path.trim()), params.replace)
             .map_err(plugin_error)?;
         // A replaced plugin installs disabled: drop the servers it contributed.
         super::mcp::sync_plugins(&shared);
+        // The install is committed: never let an oversized review turn it into an error.
+        bounded_detail(&mut outcome.plugin, WIRE_BUDGET);
         to_result(&outcome)
     })?;
     let shared = Arc::clone(services);
@@ -433,6 +481,224 @@ mod tests {
         call(UNINSTALL, json!({"name": "review"}));
         assert!(plugin_servers(&call("mcp.list", json!({}))).is_empty());
         assert!(skill_ids(&call("skill.list", json!({}))).is_empty());
+    }
+
+    /// Keeps one file unreadable while it is alive.
+    struct Unreadable {
+        #[cfg(windows)]
+        _handle: fs::File,
+        #[cfg(unix)]
+        path: std::path::PathBuf,
+    }
+
+    impl Unreadable {
+        fn new(path: &Path) -> Self {
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::OpenOptionsExt;
+                // No sharing: every other open of the file fails until this handle closes.
+                let handle = fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(0)
+                    .open(path)
+                    .unwrap();
+                Self { _handle: handle }
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(path, fs::Permissions::from_mode(0o000)).unwrap();
+                Self {
+                    path: path.to_path_buf(),
+                }
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for Unreadable {
+        fn drop(&mut self) {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&self.path, fs::Permissions::from_mode(0o644));
+        }
+    }
+
+    #[test]
+    fn unreadable_plugins_contribute_nothing_and_lose_their_servers() {
+        let fixture = fixture();
+        let mut router = Router::new();
+        register(&mut router, &fixture.services).unwrap();
+        crate::methods::skills::register(&mut router, &fixture.services).unwrap();
+        crate::methods::mcp::register(&mut router, &fixture.services).unwrap();
+        let call =
+            |method: &str, params: Value| router.call(&fixture.context, method, params).unwrap();
+        let plugin_servers = || -> Vec<Value> {
+            let listing = call("mcp.list", json!({}));
+            listing["servers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|server| server["source"] == "plugin")
+                .cloned()
+                .collect()
+        };
+        let skill_ids = || -> Vec<String> {
+            let listing = call("skill.list", json!({}));
+            listing["skills"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|skill| skill["id"].as_str().unwrap().to_owned())
+                .collect()
+        };
+        let installed: InstallOutcome =
+            serde_json::from_value(call(INSTALL, json!({"source_path": fixture.plugin_path()})))
+                .unwrap();
+        let hash = installed.plugin.summary.tree_sha256.unwrap();
+        call(
+            TRUST,
+            json!({"name": "review", "tree_sha256": hash, "enable": true}),
+        );
+        assert_eq!(plugin_servers().len(), 1);
+        // The user enabled the server the plugin contributed.
+        let store = fixture.services.mcp().unwrap().store();
+        store.set_enabled("review-github", true).unwrap();
+
+        let skill = fixture
+            .services
+            .paths()
+            .plugins()
+            .join("review/skills/review/SKILL.md");
+        let locked = Unreadable::new(&skill);
+        if fs::read(&skill).is_ok() {
+            // Running with privileges that ignore file permissions (e.g. root).
+            return;
+        }
+        // Files that cannot be verified contribute no skills, and the servers they
+        // contributed are stopped and removed so nothing of the plugin can run.
+        assert!(skill_ids().is_empty());
+        assert!(plugin_servers().is_empty());
+        assert!(!store.exists("review-github"));
+        let listed: PluginList = fixture.call(LIST, json!({}));
+        assert!(!listed.plugins[0].enabled);
+        assert_eq!(
+            listed.plugins[0].trusted_sha256.as_deref(),
+            Some(hash.as_str())
+        );
+
+        // Readable again, the plugin contributes again (its server disabled, as on enable).
+        drop(locked);
+        assert_eq!(skill_ids(), ["plugin:review"]);
+        let servers = plugin_servers();
+        assert_eq!(servers.len(), 1);
+        assert_eq!(servers[0]["enabled"], false);
+        let listed: PluginList = fixture.call(LIST, json!({}));
+        assert!(listed.plugins[0].enabled && listed.plugins[0].trusted);
+    }
+
+    #[test]
+    fn reviewed_mcp_servers_are_the_ones_imported() {
+        let fixture = fixture();
+        let mut router = Router::new();
+        register(&mut router, &fixture.services).unwrap();
+        crate::methods::mcp::register(&mut router, &fixture.services).unwrap();
+        let call =
+            |method: &str, params: Value| router.call(&fixture.context, method, params).unwrap();
+        // Claude Code plugins may ship the server map without the `mcpServers` wrapper.
+        let plugin = fixture.source.path().join("bare");
+        for (path, content) in [
+            (
+                "aidex-plugin.json",
+                r#"{"name": "bare", "version": "1", "description": "Bare map."}"#,
+            ),
+            (
+                ".mcp.json",
+                "\u{feff}{\"github\": {\"command\": \"npx\", \"args\": [\"-y\", \"server-github\"]}}",
+            ),
+        ] {
+            let path = plugin.join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, content).unwrap();
+        }
+        let installed: InstallOutcome = serde_json::from_value(call(
+            INSTALL,
+            json!({"source_path": plugin.display().to_string()}),
+        ))
+        .unwrap();
+        let reviewed = &installed.plugin.contents.as_ref().unwrap().mcp_servers;
+        assert_eq!(installed.plugin.summary.mcp_server_count, 1);
+        assert_eq!(reviewed[0].name, "github");
+        let hash = installed.plugin.summary.tree_sha256.unwrap();
+        call(
+            TRUST,
+            json!({"name": "bare", "tree_sha256": hash, "enable": true}),
+        );
+        let listing = call("mcp.list", json!({}));
+        let imported: Vec<&Value> = listing["servers"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|server| server["source_owner"] == "bare")
+            .collect();
+        assert_eq!(imported.len(), 1, "{listing}");
+        assert_eq!(imported[0]["id"], "bare-github");
+        assert_eq!(imported[0]["enabled"], false);
+    }
+
+    #[test]
+    fn oversized_reviews_fit_the_wire_budget() {
+        let fixture = fixture();
+        let plugin = fixture.source.path().join("noisy");
+        let write = |path: &str, content: &str| {
+            let path = plugin.join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, content).unwrap();
+        };
+        write(
+            "aidex-plugin.json",
+            r#"{"name": "noisy", "version": "1", "description": "Noisy."}"#,
+        );
+        write("README.md", &"# Noisy\n".repeat(2048));
+        // Quotes double in JSON: 256 skills of 1 KiB names and descriptions exceed 1 MiB.
+        let quotes = "\"".repeat(1026);
+        for index in 0..256 {
+            write(
+                &format!("skills/s{index:03}/SKILL.md"),
+                &format!("---\nname: {quotes}\ndescription: {quotes}\n---\nBody.\n"),
+            );
+        }
+        let source = plugin.display().to_string();
+        let raw = fixture
+            .router
+            .call(&fixture.context, INSTALL, json!({ "source_path": source }))
+            .unwrap();
+        assert!(raw.to_string().len() <= WIRE_BUDGET);
+        let installed: InstallOutcome = serde_json::from_value(raw).unwrap();
+        assert_eq!(installed.plugin.summary.skill_count, 256);
+        let contents = installed.plugin.contents.as_ref().unwrap();
+        assert!(contents.skills_truncated && contents.readme_truncated);
+        assert!(contents.readme.is_none());
+        assert!(!contents.skills.is_empty() && contents.skills.len() < 256);
+
+        let shown = fixture
+            .router
+            .call(&fixture.context, SHOW, json!({"name": "noisy"}))
+            .unwrap();
+        assert!(shown.to_string().len() <= WIRE_BUDGET);
+        assert_eq!(shown["contents"]["skills_truncated"], true);
+        assert!(shown["tree_sha256"].is_string());
+
+        // With no room for any contents, only the summary is kept.
+        let mut detail: PluginDetail = serde_json::from_value(shown).unwrap();
+        let mut summary_only = detail.clone();
+        summary_only.contents = None;
+        summary_only.summary.error =
+            Some("the plugin's contents are too large to list for review".into());
+        let budget = encoded_len(&summary_only);
+        bounded_detail(&mut detail, budget);
+        assert_eq!(detail, summary_only);
+        assert!(encoded_len(&detail) <= budget);
+        assert_eq!(detail.summary.skill_count, 256);
     }
 
     #[test]

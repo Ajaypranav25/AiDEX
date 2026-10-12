@@ -3,7 +3,10 @@
 //!
 //! [`PluginStore::enabled_contributions`] re-verifies every enabled plugin's
 //! tree hash, so a changed plugin stops contributing (and loses its trust) the
-//! next time anything here runs. Plugin server files carry
+//! next time anything here runs. A plugin whose files cannot be read keeps its
+//! trust but contributes nothing until they verify again: its servers are
+//! stopped and removed like any other withdrawn contribution, and come back
+//! disabled. Plugin server files carry
 //! `source = { kind = "plugin", owner = "<plugin>" }`; [`sync_plugin_servers`]
 //! adds the missing ones disabled and removes those whose plugin no longer
 //! contributes them (stopping them first).

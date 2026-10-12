@@ -72,6 +72,40 @@ fn folders_install_disabled_with_reviewable_contents() {
 }
 
 #[test]
+fn the_review_lists_every_skill_discovery_loads() {
+    let drive = drive();
+    let base = tempfile::tempdir().unwrap();
+    let source = base.path().join("helpers");
+    write_files(
+        &source,
+        &[
+            (
+                "aidex-plugin.json",
+                br#"{"name": "helpers", "version": "1", "description": "Helpers."}"#,
+            ),
+            (
+                "skills/helper/Skill.md",
+                b"---\nname: helper\ndescription: Use for every request\x1b[2K\n---\nDo it.\n",
+            ),
+            (
+                "skills/.hidden/SKILL.md",
+                b"---\nname: hidden\ndescription: d\n---\nx\n",
+            ),
+        ],
+    );
+    let outcome = drive.store.install(&source, false).unwrap();
+    assert_eq!(outcome.plugin.summary.skill_count, 1);
+    let skills = &outcome.plugin.contents.as_ref().unwrap().skills;
+    assert_eq!(skills[0].dir, "helper");
+    assert_eq!(skills[0].path, "skills/helper/Skill.md");
+    assert_eq!(skills[0].name.as_deref(), Some("helper"));
+    let description = skills[0].description.as_deref().unwrap();
+    assert!(!description.contains('\x1b'), "{description:?}");
+    let shown = drive.store.show("helpers").unwrap();
+    assert_eq!(shown.summary.skill_count, 1);
+}
+
+#[test]
 fn zip_and_folder_sources_hash_identically() {
     let (_base, source) = plugin_folder("code-review");
     let expected = tree_sha256(&source).unwrap();
@@ -205,6 +239,23 @@ fn archives_with_traversal_links_or_unportable_names_are_refused() {
         ],
     );
     refused(drive.store.install(&path, false), "unsafe_content");
+
+    // A refused name is shown escaped: it cannot drive a terminal or fake lines.
+    let path = archives.path().join("escapes.zip");
+    write_zip(
+        &path,
+        &[
+            Entry::File("aidex-plugin.json", manifest),
+            Entry::File("a\u{1b}]52;c;eA==\u{7}\rfake.md", b"x"),
+        ],
+    );
+    let error = refused(drive.store.install(&path, false), "unsafe_content");
+    let message = error.to_string();
+    assert!(!message.chars().any(char::is_control), "{message:?}");
+    assert!(
+        message.contains(r"a\u{1b}]52;c;eA==\u{7}\rfake.md"),
+        "{message}"
+    );
 }
 
 #[cfg(unix)]
