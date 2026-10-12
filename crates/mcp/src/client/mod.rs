@@ -401,17 +401,20 @@ impl McpClient {
                     &CancelToken::new().with_timeout(Duration::from_secs(2)),
                 );
             }
-            if error.kind == McpErrorKind::Timeout {
-                McpError::new(
-                    McpErrorKind::Timeout,
-                    format!(
-                        "the MCP server did not answer `{method}` within {} s",
-                        timeout.as_secs().max(1)
-                    ),
-                )
-            } else {
-                error
+            if error.kind != McpErrorKind::Timeout {
+                return error;
             }
+            // Name this request's own limit only when it, not the caller's
+            // earlier deadline, ran out.
+            let message = if cancel.is_stopped() {
+                format!("the MCP server did not answer `{method}` before the caller's time limit")
+            } else {
+                format!(
+                    "the MCP server did not answer `{method}` within {} s",
+                    timeout.as_secs().max(1)
+                )
+            };
+            McpError::new(McpErrorKind::Timeout, message)
         })
     }
 }

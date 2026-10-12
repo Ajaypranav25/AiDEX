@@ -102,10 +102,14 @@ fn python() -> String {
     })
 }
 
+/// The `aidex-mcp` fixture server script.
+fn fixture_script() -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../mcp/tests/fixtures/mcp_server.py")
+}
+
 /// A stdio server running the `aidex-mcp` fixture.
 fn stdio_spec(id: &str, enabled: bool) -> Value {
-    let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../mcp/tests/fixtures/mcp_server.py");
+    let script = fixture_script();
     json!({
         "id": id,
         "name": format!("Fixture {id}"),
@@ -219,10 +223,14 @@ fn servers_are_configured_started_and_stopped_over_rpc() {
     );
     assert!(events.contains(&"process.started".to_owned()), "{events:?}");
 
+    // Removing a server also deletes its scratch home.
+    let home = f.services.paths().tmp().join("mcp").join("fixture");
+    assert!(home.is_dir());
     assert_eq!(
         f.ok(REMOVE, json!({"id": "fixture"})),
         json!({"removed": true})
     );
+    assert!(!home.exists());
     assert_eq!(
         f.ok(REMOVE, json!({"id": "fixture"})),
         json!({"removed": false})
@@ -285,6 +293,99 @@ fn remote_servers_pass_the_offline_switch_and_need_vault_secrets() {
     assert_eq!(f.status("remote"), "needs_auth");
     let names = f.event_names();
     assert!(names.contains(&"policy.decision".to_owned()), "{names:?}");
+}
+
+/// The daemon's supervisor resolves imported servers' paths: a trusted
+/// plugin's `${CLAUDE_PLUGIN_ROOT}` points into its installed folder, and a
+/// workspace server runs in its workspace root.
+#[test]
+fn plugin_and_workspace_servers_start_from_their_own_folders() {
+    let f = fixture();
+    let source = tempfile::tempdir().unwrap();
+    let plugin = source.path().join("toolkit");
+    std::fs::create_dir_all(plugin.join(".claude-plugin")).unwrap();
+    std::fs::create_dir_all(plugin.join("servers")).unwrap();
+    std::fs::write(
+        plugin.join(".claude-plugin/plugin.json"),
+        json!({"name": "toolkit", "version": "1.0.0", "description": "Bundles a server."})
+            .to_string(),
+    )
+    .unwrap();
+    std::fs::copy(fixture_script(), plugin.join("servers/echo.py")).unwrap();
+    std::fs::write(
+        plugin.join(".mcp.json"),
+        json!({"mcpServers": {"echo": {
+            "command": python(),
+            "args": ["-u", "${CLAUDE_PLUGIN_ROOT}/servers/echo.py", "normal"],
+        }}})
+        .to_string(),
+    )
+    .unwrap();
+    let plugins = f.services.plugins();
+    let installed = plugins.install(&plugin, false).unwrap();
+    let hash = installed.plugin.summary.tree_sha256.clone().unwrap();
+    plugins.trust("toolkit", &hash, true).unwrap();
+
+    // Listing brings in the plugin's server, disabled; once enabled it starts
+    // from the plugin's folder.
+    assert_eq!(f.status("toolkit-echo"), "stopped");
+    f.ok(SET_ENABLED, json!({"id": "toolkit-echo", "enabled": true}));
+    let started = f.ok(START, json!({"id": "toolkit-echo"}));
+    assert_eq!(started["status"], "running", "{started}");
+    assert_eq!(started["tool_count"], 7);
+    assert_eq!(f.ok(TOOLS, json!({"id": "toolkit-echo"}))["total"], 7);
+    assert_eq!(
+        f.ok(STOP, json!({"id": "toolkit-echo"}))["status"],
+        "stopped"
+    );
+    // Its files are as trusted, so the plugin still contributes the server.
+    let summary = plugins.show("toolkit").unwrap().summary;
+    assert!(summary.trusted && summary.enabled, "{summary:?}");
+    assert_eq!(f.status("toolkit-echo"), "stopped");
+
+    // A bundled script changed after the review never runs: starting the
+    // server re-verifies the plugin first, which withdraws its servers.
+    let bundled = f.services.paths().plugins().join("toolkit/servers/echo.py");
+    let mut script = std::fs::read(&bundled).unwrap();
+    script.extend_from_slice(b"\n# changed after review\n");
+    std::fs::write(&bundled, script).unwrap();
+    assert_eq!(
+        f.refused(START, json!({"id": "toolkit-echo"})),
+        (Some(ErrorCode::NotFound), "not_found".into())
+    );
+    let summary = plugins.show("toolkit").unwrap().summary;
+    assert!(!summary.trusted && !summary.enabled, "{summary:?}");
+
+    // A project's server names its script relative to the project.
+    let project = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(project.path().join("scripts")).unwrap();
+    std::fs::copy(fixture_script(), project.path().join("scripts/mcp.py")).unwrap();
+    std::fs::write(
+        project.path().join(".mcp.json"),
+        json!({"mcpServers": {"local": {
+            "command": python(),
+            "args": ["-u", "scripts/mcp.py", "normal"],
+        }}})
+        .to_string(),
+    )
+    .unwrap();
+    f.services
+        .workspaces()
+        .add_host(project.path(), Some("proj"))
+        .unwrap();
+    f.ok(IMPORT, json!({"workspace_id": "proj"}));
+    let listed = f.ok(LIST, json!({"workspace_id": "proj"}));
+    let id = listed["servers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|server| server["source"] == "workspace")
+        .map(|server| server["id"].as_str().unwrap().to_owned())
+        .unwrap();
+    f.ok(SET_ENABLED, json!({"id": id, "enabled": true}));
+    let started = f.ok(START, json!({"id": id}));
+    assert_eq!(started["status"], "running", "{started}");
+    assert_eq!(f.ok(STOP, json!({"id": id}))["status"], "stopped");
 }
 
 #[test]

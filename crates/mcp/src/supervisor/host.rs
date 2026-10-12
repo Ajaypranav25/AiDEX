@@ -3,26 +3,29 @@
 //! servers run through `aidex-sandbox` `spawn_interactive` with a cleared
 //! environment (the sandbox basics plus the server's `env_allowlist`) and the
 //! vault secrets mapped by `env_from_secrets`; HTTP servers get their header
-//! secrets and an egress check before every request.
+//! secrets and an egress check before every request. Imported servers' paths
+//! resolve against their plugin's folder or workspace root (see `roots`).
 
 use std::{
     fmt, fs,
     path::PathBuf,
     sync::{Arc, PoisonError},
+    thread,
     time::Duration,
 };
 
 use aidex_events::{EventKind, EventScope, EventSink};
 use aidex_sandbox::{
-    CommandSpec, DEFAULT_ENV_ALLOWLIST, ManagedProcess, NetworkMode, ResourceLimits, Sandbox,
-    SandboxError, SandboxLevel, SandboxRequest,
+    CommandSpec, DEFAULT_ENV_ALLOWLIST, ManagedProcess, Mount, NetworkMode, ResourceLimits,
+    Sandbox, SandboxError, SandboxLevel, SandboxRequest,
 };
 use aidex_vault::{ConsumerScope, SecretName, VaultErrorKind, VaultService};
 use zeroize::Zeroizing;
 
+use super::roots::SourceRoots;
 use crate::{
     EndpointUrl, HttpEndpoint, LogBuffer, LogStream, McpError, McpErrorKind, ServerConfig,
-    TransportKind, client::MAX_FRAME, redact::bounded_redacted,
+    TransportKind, client::MAX_FRAME, config::validate_id, redact::bounded_redacted,
 };
 
 /// Bytes buffered per output stream of a server process between reads (several
@@ -61,6 +64,8 @@ pub trait McpHost: Send + Sync {
     fn http_endpoint(&self, config: &ServerConfig) -> Result<HttpEndpoint, McpError>;
     /// A stdio server process ended after it was closed (for audit events).
     fn process_exited(&self, _process: &ManagedProcess) {}
+    /// The server was removed: drop what the host kept for it between starts.
+    fn forget(&self, _server_id: &str) {}
 }
 
 /// Policy checks around servers: the emergency stop for launches, and the offline
@@ -168,6 +173,7 @@ pub struct SandboxHost {
     secrets: Arc<dyn SecretSource>,
     gate: Arc<dyn McpGate>,
     events: Option<Arc<dyn EventSink>>,
+    roots: SourceRoots,
 }
 
 impl fmt::Debug for SandboxHost {
@@ -175,6 +181,7 @@ impl fmt::Debug for SandboxHost {
         f.debug_struct("SandboxHost")
             .field("helper", &self.sandbox.helper_path())
             .field("scratch_root", &self.scratch_root)
+            .field("roots", &self.roots)
             .finish_non_exhaustive()
     }
 }
@@ -194,6 +201,7 @@ impl SandboxHost {
             secrets,
             gate,
             events: None,
+            roots: SourceRoots::default(),
         }
     }
 
@@ -201,6 +209,27 @@ impl SandboxHost {
     #[must_use]
     pub fn with_events(mut self, events: Arc<dyn EventSink>) -> Self {
         self.events = Some(events);
+        self
+    }
+
+    /// Where plugins are installed (`DrivePaths::plugins()`): a plugin server's
+    /// `${CLAUDE_PLUGIN_ROOT}`, `${AIDEX_PLUGIN_ROOT}`, and relative command
+    /// resolve inside `<plugins>/<plugin name>`.
+    #[must_use]
+    pub fn with_plugins_dir(mut self, plugins: impl Into<PathBuf>) -> Self {
+        self.roots.plugins = Some(plugins.into());
+        self
+    }
+
+    /// How to find a workspace's root by id: a workspace server runs there, and
+    /// its relative command resolves there. Without it, workspace servers run in
+    /// their scratch folder.
+    #[must_use]
+    pub fn with_workspace_roots(
+        mut self,
+        roots: impl Fn(&str) -> Option<PathBuf> + Send + Sync + 'static,
+    ) -> Self {
+        self.roots.workspaces = Some(Arc::new(roots));
         self
     }
 
@@ -238,6 +267,7 @@ impl McpHost for SandboxHost {
             .as_deref()
             .ok_or_else(|| McpError::invalid_config("a stdio server needs a command"))?;
         self.gate.check_launch(config)?;
+        let launch = self.roots.launch(config, command)?;
         let mut secrets: Vec<Zeroizing<String>> = Vec::new();
         let mut environment: Vec<(String, Zeroizing<String>)> = Vec::new();
         for mapping in &config.env_from_secrets {
@@ -261,13 +291,18 @@ impl McpHost for SandboxHost {
                 allowlist.push(name.clone());
             }
         }
-        let mut request = SandboxRequest::new(SandboxLevel::Brokered, &scratch, &scratch)
+        let cwd = launch.cwd.clone().unwrap_or_else(|| scratch.clone());
+        let mut request = SandboxRequest::new(SandboxLevel::Brokered, &cwd, &scratch)
             .with_network(NetworkMode::Normal)
             .with_limits(ResourceLimits {
                 max_output_bytes: MAX_BUFFERED_OUTPUT,
                 ..ResourceLimits::default()
             });
+        if let Some(root) = &launch.cwd {
+            request = request.with_mount(Mount::read_write(root));
+        }
         request.env_allowlist = allowlist;
+        request.env.extend(launch.env.iter().cloned());
         for (name, value) in &environment {
             request.env.push((name.clone(), value.as_str().to_owned()));
         }
@@ -291,7 +326,7 @@ impl McpHost for SandboxHost {
             level: aidex_events::SandboxLevel::Brokered,
             enforced: true,
         });
-        let program = plan.resolve_program(command).map_err(|error| match error {
+        let program = plan.resolve_program(&launch.program).map_err(|error| match error {
             SandboxError::ProgramNotFound(_) => McpError::new(
                 McpErrorKind::LaunchFailed,
                 format!(
@@ -303,7 +338,7 @@ impl McpHost for SandboxHost {
         })?;
         let process = self
             .sandbox
-            .spawn_interactive(&plan, CommandSpec::new(program).args(config.args.clone()))
+            .spawn_interactive(&plan, CommandSpec::new(program).args(launch.args))
             .map_err(|error| launch_error("the MCP server could not be launched", &error))?;
         logs.push(
             LogStream::Client,
@@ -361,6 +396,28 @@ impl McpHost for SandboxHost {
             exit_code: status.as_ref().and_then(|status| status.code),
             signal: status.as_ref().and_then(|status| status.signal),
         });
+    }
+
+    /// Delete the server's scratch home (caches, files it wrote there). Best
+    /// effort; only a real folder directly under the scratch root, and links
+    /// inside it are removed, never followed.
+    fn forget(&self, server_id: &str) {
+        if validate_id(server_id).is_err() {
+            return;
+        }
+        let scratch = self.scratch_root.join(server_id);
+        let is_folder = fs::symlink_metadata(&scratch)
+            .is_ok_and(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink());
+        if !is_folder {
+            return;
+        }
+        // Files of a process that just exited can stay locked for a moment.
+        for _ in 0..3 {
+            if fs::remove_dir_all(&scratch).is_ok() || !scratch.exists() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
     }
 }
 

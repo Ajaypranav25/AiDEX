@@ -3,7 +3,10 @@
 Newline-delimited JSON-RPC 2.0 on stdin/stdout, diagnostics on stderr.
 `argv[1]` selects a scenario: `normal`, `old-version` (answers initialize with
 an unsupported protocol version), `exit` (exits during initialize), `silent`
-(never answers initialize), or `noisy` (prints a non-JSON line first).
+(never answers initialize), `flood-init` (never answers initialize, sends
+pings instead, and stops reading its input), `noisy` (prints a non-JSON line
+first), or `chatty` (also lists the `flood` and `unsolicited` tools, which every
+scenario answers).
 """
 
 import json
@@ -36,6 +39,20 @@ TOOLS = [
     {"name": "slow", "description": "Answer after a delay", "inputSchema": {"type": "object"}},
     {"name": "crash", "description": "Exit the server", "inputSchema": {"type": "object"}},
 ]
+CHATTY_TOOLS = [
+    {
+        "name": "flood",
+        "description": "Send ping requests, then stop reading input for a while",
+        "inputSchema": {"type": "object"},
+    },
+    {
+        "name": "unsolicited",
+        "description": "Send responses to requests the client never made",
+        "inputSchema": {"type": "object"},
+    },
+]
+if SCENARIO == "chatty":
+    TOOLS = TOOLS + CHATTY_TOOLS
 
 
 def send(message):
@@ -83,6 +100,19 @@ def call(request_id, params):
     elif name == "crash":
         log("fixture crashing on request")
         sys.exit(3)
+    elif name == "flood":
+        result(request_id, text("flooding"))
+        for n in range(int(arguments.get("pings", 20000))):
+            send({"jsonrpc": "2.0", "id": "flood-%d" % n, "method": "ping"})
+        # Input is not read meanwhile, so the client's answers fill the pipe.
+        time.sleep(float(arguments.get("seconds", 30)))
+    elif name == "unsolicited":
+        result(request_id, text("sent"))
+        pad = "u" * int(arguments.get("bytes", 1000))
+        for n in range(int(arguments.get("count", 50))):
+            send({"jsonrpc": "2.0", "id": 900000 + n, "result": {"pad": pad}})
+        # A second answer to the request already answered.
+        result(request_id, text("again"))
     else:
         error(request_id, -32602, "Unknown tool: %s" % name)
 
@@ -110,6 +140,12 @@ def main():
                 log("fixture refusing to start")
                 sys.exit(2)
             if SCENARIO == "silent":
+                continue
+            if SCENARIO == "flood-init":
+                for n in range(20000):
+                    send({"jsonrpc": "2.0", "id": "init-%d" % n, "method": "ping"})
+                # Input is not read again, so the client's answers fill the pipe.
+                time.sleep(120)
                 continue
             version = message["params"]["protocolVersion"]
             if SCENARIO == "old-version":

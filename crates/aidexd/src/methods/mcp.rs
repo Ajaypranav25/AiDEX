@@ -294,6 +294,19 @@ pub(crate) fn sync_plugins(services: &Services) {
     }
 }
 
+/// Re-verify the plugin behind server `id` before anything may launch it, so a
+/// plugin whose files changed since the last check loses its servers (and its
+/// bundled code never runs) instead of starting.
+fn reverify_plugin(services: &Services, supervisor: &McpSupervisor, id: &str) {
+    if supervisor
+        .store()
+        .get(id)
+        .is_ok_and(|config| config.source.kind == McpSourceKind::Plugin)
+    {
+        sync_plugins(services);
+    }
+}
+
 fn list(services: &Services, params: ListParams) -> Result<ListResult, RpcError> {
     let supervisor = supervisor(services)?;
     sync_plugins(services);
@@ -457,6 +470,7 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
     router.register(START, move |_context, params| {
         let params: IdParams = parse_params(params)?;
         let supervisor = supervisor(&shared)?;
+        reverify_plugin(&shared, supervisor, &params.id);
         supervisor.start(&params.id, &cancel()).map_err(mcp_error)?;
         let config = supervisor.store().get(&params.id).map_err(mcp_error)?;
         to_result(&view(supervisor, config))
@@ -475,6 +489,7 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
     router.register(RESTART, move |_context, params| {
         let params: IdParams = parse_params(params)?;
         let supervisor = supervisor(&shared)?;
+        reverify_plugin(&shared, supervisor, &params.id);
         supervisor
             .restart(&params.id, &cancel())
             .map_err(mcp_error)?;
@@ -485,7 +500,9 @@ pub(crate) fn register(router: &mut Router, services: &Arc<Services>) -> Result<
     let shared = Arc::clone(services);
     router.register(TOOLS, move |_context, params| {
         let params: IdParams = parse_params(params)?;
-        to_result(&tools(supervisor(&shared)?, &params.id)?)
+        let supervisor = supervisor(&shared)?;
+        reverify_plugin(&shared, supervisor, &params.id);
+        to_result(&tools(supervisor, &params.id)?)
     })?;
 
     let shared = Arc::clone(services);

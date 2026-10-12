@@ -405,7 +405,12 @@ impl ServerConfig {
                     line.push(' ');
                     line.push_str(arg);
                 }
+                // Arguments may hold control characters (a plugin's are
+                // imported as written); the summary is shown on terminals.
                 bounded_redacted(&line, 512)
+                    .chars()
+                    .map(|ch| if ch.is_control() { '\u{fffd}' } else { ch })
+                    .collect()
             }
             TransportKind::Http => self
                 .endpoint_url()
@@ -551,6 +556,18 @@ mod tests {
         );
         assert_eq!(config.secret_names(), ["github-token"]);
         assert!(config.applies_to(Some("ws_1")));
+    }
+
+    #[test]
+    fn the_endpoint_summary_hides_control_characters_in_arguments() {
+        let mut config = stdio();
+        config.args = vec!["--name".into(), "a\rb\u{1b}[2J".into()];
+        config.validate().unwrap();
+        assert_eq!(
+            config.endpoint_summary(),
+            "npx --name a\u{fffd}b\u{fffd}[2J"
+        );
+        assert_eq!(config.args[1], "a\rb\u{1b}[2J");
     }
 
     #[test]

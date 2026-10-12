@@ -170,6 +170,7 @@ impl Services {
             &paths,
             &broker,
             &vault,
+            &workspaces,
             models.offline(),
             Arc::new(events.clone()),
             &shutdown,

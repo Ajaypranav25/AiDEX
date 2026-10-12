@@ -1,6 +1,9 @@
 //! A bounded ring buffer of one server's log lines: its stderr, the log
 //! notifications it sends, and the client's own lifecycle notes. Every line is
-//! scrubbed of the server's secret values and credential patterns.
+//! scrubbed of the server's secret values and credential patterns. A stderr line
+//! is scrubbed whole: an over-long one is recorded once from a held prefix far
+//! longer than the part shown, and the rest of it is dropped, so a secret is
+//! never split across two records.
 
 use std::{
     collections::VecDeque,
@@ -18,6 +21,10 @@ pub const MAX_LOG_LINES: usize = 400;
 const MAX_LOG_BYTES: usize = 128 * 1024;
 /// Longest line kept; longer lines are cut.
 const MAX_LINE_BYTES: usize = 2048;
+/// Raw bytes of one stderr line held before it is recorded. Well past
+/// `MAX_LINE_BYTES`, so a secret that would show in the kept part is whole when
+/// the line is scrubbed.
+const MAX_HELD_BYTES: usize = 16 * 1024;
 
 /// Where a log line came from.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -52,6 +59,8 @@ struct State {
     bytes: usize,
     dropped: u64,
     partial: Vec<u8>,
+    /// The current stderr line was already recorded; drop it up to its newline.
+    discarding: bool,
     scrubber: Scrubber,
 }
 
@@ -81,25 +90,38 @@ impl LogBuffer {
             return;
         }
         let mut state = self.state();
-        state.partial.extend_from_slice(bytes);
-        while let Some(end) = state.partial.iter().position(|b| *b == b'\n') {
-            let line: Vec<u8> = state.partial.drain(..=end).collect();
-            let text = String::from_utf8_lossy(&line[..line.len() - 1]).into_owned();
-            record(&mut state, LogStream::Stderr, &text);
-        }
-        if state.partial.len() > MAX_LINE_BYTES {
-            let line = std::mem::take(&mut state.partial);
-            record(
-                &mut state,
-                LogStream::Stderr,
-                &String::from_utf8_lossy(&line),
-            );
+        let mut rest = bytes;
+        while !rest.is_empty() {
+            let newline = rest.iter().position(|b| *b == b'\n');
+            let (chunk, ended) = match newline {
+                Some(end) => (&rest[..end], true),
+                None => (rest, false),
+            };
+            rest = newline.map_or(&[][..], |end| &rest[end + 1..]);
+            if !state.discarding {
+                let room = MAX_HELD_BYTES.saturating_sub(state.partial.len());
+                state
+                    .partial
+                    .extend_from_slice(&chunk[..chunk.len().min(room)]);
+                if ended || state.partial.len() >= MAX_HELD_BYTES {
+                    let line = std::mem::take(&mut state.partial);
+                    record(
+                        &mut state,
+                        LogStream::Stderr,
+                        &String::from_utf8_lossy(&line),
+                    );
+                    state.discarding = !ended;
+                }
+            } else if ended {
+                state.discarding = false;
+            }
         }
     }
 
     /// Record any stderr text still waiting for a newline.
     pub fn flush_stderr(&self) {
         let mut state = self.state();
+        state.discarding = false;
         if !state.partial.is_empty() {
             let line = std::mem::take(&mut state.partial);
             record(
@@ -188,5 +210,44 @@ mod tests {
             tail.lines.last().unwrap().text,
             format!("line {}", MAX_LOG_LINES + 9)
         );
+    }
+
+    fn stderr_lines(logs: &LogBuffer) -> Vec<String> {
+        logs.tail(MAX_LOG_LINES)
+            .lines
+            .into_iter()
+            .filter(|line| line.stream == LogStream::Stderr)
+            .map(|line| line.text)
+            .collect()
+    }
+
+    #[test]
+    fn a_secret_split_across_reads_of_a_long_line_never_shows() {
+        let secret = "secret-token-1234";
+        let logs = LogBuffer::new();
+        logs.set_scrubber(Scrubber::new(vec![Zeroizing::new(secret.into())]));
+        // Past the shown length, but within the held prefix: scrubbed whole.
+        logs.push_stderr(&[b'x'; MAX_LINE_BYTES - 3]);
+        logs.push_stderr(b"secret-to");
+        logs.push_stderr(b"ken-1234 more\nnext\n");
+        // Past the held prefix: recorded once, and the rest of the line dropped.
+        logs.push_stderr(&[b'y'; MAX_HELD_BYTES - 4]);
+        logs.push_stderr(b"secret-to");
+        logs.push_stderr(b"ken-1234 ");
+        logs.push_stderr(&[b'z'; 3 * MAX_HELD_BYTES]);
+        logs.push_stderr(b"\nafter\nunfinished");
+        logs.flush_stderr();
+        let lines = stderr_lines(&logs);
+        assert_eq!(lines.len(), 5, "{lines:?}");
+        for line in &lines {
+            for fragment in ["secret", "ken-1234", "-to", "z"] {
+                assert!(!line.contains(fragment), "{fragment} in {line}");
+            }
+            assert!(line.len() <= MAX_LINE_BYTES + 3);
+        }
+        assert!(lines[0].starts_with("xxx") && lines[0].ends_with("..."));
+        assert!(lines[2].starts_with("yyy") && lines[2].ends_with("..."));
+        assert_eq!(lines[1], "next");
+        assert_eq!(&lines[3..], ["after", "unfinished"]);
     }
 }

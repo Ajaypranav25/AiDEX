@@ -5,9 +5,18 @@
 //! [`McpSupervisor::list_tools`] or [`McpSupervisor::call_tool`]). Health is
 //! `stopped | starting | running | failed | needs_auth`. A connection serves one
 //! request at a time; [`McpSupervisor::stop`] interrupts an in-flight request or
-//! start before closing, so it never waits for a slow server.
+//! start before closing, so it never waits for a slow server. A request waiting
+//! for a busy connection honours its cancel token, and listing tools while a
+//! call is in flight answers from the cached list.
+//!
+//! A start the caller gives up on leaves the server `stopped`, not `failed`.
+//! When the caller's deadline (not a Stop) ended it, the server is not started
+//! on demand again for five minutes, so a server that never finishes starting
+//! does not cost every later caller its whole time budget; an explicit
+//! [`McpSupervisor::start`] retries at once.
 
 mod host;
+mod roots;
 
 pub use host::{
     LaunchedServer, McpGate, McpHost, OpenGate, SandboxHost, SecretSource, VaultSecrets,
@@ -23,8 +32,13 @@ use std::{
 
 /// How long `stop` waits for a busy connection before killing the server.
 const BUSY_GRACE: Duration = Duration::from_secs(3);
+/// How often a request waiting for a busy connection checks its cancel token.
+const BUSY_POLL: Duration = Duration::from_millis(10);
+/// How long a server whose start ran past its caller's deadline is not started
+/// on demand again.
+const START_BACKOFF: Duration = Duration::from_secs(5 * 60);
 
-use aidex_core::{CancelToken, Timestamp};
+use aidex_core::{CancelReason, CancelToken, Timestamp};
 use serde::Serialize;
 use serde_json::Value;
 
@@ -121,6 +135,9 @@ struct SlotState {
     /// Bumped by every start and stop; a start that finds it changed was
     /// superseded and discards its connection.
     generation: u64,
+    /// Not started on demand before this: its last start ran past the
+    /// caller's deadline.
+    retry_after: Option<Instant>,
 }
 
 impl SlotState {
@@ -200,6 +217,24 @@ impl Slot {
 
     fn is_running(&self) -> bool {
         self.status() == McpStatus::Running
+    }
+
+    /// Refuse an on-demand start while an earlier one that ran past its
+    /// caller's deadline is recent.
+    fn check_backoff(&self, id: &str) -> Result<(), McpError> {
+        let retry_after = lock(&self.state).retry_after;
+        let Some(left) = retry_after.and_then(|at| at.checked_duration_since(Instant::now()))
+        else {
+            return Ok(());
+        };
+        Err(McpError::new(
+            McpErrorKind::Unavailable,
+            format!(
+                "the MCP server `{id}` did not finish starting in time before; it is started on \
+                 demand again in {} s, or start it now",
+                left.as_secs().max(1)
+            ),
+        ))
     }
 }
 
@@ -296,11 +331,25 @@ impl McpSupervisor {
     /// disabled, cannot be launched or reached, or does not complete `initialize`
     /// and the tool listing in time.
     pub fn start(&self, id: &str, cancel: &CancelToken) -> Result<ServerState, McpError> {
+        self.start_server(id, cancel, false)
+    }
+
+    /// [`Self::start`]; `on_demand` starts wait out an earlier start that ran
+    /// past its caller's deadline.
+    fn start_server(
+        &self,
+        id: &str,
+        cancel: &CancelToken,
+        on_demand: bool,
+    ) -> Result<ServerState, McpError> {
         let config = self.enabled_config(id)?;
         let slot = self.slot(id);
         let _lifecycle = lock(&slot.lifecycle);
         if slot.is_running() {
             return Ok(slot.snapshot());
+        }
+        if on_demand {
+            slot.check_backoff(id)?;
         }
         self.teardown(&slot);
         let generation = {
@@ -342,40 +391,78 @@ impl McpSupervisor {
                 );
                 Ok(state.snapshot())
             }
-            Err(error) => {
+            Err((error, caller)) => {
                 let mut state = lock(&slot.state);
                 if state.generation == generation {
-                    state.interrupter = None;
-                    state.fail(error.clone());
-                    slot.logs.push(
-                        LogStream::Client,
-                        &format!("start failed: {}", error.message),
-                    );
+                    // The caller gave up (its run was stopped, or its own deadline
+                    // came before the server's): the server did not fail. A run's
+                    // Stop lets the next use start it again; after a deadline it
+                    // waits a while, so each later caller does not wait as long.
+                    let abandoned = caller.is_some()
+                        && matches!(error.kind, McpErrorKind::Cancelled | McpErrorKind::Timeout);
+                    if abandoned {
+                        let retry_after = (caller == Some(CancelReason::DeadlineExceeded))
+                            .then(|| Instant::now() + START_BACKOFF);
+                        *state = SlotState {
+                            generation,
+                            retry_after,
+                            ..SlotState::default()
+                        };
+                        slot.logs.push(
+                            LogStream::Client,
+                            &format!("start abandoned: {}", error.message),
+                        );
+                        if retry_after.is_some() {
+                            slot.logs.push(
+                                LogStream::Client,
+                                &format!(
+                                    "not started on demand again for {} minutes; start it to retry now",
+                                    START_BACKOFF.as_secs() / 60
+                                ),
+                            );
+                        }
+                    } else {
+                        state.interrupter = None;
+                        state.fail(error.clone());
+                        slot.logs.push(
+                            LogStream::Client,
+                            &format!("start failed: {}", error.message),
+                        );
+                    }
                 }
                 Err(error)
             }
         }
     }
 
+    /// Launch or reach the server, `initialize`, and list its tools. A failure
+    /// comes with why the caller's `cancel` had fired when the server's answer
+    /// was given up on (closing the connection afterwards can take seconds,
+    /// during which the caller's own deadline may pass too).
     fn connect(
         &self,
         config: &ServerConfig,
         slot: &Slot,
         generation: u64,
         cancel: &CancelToken,
-    ) -> Result<(McpClient, ToolListing), McpError> {
+    ) -> Result<(McpClient, ToolListing), (McpError, Option<CancelReason>)> {
+        let not_cancelled = |error| (error, None);
         let mut client = match config.transport {
             TransportKind::Stdio => {
-                let launched = self.host.launch_stdio(config, &slot.logs)?;
+                let launched = self
+                    .host
+                    .launch_stdio(config, &slot.logs)
+                    .map_err(not_cancelled)?;
                 McpClient::stdio(
                     launched.process,
                     Arc::clone(&slot.logs),
                     Scrubber::new(launched.secrets),
                     self.timeouts,
-                )?
+                )
+                .map_err(not_cancelled)?
             }
             TransportKind::Http => McpClient::http(
-                self.host.http_endpoint(config)?,
+                self.host.http_endpoint(config).map_err(not_cancelled)?,
                 Arc::clone(&slot.logs),
                 self.timeouts,
             ),
@@ -385,7 +472,7 @@ impl McpSupervisor {
             if state.generation != generation {
                 drop(state);
                 self.close_client(client);
-                return Err(stopped_while_starting());
+                return Err((stopped_while_starting(), None));
             }
             state.interrupter = Some(client.interrupter());
         }
@@ -395,8 +482,9 @@ impl McpSupervisor {
         match outcome {
             Ok(listing) => Ok((client, listing)),
             Err(error) => {
+                let caller = cancel.state();
                 self.close_client(client);
-                Err(error)
+                Err((error, caller))
             }
         }
     }
@@ -456,7 +544,7 @@ impl McpSupervisor {
             }
             (state.status != McpStatus::Stopped, interrupter)
         };
-        let _lifecycle = lock(&slot.lifecycle);
+        let _lifecycle = lock_lifecycle(&slot, interrupter.as_ref());
         self.teardown_interrupted(&slot, interrupter.as_ref());
         let mut state = lock(&slot.state);
         let generation = state.generation;
@@ -498,10 +586,11 @@ impl McpSupervisor {
         stopped
     }
 
-    /// Stop `id` and forget its logs (the server was removed).
+    /// Stop `id` and forget its logs and scratch home (the server was removed).
     pub fn forget(&self, id: &str) {
         self.stop(id);
         lock(&self.slots).remove(id);
+        self.host.forget(id);
     }
 
     fn ensure_running(
@@ -511,7 +600,7 @@ impl McpSupervisor {
     ) -> Result<Arc<Slot>, McpError> {
         let slot = self.slot(&config.id);
         if !slot.is_running() {
-            self.start(&config.id, cancel)?;
+            self.start_server(&config.id, cancel, true)?;
         }
         Ok(slot)
     }
@@ -526,7 +615,7 @@ impl McpSupervisor {
     ) -> Result<T, McpError> {
         let config = self.enabled_config(id)?;
         let slot = self.ensure_running(&config, cancel)?;
-        let mut guard = lock(&slot.client);
+        let mut guard = wait_for_client(&slot, id, cancel)?;
         let Some(client) = guard.as_mut() else {
             return Err(McpError::new(
                 McpErrorKind::Unavailable,
@@ -556,17 +645,35 @@ impl McpSupervisor {
                 McpErrorKind::SessionExpired | McpErrorKind::NeedsAuth
             );
         if fatal {
+            // Why the connection ended (say, the server stopped reading its
+            // input), rather than how this request gave up on it.
+            let reason = client
+                .interrupter()
+                .failure()
+                .unwrap_or_else(|| error.clone());
             let mut state = lock(&slot.state);
             if state.status == McpStatus::Running {
-                slot.logs.push(LogStream::Client, &error.message);
-                state.fail(error.clone());
+                slot.logs.push(LogStream::Client, &reason.message);
+                state.fail(reason);
             }
         }
         error
     }
 
-    /// The tools of `id`, starting it on demand.
+    /// The tools of `id`, starting it on demand. While a request (such as a long
+    /// `tools/call`) holds the connection, the cached list is the answer; a
+    /// pending `tools/list_changed` is picked up by the next request.
     pub fn list_tools(&self, id: &str, cancel: &CancelToken) -> Result<Vec<McpToolSpec>, McpError> {
+        self.enabled_config(id)?;
+        if let Some(slot) = self.existing(id)
+            && slot.is_running()
+            && matches!(slot.client.try_lock(), Err(TryLockError::WouldBlock))
+        {
+            let state = lock(&slot.state);
+            if state.status == McpStatus::Running {
+                return Ok(state.tools.clone());
+            }
+        }
         self.with_client(id, cancel, |_, tools| Ok(tools.to_vec()))
     }
 
@@ -628,6 +735,59 @@ impl McpSupervisor {
 impl Drop for McpSupervisor {
     fn drop(&mut self) {
         self.stop_all("the MCP supervisor is shutting down");
+    }
+}
+
+/// The lifecycle lock of `slot`, which a start holds until it returns. A start
+/// that stays stuck (on a server that stopped reading its input) after the
+/// interrupt is ended by killing the server's tree.
+fn lock_lifecycle<'a>(
+    slot: &'a Slot,
+    interrupter: Option<&Interrupter>,
+) -> std::sync::MutexGuard<'a, ()> {
+    let deadline = Instant::now() + BUSY_GRACE;
+    loop {
+        match slot.lifecycle.try_lock() {
+            Ok(guard) => return guard,
+            Err(TryLockError::Poisoned(poisoned)) => return poisoned.into_inner(),
+            Err(TryLockError::WouldBlock) if Instant::now() >= deadline => {
+                if let Some(process) = interrupter.and_then(Interrupter::process) {
+                    let _ = process.kill_tree();
+                }
+                return lock(&slot.lifecycle);
+            }
+            Err(TryLockError::WouldBlock) => thread::sleep(BUSY_POLL),
+        }
+    }
+}
+
+/// The connection of `slot`, once no other request holds it; gives up when
+/// `cancel` fires, so a run's Stop or deadline is not stuck behind a slow call.
+fn wait_for_client<'a>(
+    slot: &'a Slot,
+    id: &str,
+    cancel: &CancelToken,
+) -> Result<std::sync::MutexGuard<'a, Option<McpClient>>, McpError> {
+    loop {
+        match slot.client.try_lock() {
+            Ok(guard) => return Ok(guard),
+            Err(TryLockError::Poisoned(poisoned)) => return Ok(poisoned.into_inner()),
+            Err(TryLockError::WouldBlock) => match cancel.state() {
+                Some(CancelReason::Cancelled) => {
+                    return Err(McpError::new(
+                        McpErrorKind::Cancelled,
+                        format!("the MCP request was cancelled while `{id}` was busy"),
+                    ));
+                }
+                Some(CancelReason::DeadlineExceeded) => {
+                    return Err(McpError::new(
+                        McpErrorKind::Timeout,
+                        format!("the MCP server `{id}` stayed busy with another request"),
+                    ));
+                }
+                None => thread::sleep(BUSY_POLL),
+            },
+        }
     }
 }
 

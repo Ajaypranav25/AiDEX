@@ -4,7 +4,9 @@
 mod support;
 
 use std::{
-    sync::Arc,
+    fs,
+    path::Path,
+    sync::{Arc, mpsc},
     thread,
     time::{Duration, Instant},
 };
@@ -12,10 +14,10 @@ use std::{
 use aidex_core::CancelToken;
 use aidex_mcp::{
     EnvSecret, LATEST_PROTOCOL_VERSION, LogBuffer, McpClient, McpConfigStore, McpErrorKind,
-    McpHost, McpStatus, McpSupervisor, Scrubber, Timeouts,
+    McpHost, McpSource, McpStatus, McpSupervisor, Scrubber, Timeouts,
 };
 use serde_json::{Value, json};
-use support::{StaticSecrets, host, sentinel, stdio_config};
+use support::{StaticSecrets, fixture_script, host, python, sentinel, stdio_config, stdio_spec};
 
 fn cancel() -> CancelToken {
     CancelToken::new().with_timeout(Duration::from_secs(60))
@@ -281,6 +283,9 @@ fn start_failures_set_the_server_status() {
     let error = supervisor.start("silent", &cancel()).unwrap_err();
     assert_eq!(error.kind, McpErrorKind::Timeout);
     assert!(error.message.contains("initialize"), "{}", error.message);
+    assert!(error.message.contains("within 1 s"), "{}", error.message);
+    // The server's own time limit ran out: it failed.
+    assert_eq!(supervisor.state("silent").status, McpStatus::Failed);
 
     let mut missing = stdio_config("missing", "normal");
     missing.command = Some("aidex-no-such-mcp-server".into());
@@ -325,4 +330,422 @@ fn stop_interrupts_a_call_in_flight() {
     );
     supervisor.forget("fixture");
     assert!(supervisor.logs("fixture", 10).lines.is_empty());
+}
+
+#[test]
+fn a_start_the_caller_gives_up_on_leaves_the_server_stopped() {
+    let scratch = tempfile::tempdir().unwrap();
+    let supervisor = supervisor(
+        scratch.path(),
+        StaticSecrets::default(),
+        Timeouts::default(),
+    );
+    supervisor
+        .store()
+        .add(&stdio_config("silent", "silent"))
+        .unwrap();
+
+    // The caller's deadline comes before the server's 60 s `initialize`.
+    let error = supervisor
+        .start(
+            "silent",
+            &CancelToken::new().with_timeout(Duration::from_millis(800)),
+        )
+        .unwrap_err();
+    assert_eq!(error.kind, McpErrorKind::Timeout);
+    assert!(error.message.contains("caller"), "{}", error.message);
+    let state = supervisor.state("silent");
+    assert_eq!(state.status, McpStatus::Stopped);
+    assert!(state.error.is_none());
+
+    // Later callers do not each wait out their own budget on it again: on-demand
+    // starts are refused for a while.
+    let on_demand = || {
+        let started = Instant::now();
+        let outcome = supervisor.list_tools(
+            "silent",
+            &CancelToken::new().with_timeout(Duration::from_millis(600)),
+        );
+        (outcome.unwrap_err(), started.elapsed())
+    };
+    let (refused, took) = on_demand();
+    assert_eq!(refused.kind, McpErrorKind::Unavailable);
+    assert!(refused.message.contains("start it now"), "{refused:?}");
+    assert!(took < Duration::from_millis(300), "{took:?}");
+    let refused = supervisor
+        .call_tool("silent", "echo", json!({"text": "x"}), &cancel())
+        .unwrap_err();
+    assert_eq!(refused.kind, McpErrorKind::Unavailable);
+    assert_eq!(supervisor.state("silent").status, McpStatus::Stopped);
+
+    // A run stopped while the server starts (an explicit start retries at once).
+    let stop = CancelToken::new();
+    let stopping = {
+        let stop = stop.clone();
+        thread::spawn(move || {
+            thread::sleep(Duration::from_millis(500));
+            stop.cancel();
+        })
+    };
+    let error = supervisor.start("silent", &stop).unwrap_err();
+    stopping.join().unwrap();
+    assert_eq!(error.kind, McpErrorKind::Cancelled);
+    assert_eq!(supervisor.state("silent").status, McpStatus::Stopped);
+    // A Stop is no reason to wait: the next use starts it again, and that
+    // start's deadline holds it back once more.
+    let (tried, took) = on_demand();
+    assert_eq!(tried.kind, McpErrorKind::Timeout);
+    assert!(took >= Duration::from_millis(500), "{took:?}");
+    assert_eq!(on_demand().0.kind, McpErrorKind::Unavailable);
+    let logs = supervisor.logs("silent", 1000);
+    assert!(
+        logs.lines
+            .iter()
+            .any(|line| line.text.starts_with("start abandoned")),
+        "{logs:?}"
+    );
+    assert!(
+        logs.lines
+            .iter()
+            .any(|line| line.text.starts_with("not started on demand again")),
+        "{logs:?}"
+    );
+    assert!(!supervisor.has_active());
+}
+
+#[test]
+fn a_start_on_a_server_that_stopped_reading_its_input_ends() {
+    let scratch = tempfile::tempdir().unwrap();
+    let supervisor = Arc::new(supervisor(
+        scratch.path(),
+        StaticSecrets::default(),
+        Timeouts {
+            initialize: Duration::from_secs(2),
+            request: Duration::from_secs(2),
+            ..Timeouts::default()
+        },
+    ));
+    supervisor
+        .store()
+        .add(&stdio_config("flood", "flood-init"))
+        .unwrap();
+    let start = |supervisor: &Arc<McpSupervisor>| {
+        let (done, finished) = mpsc::channel();
+        let supervisor = Arc::clone(supervisor);
+        thread::spawn(move || {
+            let _ = done.send(supervisor.start("flood", &cancel()));
+        });
+        finished
+    };
+
+    // The server pings instead of answering `initialize` and stops reading, so
+    // neither the answers nor `notifications/cancelled` can be written. The
+    // start still ends at its own `initialize` limit.
+    let started = Instant::now();
+    let error = start(&supervisor)
+        .recv_timeout(Duration::from_secs(30))
+        .expect("start did not return")
+        .unwrap_err();
+    assert_eq!(error.kind, McpErrorKind::Timeout);
+    assert!(
+        started.elapsed() < Duration::from_secs(15),
+        "start took {:?}",
+        started.elapsed()
+    );
+    assert_eq!(supervisor.state("flood").status, McpStatus::Failed);
+    assert!(
+        log_text_of(&supervisor, "flood").contains("dropped answers to the server's requests"),
+        "{}",
+        log_text_of(&supervisor, "flood")
+    );
+
+    // A stop while such a start is giving up returns at once.
+    let starting = start(&supervisor);
+    thread::sleep(Duration::from_millis(2500));
+    let (done, stopped) = mpsc::channel();
+    let began = Instant::now();
+    {
+        let supervisor = Arc::clone(&supervisor);
+        thread::spawn(move || {
+            let _ = done.send(supervisor.stop("flood"));
+        });
+    }
+    let state = stopped
+        .recv_timeout(Duration::from_secs(30))
+        .expect("stop did not return");
+    assert_eq!(state.status, McpStatus::Stopped);
+    assert!(
+        began.elapsed() < Duration::from_secs(10),
+        "stop took {:?}",
+        began.elapsed()
+    );
+    let outcome = starting
+        .recv_timeout(Duration::from_secs(30))
+        .expect("start did not return");
+    assert!(outcome.is_err(), "{outcome:?}");
+    assert!(!supervisor.has_active());
+}
+
+fn log_text_of(supervisor: &McpSupervisor, id: &str) -> String {
+    supervisor
+        .logs(id, 1000)
+        .lines
+        .iter()
+        .map(|line| line.text.clone())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
+fn a_busy_connection_serves_cached_tools_and_honours_cancellation() {
+    let scratch = tempfile::tempdir().unwrap();
+    let supervisor = Arc::new(supervisor(
+        scratch.path(),
+        StaticSecrets::default(),
+        Timeouts::default(),
+    ));
+    supervisor
+        .store()
+        .add(&stdio_config("fixture", "normal"))
+        .unwrap();
+    supervisor.start("fixture", &cancel()).unwrap();
+    let calling = {
+        let supervisor = Arc::clone(&supervisor);
+        thread::spawn(move || {
+            supervisor.call_tool("fixture", "slow", json!({"seconds": 4}), &cancel())
+        })
+    };
+    thread::sleep(Duration::from_millis(400));
+
+    // Listing tools answers from the cache, without waiting for the call.
+    let started = Instant::now();
+    let tools = supervisor
+        .list_tools("fixture", &CancelToken::new())
+        .unwrap();
+    assert_eq!(tools.len(), 7);
+    assert!(started.elapsed() < Duration::from_secs(1));
+
+    // A request queued behind the call gives up with its own token.
+    let started = Instant::now();
+    let late = supervisor
+        .call_tool(
+            "fixture",
+            "echo",
+            json!({"text": "queued"}),
+            &CancelToken::new().with_timeout(Duration::from_millis(300)),
+        )
+        .unwrap_err();
+    assert_eq!(late.kind, McpErrorKind::Timeout);
+    let stopped = CancelToken::new();
+    stopped.cancel();
+    let cancelled = supervisor.ping("fixture", &stopped).unwrap_err();
+    assert_eq!(cancelled.kind, McpErrorKind::Cancelled);
+    assert!(started.elapsed() < Duration::from_secs(2));
+
+    let slow = calling.join().unwrap().unwrap();
+    assert_eq!(slow.content_text, "late");
+    // Giving up on a busy connection is no failure of the server.
+    assert_eq!(supervisor.state("fixture").status, McpStatus::Running);
+    supervisor.stop("fixture");
+}
+
+#[test]
+fn stop_kills_a_server_that_stopped_reading_its_input() {
+    let scratch = tempfile::tempdir().unwrap();
+    let supervisor = Arc::new(supervisor(
+        scratch.path(),
+        StaticSecrets::default(),
+        Timeouts::default(),
+    ));
+    supervisor
+        .store()
+        .add(&stdio_config("fixture", "chatty"))
+        .unwrap();
+    // The server pings far more than its input pipe holds answers to, then
+    // stops reading, so the client's answer write blocks.
+    let flooding = supervisor
+        .call_tool(
+            "fixture",
+            "flood",
+            json!({"pings": 20000, "seconds": 60}),
+            &cancel(),
+        )
+        .unwrap();
+    assert_eq!(flooding.content_text, "flooding");
+    thread::sleep(Duration::from_millis(1500));
+
+    // A request behind the answers that cannot be written gives up at its own
+    // deadline (and the notice that it was cancelled at its own).
+    let began = Instant::now();
+    let late = supervisor
+        .ping(
+            "fixture",
+            &CancelToken::new().with_timeout(Duration::from_secs(1)),
+        )
+        .unwrap_err();
+    assert_eq!(late.kind, McpErrorKind::Timeout);
+    assert!(
+        began.elapsed() < Duration::from_secs(8),
+        "ping took {:?}",
+        began.elapsed()
+    );
+
+    let (done, stopped) = mpsc::channel();
+    let started = Instant::now();
+    {
+        let supervisor = Arc::clone(&supervisor);
+        thread::spawn(move || {
+            let _ = done.send(supervisor.stop("fixture"));
+        });
+    }
+    let state = stopped
+        .recv_timeout(Duration::from_secs(30))
+        .expect("stop did not return");
+    assert_eq!(state.status, McpStatus::Stopped);
+    assert!(
+        started.elapsed() < Duration::from_secs(15),
+        "stop took {:?}",
+        started.elapsed()
+    );
+    assert!(!supervisor.has_active());
+}
+
+#[test]
+fn responses_to_no_request_in_flight_are_dropped() {
+    let scratch = tempfile::tempdir().unwrap();
+    let host = host(scratch.path(), StaticSecrets::default());
+    let logs = Arc::new(LogBuffer::new());
+    let launched = host
+        .launch_stdio(&stdio_config("fixture", "normal"), &logs)
+        .unwrap();
+    let mut client = McpClient::stdio(
+        launched.process,
+        Arc::clone(&logs),
+        Scrubber::new(launched.secrets),
+        Timeouts::default(),
+    )
+    .unwrap();
+    client.initialize(&cancel()).unwrap();
+    let sent = client
+        .call_tool(
+            "unsolicited",
+            json!({"count": 60, "bytes": 20000}),
+            &cancel(),
+        )
+        .unwrap();
+    assert_eq!(sent.content_text, "sent");
+    thread::sleep(Duration::from_millis(500));
+    // The connection still answers, and its next request gets its own answer.
+    client.ping(&cancel()).unwrap();
+    let echo = client
+        .call_tool("echo", json!({"text": "mine"}), &cancel())
+        .unwrap();
+    assert_eq!(echo.content_text, "mine");
+    let ignored = logs
+        .tail(1000)
+        .lines
+        .iter()
+        .filter(|line| line.text == "ignored a response to no request in flight")
+        .count();
+    assert!(ignored >= 60, "{ignored}");
+    client.close();
+}
+
+#[test]
+fn plugin_and_workspace_servers_find_their_own_files() {
+    let scratch = tempfile::tempdir().unwrap();
+    let plugins = scratch.path().join("plugins");
+    fs::create_dir_all(plugins.join("kit/servers")).unwrap();
+    // The server imports a module of the plugin, which Python would cache.
+    fs::copy(
+        fixture_script(),
+        plugins.join("kit/servers/fixture_server.py"),
+    )
+    .unwrap();
+    fs::write(
+        plugins.join("kit/servers/echo.py"),
+        "import fixture_server  # noqa: F401 (runs the server)\n",
+    )
+    .unwrap();
+    let workspace = scratch.path().join("project");
+    fs::create_dir_all(workspace.join("scripts")).unwrap();
+    fs::copy(fixture_script(), workspace.join("scripts/mcp.py")).unwrap();
+    let known = workspace.clone();
+    let host = host(&scratch.path().join("scratch"), StaticSecrets::default())
+        .with_plugins_dir(&plugins)
+        .with_workspace_roots(move |id| (id == "ws_1").then(|| known.clone()));
+    let supervisor = McpSupervisor::new(
+        McpConfigStore::in_dir(scratch.path().join("mcp")),
+        Arc::new(host),
+    );
+    let store = supervisor.store();
+
+    // A plugin's `.mcp.json` as Claude Code plugins write it.
+    let mcp_json = plugins.join("kit/.mcp.json");
+    let server = json!({
+        "command": python(),
+        "args": ["-u", "${CLAUDE_PLUGIN_ROOT}/servers/echo.py", "normal"],
+    });
+    fs::write(
+        &mcp_json,
+        json!({"mcpServers": {"echo": server}}).to_string(),
+    )
+    .unwrap();
+    let mut config = McpConfigStore::import_mcp_json(&mcp_json, McpSource::plugin("kit"))
+        .unwrap()
+        .remove(0)
+        .config
+        .unwrap();
+    config.id = "kit-echo".into();
+    config.enabled = true;
+    store.add(&config).unwrap();
+
+    let tools = supervisor.list_tools("kit-echo", &cancel()).unwrap();
+    assert_eq!(tools.len(), 7);
+    let env = supervisor
+        .call_tool(
+            "kit-echo",
+            "env",
+            json!({"names": ["CLAUDE_PLUGIN_ROOT", "AIDEX_PLUGIN_ROOT", "PYTHONDONTWRITEBYTECODE"]}),
+            &cancel(),
+        )
+        .unwrap();
+    let reported: Value = serde_json::from_str(&env.content_text).unwrap();
+    let root = reported["CLAUDE_PLUGIN_ROOT"].as_str().unwrap();
+    assert!(Path::new(root).join("servers/echo.py").is_file(), "{root}");
+    assert_eq!(reported["AIDEX_PLUGIN_ROOT"], root);
+    // Nothing is written into the plugin's trusted (hashed) files.
+    assert_eq!(reported["PYTHONDONTWRITEBYTECODE"], "1");
+    assert!(!plugins.join("kit/servers/__pycache__").exists());
+    // The stored configuration keeps the portable form.
+    assert_eq!(
+        store.get("kit-echo").unwrap().args[1],
+        "${CLAUDE_PLUGIN_ROOT}/servers/echo.py"
+    );
+
+    // A bundled command that climbs out of the plugin is refused.
+    let mut escape = config.clone();
+    escape.id = "kit-escape".into();
+    escape.command = Some("${CLAUDE_PLUGIN_ROOT}/../outside".into());
+    store.add(&escape).unwrap();
+    let refused = supervisor.start("kit-escape", &cancel()).unwrap_err();
+    assert_eq!(refused.kind, McpErrorKind::InvalidConfig);
+    assert_eq!(supervisor.state("kit-escape").status, McpStatus::Failed);
+
+    // A workspace server runs in its workspace root.
+    let mut spec = stdio_spec("project-mcp", "normal");
+    spec.args = vec!["-u".into(), "scripts/mcp.py".into(), "normal".into()];
+    store
+        .add(&spec.into_config(McpSource::workspace("ws_1")))
+        .unwrap();
+    let tools = supervisor.list_tools("project-mcp", &cancel()).unwrap();
+    assert_eq!(tools.len(), 7);
+
+    // Removing a server deletes its scratch home.
+    let home = scratch.path().join("scratch/kit-echo");
+    assert!(home.is_dir());
+    supervisor.forget("kit-echo");
+    assert!(!home.exists());
+    supervisor.forget("project-mcp");
+    assert!(!scratch.path().join("scratch/project-mcp").exists());
 }

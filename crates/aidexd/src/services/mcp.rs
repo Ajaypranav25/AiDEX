@@ -9,6 +9,9 @@
 //!   before every request.
 //! - A watchdog stops every server when the daemon shuts down, the vault locks,
 //!   or an emergency stop takes effect.
+//! - Imported servers resolve their paths at launch: a plugin's bundled server
+//!   inside its folder under `DrivePaths::plugins()`, a workspace's server in
+//!   that workspace's registered root.
 
 use std::{
     collections::{BTreeMap, VecDeque},
@@ -28,6 +31,7 @@ use aidex_mcp::{
 use aidex_policy::{Action, Intent, PolicyError, PolicySet, Verdict, classify_network};
 use aidex_providers::OfflineMode;
 use aidex_vault::{VaultService, VaultState};
+use aidex_workspace::WorkspaceRegistry;
 
 use crate::lifecycle::ShutdownSignal;
 
@@ -39,6 +43,7 @@ pub fn open_mcp(
     paths: &DrivePaths,
     broker: &Arc<Broker>,
     vault: &Arc<VaultService>,
+    workspaces: &Arc<WorkspaceRegistry>,
     offline: &Arc<OfflineMode>,
     events: Arc<dyn EventSink>,
     shutdown: &ShutdownSignal,
@@ -54,13 +59,22 @@ pub fn open_mcp(
         events: Arc::clone(&events),
         rate: Mutex::new(BTreeMap::new()),
     });
+    let registry = Arc::clone(workspaces);
     let host = SandboxHost::new(
         broker.sandbox().clone(),
         scratch,
         Arc::new(VaultSecrets::new(Arc::clone(vault))),
         gate,
     )
-    .with_events(events);
+    .with_events(events)
+    // Imported servers resolve their paths at launch: a plugin's inside its
+    // installed folder, a workspace's in the workspace root.
+    .with_plugins_dir(paths.plugins())
+    .with_workspace_roots(move |id| {
+        let id = EntityId::new(id).ok()?;
+        let root = registry.confined_root(&id).ok()?;
+        Some(root.root().to_path_buf())
+    });
     let supervisor = Arc::new(McpSupervisor::new(store, Arc::new(host)));
     spawn_watchdog(&supervisor, broker, vault, shutdown);
     Ok(supervisor)

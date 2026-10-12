@@ -1,7 +1,8 @@
 //! Read-only import of Claude Code style `.mcp.json` files.
 //!
 //! `{ "mcpServers": { "<name>": { "command", "args", "env", "url", "type", "headers" } } }`
-//! entries become DISABLED server configurations. Environment and header
+//! entries (for a plugin, also the server map without the `mcpServers` wrapper)
+//! become DISABLED server configurations. Environment and header
 //! *values* are never kept: each named variable or header becomes a mapping to a
 //! suggested vault secret name the user fills in (consumer `mcp:<id>`).
 
@@ -74,12 +75,28 @@ pub fn import_mcp_json(path: &Path, source: McpSource) -> Result<Vec<ImportedSer
 }
 
 fn parse_mcp_json(bytes: &[u8], source: &McpSource) -> Result<Vec<ImportedServer>, McpError> {
+    let bytes = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes);
     let document: Value = serde_json::from_slice(bytes)
         .map_err(|_| McpError::invalid_config(".mcp.json is not valid JSON"))?;
-    let servers = document
-        .get("mcpServers")
-        .and_then(Value::as_object)
-        .ok_or_else(|| McpError::invalid_config(".mcp.json has no `mcpServers` object"))?;
+    let Value::Object(top) = &document else {
+        return Err(McpError::invalid_config(".mcp.json must be a JSON object"));
+    };
+    let servers = match top.get("mcpServers") {
+        Some(Value::Object(servers)) => servers,
+        Some(_) => {
+            return Err(McpError::invalid_config(
+                ".mcp.json has no `mcpServers` object",
+            ));
+        }
+        // A Claude Code plugin's `.mcp.json` may be the server map itself (the
+        // grammar `aidex_plugins` reviews); other sources need the wrapper.
+        None if source.kind == McpSourceKind::Plugin => top,
+        None => {
+            return Err(McpError::invalid_config(
+                ".mcp.json has no `mcpServers` object",
+            ));
+        }
+    };
     if servers.len() > MAX_IMPORTED {
         return Err(McpError::invalid_config(format!(
             ".mcp.json declares more than {MAX_IMPORTED} servers"
@@ -399,5 +416,19 @@ mod tests {
         let insecure = br#"{"mcpServers":{"x":{"url":"http://example.com/mcp"}}}"#;
         let servers = parse_mcp_json(insecure, &source).unwrap();
         assert!(servers[0].config.is_none());
+    }
+
+    #[test]
+    fn plugin_files_may_omit_the_wrapper() {
+        let bare = b"\xef\xbb\xbf{\"github\": {\"command\": \"npx\", \"args\": [\"-y\", \"pkg\"]}}";
+        let servers = parse_mcp_json(bare, &McpSource::plugin("review")).unwrap();
+        assert_eq!(servers.len(), 1);
+        let config = servers[0].config.as_ref().unwrap();
+        assert_eq!(config.command.as_deref(), Some("npx"));
+        assert!(!config.enabled);
+        // Workspace and drive files keep the Claude Code project format.
+        assert!(parse_mcp_json(bare, &McpSource::workspace("ws_1")).is_err());
+        assert!(parse_mcp_json(br#"{"mcpServers": []}"#, &McpSource::plugin("review")).is_err());
+        assert!(parse_mcp_json(b"[]", &McpSource::plugin("review")).is_err());
     }
 }
