@@ -1,6 +1,12 @@
+export * from "./attachments";
 export { Brand, type BrandProps } from "./Brand";
 export * from "./CommandMenu";
-export { Composer, type ComposerProps } from "./Composer";
+export {
+  Composer,
+  type ComposerAttachAction,
+  type ComposerFileSource,
+  type ComposerProps,
+} from "./Composer";
 export { Dialog, type DialogProps } from "./Dialog";
 export { InfoCard, type InfoCardProps } from "./InfoCard";
 export { MediaItem, type MediaItemProps } from "./MediaItem";

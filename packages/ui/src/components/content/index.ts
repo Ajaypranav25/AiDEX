@@ -27,6 +27,7 @@ export { StepList, type Step, type StepListProps, type StepStatus } from "./Step
 export { TaskGraph, type GraphNode, type GraphNodeStatus, type TaskGraphProps } from "./TaskGraph";
 export { Terminal, type TerminalLine, type TerminalLineKind, type TerminalProps } from "./Terminal";
 export { Timeline, type TimelineItem, type TimelineProps } from "./Timeline";
+export { TranscriptDivider, type TranscriptDividerProps } from "./TranscriptDivider";
 export { WebResultList, type WebResult, type WebResultListProps } from "./WebResultList";
 export {
   WorkLogGroup,

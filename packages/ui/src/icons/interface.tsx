@@ -154,3 +154,27 @@ export const ImageIcon = createIcon(
     <path d="m20.5 15.5-4.25-4.25a1.5 1.5 0 0 0-2.12 0L5.5 19.5" />
   </>,
 );
+
+/** Magnifier with a plus, e.g. to zoom an image in. */
+export const ZoomInIcon = createIcon(
+  "ZoomInIcon",
+  <>
+    <circle cx="11" cy="11" r="6.5" />
+    <path d="m20 20-4.4-4.4M11 8.25v5.5M8.25 11h5.5" />
+  </>,
+);
+
+/** Magnifier with a minus, e.g. to fit a zoomed image back into view. */
+export const ZoomOutIcon = createIcon(
+  "ZoomOutIcon",
+  <>
+    <circle cx="11" cy="11" r="6.5" />
+    <path d="m20 20-4.4-4.4M8.25 11h5.5" />
+  </>,
+);
+
+/** Two opposing arrows, e.g. a conversation that switched mode or continued elsewhere. */
+export const ArrowRightLeftIcon = createIcon(
+  "ArrowRightLeftIcon",
+  <path d="M4.5 8h15M15.5 4l4 4-4 4M19.5 16h-15M8.5 12l-4 4 4 4" />,
+);
