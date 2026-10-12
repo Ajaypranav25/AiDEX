@@ -7,10 +7,10 @@ use crate::{
 use aidex_core::{CancelToken, EntityId, WorkspacePath};
 use aidex_events::{EventKind, EventScope, EventSink};
 use aidex_native_sessions::*;
-use aidex_providers::ProviderRegistry;
+use aidex_providers::{ModelDescriptor, ProviderRegistry};
 use aidex_workspace::WorkspaceRegistry;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     panic::{AssertUnwindSafe, catch_unwind},
     path::PathBuf,
     sync::{Arc, Mutex, MutexGuard, PoisonError},
@@ -66,6 +66,11 @@ pub struct NativeEngine {
     /// Attachment bytes read for each running run, by attachment id. Kept
     /// while the run's thread works and dropped when it stops.
     pub(crate) attachment_cache: Mutex<HashMap<String, Prefetched>>,
+    /// For each running run, the models (`provider/model`) that refused a
+    /// request carrying attachments of earlier messages: the run's later
+    /// steps go to them without those. In memory only, kept and dropped
+    /// with the run's attachment bytes.
+    pub(crate) refused_earlier: Mutex<HashMap<String, HashSet<String>>>,
 }
 impl NativeEngine {
     pub fn new(
@@ -111,6 +116,7 @@ impl NativeEngine {
             nonce_key,
             offered_mcp: Mutex::new(HashMap::new()),
             attachment_cache: Mutex::new(HashMap::new()),
+            refused_earlier: Mutex::new(HashMap::new()),
         })
     }
     /// The skills, web, and MCP services this engine was built with.
@@ -158,8 +164,34 @@ impl NativeEngine {
         parent: Option<String>,
         options: RunOptions,
     ) -> Result<Run, String> {
-        let _guard = relock(&self.operations);
-        let s = self.store.get(session)?;
+        // A new native message with attachments is checked against the
+        // session's model, whose catalog lookup may list the provider over
+        // the network. It runs without the engine-wide lock, which is then
+        // taken again; the session must still name the model that was
+        // checked.
+        let mut resolved: Option<(ModelKey, Result<ModelDescriptor, String>)> = None;
+        let mut lookups = 0;
+        let (_guard, s, model) = loop {
+            let guard = relock(&self.operations);
+            let s = self.store.get(session)?;
+            let Some(key) = attachment_model_key(&s, command, parent.is_some(), &options) else {
+                break (guard, s, None);
+            };
+            if let Some((_, model)) = resolved.take_if(|(checked, _)| *checked == key) {
+                break (guard, s, Some(model));
+            }
+            if lookups == MAX_MODEL_LOOKUPS {
+                return Err(
+                    "the conversation's model changed while the message was being sent; send it \
+                     again"
+                        .into(),
+                );
+            }
+            drop(guard);
+            lookups += 1;
+            let model = self.primary_model(&s.configuration).map(|(_, model)| model);
+            resolved = Some((key, model));
+        };
         if s.configuration.mode == Mode::Agent && s.configuration.workspace_id.is_none() {
             return Err("agent mode requires a selected workspace".into());
         }
@@ -200,10 +232,13 @@ impl NativeEngine {
         } else {
             self.check_options(&s.configuration, options)?
         };
-        let prefetched = if retry || options.attachments.is_empty() {
-            None
-        } else {
-            Some(self.check_attachments(&s, &options.attachments)?)
+        // `model` is set exactly for a new native root message with
+        // attachments (child and external ones were refused above).
+        let prefetched = match model {
+            Some(model) => {
+                Some(self.check_attachments(&s, content, &options.attachments, &model?)?)
+            }
+            None => None,
         };
         if let Some(parent) = &parent {
             self.broker.authorize_native(
@@ -264,7 +299,8 @@ impl NativeEngine {
     /// conversation it would receive exceeds the runtime's bounds: more than
     /// 1 MiB of message text, a prompt frame over 1 MiB, or, for runtimes
     /// that take the prompt as one command-line argument (Claude Code,
-    /// Cursor), more than [`ARGV_PROMPT_UNITS`] UTF-16 units once quoted.
+    /// Cursor), more than this platform allows in one argument
+    /// ([`argv_limit_exceeded`]).
     fn check_runtime_context(
         &self,
         s: &SessionDetail,
@@ -310,12 +346,12 @@ impl NativeEngine {
             ));
         }
         if ARGV_RUNTIMES.contains(&runtime.name.as_str())
-            && windows_argument_units(&prompt) > ARGV_PROMPT_UNITS
+            && let Some(limit) = argv_limit_exceeded(ArgvPlatform::HOST, &prompt)
         {
             return refuse(format!(
                 "This conversation is too long for {}, which receives it as one command-line \
-                 argument (at most {ARGV_PROMPT_UNITS} characters). Continue in a new \
-                 conversation or with an AiDEX native model.",
+                 argument (at most {limit} on this system). Continue in a new conversation or \
+                 with an AiDEX native model.",
                 runtime.name
             ));
         }
@@ -845,7 +881,7 @@ impl NativeEngine {
         Ok(())
     }
     pub fn shutdown(&self) {
-        relock(&self.attachment_cache).clear();
+        self.forget_all_attachments();
         for r in relock(&self.live).values() {
             r.provider.cancel();
             r.tool.cancel();
@@ -857,7 +893,7 @@ impl NativeEngine {
             .shutdown(aidex_sandbox::StopReason::DaemonShutdown);
     }
     pub fn cancel_all(&self) {
-        relock(&self.attachment_cache).clear();
+        self.forget_all_attachments();
         if let Ok(runs) = self.store.run_summaries() {
             for run in runs {
                 if run.status.active() {
@@ -874,8 +910,41 @@ impl NativeEngine {
             .sandbox
             .registry()
             .terminate_all(aidex_sandbox::StopReason::Cancelled);
-        relock(&self.attachment_cache).clear();
+        self.forget_all_attachments();
     }
+}
+
+/// The session configuration a model check of attachments was made for:
+/// provider id, model id, and mode.
+type ModelKey = (String, String, Mode);
+
+/// How often [`NativeEngine::start_with`] looks the model up again when the
+/// session's model changes while it checks attachments.
+const MAX_MODEL_LOOKUPS: usize = 3;
+
+/// The configuration a new message's attachments must be checked against:
+/// `None` without attachments, for a retried command, a child run, or an
+/// external runtime (those are refused or skip the check).
+fn attachment_model_key(
+    s: &SessionDetail,
+    command: &str,
+    child: bool,
+    options: &RunOptions,
+) -> Option<ModelKey> {
+    let external = s
+        .configuration
+        .runtime_id
+        .as_deref()
+        .is_some_and(|id| id != "native");
+    let checked =
+        !options.attachments.is_empty() && !child && !external && !s.commands.contains_key(command);
+    checked.then(|| {
+        (
+            s.configuration.provider_id.clone(),
+            s.configuration.model_id.clone(),
+            s.configuration.mode,
+        )
+    })
 }
 
 /// External runtimes refuse more message text than this (1 MiB).
@@ -886,9 +955,44 @@ const RUNTIME_FRAME_BYTES: usize = 1024 * 1024;
 const RUNTIME_FRAME_RESERVE: usize = 16 * 1024;
 /// Runtimes (by descriptor name) that receive the prompt as one argument.
 const ARGV_RUNTIMES: [&str; 2] = ["Claude Code", "Cursor"];
-/// Most UTF-16 units of a quoted prompt argument (Windows allows 32,767 for
-/// the whole command line; the rest is left for the executable and flags).
+/// Most UTF-16 units of a quoted prompt argument on Windows (32,767 for the
+/// whole command line; the rest is left for the executable and flags).
 pub(crate) const ARGV_PROMPT_UNITS: usize = 30_000;
+/// Most bytes of one argument on Linux, its terminating NUL included
+/// (`MAX_ARG_STRLEN`).
+const LINUX_ARGUMENT_BYTES: usize = 128 * 1024;
+
+/// Where a runtime's command line is built, for its one-argument limit.
+#[derive(Clone, Copy, Debug)]
+enum ArgvPlatform {
+    Windows,
+    Linux,
+    /// macOS and the rest: their limit is on the whole command line (about
+    /// 1 MiB on macOS), which the 1 MiB text and frame bounds keep below.
+    Other,
+}
+
+impl ArgvPlatform {
+    const HOST: Self = if cfg!(windows) {
+        Self::Windows
+    } else if cfg!(target_os = "linux") {
+        Self::Linux
+    } else {
+        Self::Other
+    };
+}
+
+/// The one-argument limit `prompt` exceeds on `platform`, as the refusal
+/// names it, or `None` when it fits.
+fn argv_limit_exceeded(platform: ArgvPlatform, prompt: &str) -> Option<String> {
+    match platform {
+        ArgvPlatform::Windows => (windows_argument_units(prompt) > ARGV_PROMPT_UNITS)
+            .then(|| format!("{ARGV_PROMPT_UNITS} characters")),
+        ArgvPlatform::Linux => (prompt.len().saturating_add(1) > LINUX_ARGUMENT_BYTES)
+            .then(|| format!("{} KiB", LINUX_ARGUMENT_BYTES / 1024)),
+        ArgvPlatform::Other => None,
+    }
+}
 
 /// The prompt external runtimes build for a new run: the instructions, then
 /// one `role: content` line per message.
@@ -949,5 +1053,34 @@ mod tests {
             runtime_prompt("rules", &[aidex_providers::ChatMessage::user("hi")]),
             "rules\nuser: hi"
         );
+    }
+
+    #[test]
+    fn the_one_argument_limit_depends_on_the_platform() {
+        use ArgvPlatform::{Linux, Other, Windows};
+        let units = |n: usize| "x".repeat(n);
+        // Windows counts quoted UTF-16 units.
+        assert_eq!(
+            argv_limit_exceeded(Windows, &units(ARGV_PROMPT_UNITS)),
+            None
+        );
+        assert_eq!(
+            argv_limit_exceeded(Windows, &units(ARGV_PROMPT_UNITS + 1)).as_deref(),
+            Some("30000 characters")
+        );
+        assert!(argv_limit_exceeded(Windows, &"\"".repeat(ARGV_PROMPT_UNITS / 2 + 1)).is_some());
+        // Linux counts bytes, the terminating NUL included.
+        assert_eq!(argv_limit_exceeded(Linux, &units(40_000)), None);
+        assert_eq!(
+            argv_limit_exceeded(Linux, &units(LINUX_ARGUMENT_BYTES - 1)),
+            None
+        );
+        assert_eq!(
+            argv_limit_exceeded(Linux, &units(LINUX_ARGUMENT_BYTES)).as_deref(),
+            Some("128 KiB")
+        );
+        assert!(argv_limit_exceeded(Linux, &"é".repeat(LINUX_ARGUMENT_BYTES / 2)).is_some());
+        // Elsewhere only the 1 MiB text and frame bounds apply.
+        assert_eq!(argv_limit_exceeded(Other, &units(1024 * 1024)), None);
     }
 }

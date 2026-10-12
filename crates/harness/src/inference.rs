@@ -16,7 +16,7 @@ use aidex_events::EventKind;
 use aidex_native_sessions::{Mode, Run, SessionConfig};
 use aidex_providers::{
     CapabilitySource, ChatRequest, ChatResponse, ModelDescriptor, ModelProvider, ModelRef,
-    ProviderError, RegistryError, StreamEvent, ToolCallSupport,
+    PDF_PAGE_TOKENS, ProviderError, RegistryError, StreamEvent, ToolCallSupport,
 };
 use std::{
     collections::HashSet,
@@ -35,8 +35,8 @@ pub(crate) struct Turn {
     pub attachments: TurnAttachments,
 }
 
-/// A refusal that may come from images or PDFs of earlier messages: the
-/// attempt is repeated once without them.
+/// A refusal that may come from attachments (images, PDFs, or text) of
+/// earlier messages: the attempt is repeated once without them.
 fn refused_for_size_or_content(error: &ProviderError) -> bool {
     matches!(
         error,
@@ -90,6 +90,7 @@ impl NativeEngine {
         run: &Run,
         index: Option<usize>,
         cancel: &CancelToken,
+        pdf_page_tokens: u32,
     ) -> Result<ChatResponse, ProviderError> {
         if cancel.is_stopped() {
             return Err(ProviderError::Cancelled);
@@ -102,7 +103,8 @@ impl NativeEngine {
                     .find(|r| r.id == run.id)
                     .ok_or("run not found")?;
                 run.effective_max_tokens = request.max_tokens;
-                run.estimated_input_tokens = Some(request.estimated_input_tokens());
+                run.estimated_input_tokens =
+                    Some(request.estimated_input_tokens_with(pdf_page_tokens));
                 run.model_used = Some(format!("{}/{}", provider.descriptor().id, request.model));
                 Ok(())
             })
@@ -178,8 +180,8 @@ impl NativeEngine {
         self.validate_model(&target, config)
             .map_err(|e| e.to_string())
     }
-    /// `base` prepared for `model`; also whether it carries images or PDFs
-    /// of messages before the run's own one.
+    /// `base` prepared for `model`; also whether it carries attachments
+    /// (images, PDFs, or text) of messages before the run's own one.
     fn prepare(
         &self,
         base: &ChatRequest,
@@ -219,22 +221,34 @@ impl NativeEngine {
     ) -> Result<ChatResponse, String> {
         let index = turn.index;
         // One model's attempt. When the provider refuses a request carrying
-        // images or PDFs of earlier messages, it is repeated once with those
-        // as placeholders, so one unreadable old file cannot block the chat.
+        // attachments of earlier messages, it is repeated once with those as
+        // placeholders, so one unreadable or oversized old file cannot block
+        // the chat. The run remembers that refusal (in memory, per model), so
+        // its later steps do not send the refused request first again.
         let run_model = |provider: &dyn ModelProvider,
                          model: &ModelDescriptor,
                          base: &ChatRequest|
          -> Result<ChatResponse, ProviderError> {
-            let (prepared, earlier) = self.prepare(base, model, turn, false);
-            let first = bound_request(&prepared, model, config)
-                .and_then(|bounded| self.attempt(provider, &bounded, run, index, cancel));
+            let page_tokens = self
+                .registry
+                .part_limits(model)
+                .map_or(PDF_PAGE_TOKENS, |limits| limits.pdf_page_tokens);
+            let refused = self.refused_earlier(&run.id, model);
+            let (prepared, earlier) = self.prepare(base, model, turn, refused);
+            let first = bound_request(&prepared, model, config, page_tokens).and_then(|bounded| {
+                self.attempt(provider, &bounded, run, index, cancel, page_tokens)
+            });
             match first {
                 Err(error)
-                    if earlier && refused_for_size_or_content(&error) && !cancel.is_stopped() =>
+                    if !refused
+                        && earlier
+                        && refused_for_size_or_content(&error)
+                        && !cancel.is_stopped() =>
                 {
+                    self.remember_refused_earlier(&run.id, model);
                     let (prepared, _) = self.prepare(base, model, turn, true);
-                    let bounded = bound_request(&prepared, model, config)?;
-                    self.attempt(provider, &bounded, run, index, cancel)
+                    let bounded = bound_request(&prepared, model, config, page_tokens)?;
+                    self.attempt(provider, &bounded, run, index, cancel, page_tokens)
                 }
                 other => other,
             }
@@ -321,10 +335,14 @@ fn model_event_id(model: &ModelRef) -> Result<EntityId, String> {
     EntityId::new(text).map_err(|e| e.to_string())
 }
 
+/// `request` with its output budget set. PDF pages are estimated at
+/// `pdf_page_tokens` each, the model family's cost
+/// ([`aidex_providers::PartLimits::pdf_page_tokens`]).
 fn bound_request(
     request: &ChatRequest,
     model: &ModelDescriptor,
     configuration: &SessionConfig,
+    pdf_page_tokens: u32,
 ) -> Result<ChatRequest, ProviderError> {
     let mut bounded = request.clone();
     let mut budget = configuration
@@ -339,7 +357,7 @@ fn bound_request(
         CapabilitySource::Configured | CapabilitySource::Discovered
     );
     if exact_window && model.context_window > 0 {
-        let input = request.estimated_input_tokens();
+        let input = request.estimated_input_tokens_with(pdf_page_tokens);
         let remaining = model.context_window.saturating_sub(input);
         if remaining == 0 {
             return Err(ProviderError::ContextOverflow {

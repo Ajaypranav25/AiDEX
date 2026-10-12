@@ -4,7 +4,9 @@
 //! - an assistant tool call the request does not offer (or one that never
 //!   got a result) becomes a `[Called <tool> with <arguments>]` line in the
 //!   assistant's text, and its result becomes a user message wrapped as data;
-//!   Anthropic, Bedrock, and Gemini refuse tool blocks without definitions;
+//!   Anthropic, Bedrock, and Gemini refuse tool blocks without definitions.
+//!   Those user messages follow the results of the calls the assistant
+//!   keeps, which OpenAI Chat Completions needs right after the calls;
 //! - empty assistant messages without tool calls (the placeholder of a turn
 //!   that failed before any text) are dropped, because some vendors refuse
 //!   empty content.
@@ -22,8 +24,9 @@ use std::collections::HashSet;
 const FLATTENED_ARGUMENTS: usize = 2048;
 
 /// Flatten the tool calls in `messages[start..]` whose tool `offered` does
-/// not contain or that have no result, and their results. Returns whether a
-/// result was wrapped here (the prompt must then explain the delimiters).
+/// not contain or that have no result, and their results (and results that
+/// answer no call the assistant keeps). Returns whether a result was wrapped
+/// here (the prompt must then explain the delimiters).
 pub(crate) fn flatten_tool_history(
     messages: &mut [ChatMessage],
     start: usize,
@@ -39,6 +42,8 @@ pub(crate) fn flatten_tool_history(
         .collect();
     // For each message, whether it is a result to flatten.
     let mut flatten_result = vec![false; transcript.len()];
+    // Result blocks that keep some results and flatten others.
+    let mut mixed = Vec::new();
     let mut index = 0;
     while index < transcript.len() {
         let message = &transcript[index];
@@ -66,14 +71,22 @@ pub(crate) fn flatten_tool_history(
             .filter(|call| !offered.contains(&call.name) || !answered.contains(call.id.as_str()))
             .map(|call| call.id.clone())
             .collect();
-        for (offset, result) in transcript[index + 1..index + 1 + results]
+        let kept: HashSet<&str> = message
+            .tool_calls
             .iter()
-            .enumerate()
-        {
+            .map(|call| call.id.as_str())
+            .filter(|id| !flattened.contains(*id))
+            .collect();
+        let block = index + 1..index + 1 + results;
+        for (offset, result) in transcript[block.clone()].iter().enumerate() {
             flatten_result[index + 1 + offset] = result
                 .tool_call_id
                 .as_deref()
-                .is_none_or(|id| flattened.contains(id));
+                .is_none_or(|id| !kept.contains(id));
+        }
+        let flat = flatten_result[block.clone()].iter().filter(|f| **f).count();
+        if flat > 0 && flat < results {
+            mixed.push(block);
         }
         if !flattened.is_empty() {
             let message = &mut transcript[index];
@@ -141,6 +154,11 @@ pub(crate) fn flatten_tool_history(
             &message.content,
         );
         wrapped = true;
+    }
+    // The kept results first, right after the calls they answer, then the
+    // flattened ones (now user messages), each in their stored order.
+    for block in mixed {
+        transcript[block].sort_by_key(|message| message.role != Role::Tool);
     }
     wrapped
 }
@@ -243,6 +261,7 @@ mod tests {
         ];
         let offered = HashSet::from(["fs_read".to_owned()]);
         assert!(flatten_tool_history(&mut messages, 0, &offered, "n"));
+        chat_completions_order(&messages).unwrap();
         assert_eq!(messages[1].tool_calls.len(), 1, "c1 has its result");
         assert_eq!(messages[1].tool_calls[0].id, "c1");
         assert_eq!(messages[1].content, "[Called fs_read with {\"q\":\"c2\"}]");
@@ -266,6 +285,99 @@ mod tests {
         let before = untouched.clone();
         assert!(!flatten_tool_history(&mut untouched, 0, &offered, "n"));
         assert_eq!(untouched, before);
+    }
+
+    /// OpenAI Chat Completions ordering: every tool message directly follows
+    /// an assistant message with tool calls or another tool message, and
+    /// answers a call of that assistant message; every call is answered in
+    /// that run of tool messages.
+    fn chat_completions_order(messages: &[ChatMessage]) -> Result<(), String> {
+        let mut index = 0;
+        while index < messages.len() {
+            let message = &messages[index];
+            if message.role == Role::Tool {
+                return Err(format!("tool message {index} follows no tool calls"));
+            }
+            index += 1;
+            if message.tool_calls.is_empty() {
+                continue;
+            }
+            let ids: HashSet<&str> = message.tool_calls.iter().map(|c| c.id.as_str()).collect();
+            let mut answered = HashSet::new();
+            while let Some(result) = messages.get(index).filter(|m| m.role == Role::Tool) {
+                let id = result.tool_call_id.as_deref().unwrap_or_default();
+                if !ids.contains(id) {
+                    return Err(format!("tool message {index} answers no call"));
+                }
+                answered.insert(id);
+                index += 1;
+            }
+            if answered != ids {
+                return Err(format!("calls before {index} are not all answered"));
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn kept_results_stay_right_after_their_calls_when_an_earlier_result_flattens() {
+        let history = vec![
+            ChatMessage::user("go"),
+            assistant(vec![
+                call("c1", "mcp__x__lookup"),
+                call("c2", "fs_read"),
+                call("c3", "fs_read"),
+            ]),
+            ChatMessage::tool_result("c1", "looked up"),
+            ChatMessage::tool_result("c2", "two"),
+            ChatMessage::tool_result("stray", "no call"),
+            ChatMessage::tool_result("c3", "three"),
+            ChatMessage::assistant("answer"),
+        ];
+        assert!(chat_completions_order(&history).is_err(), "a stray result");
+        let offered = HashSet::from(["fs_read".to_owned()]);
+        let mut messages = history.clone();
+        flatten_tool_history(&mut messages, 0, &offered, "n");
+        chat_completions_order(&messages).unwrap();
+        let ids: Vec<&str> = messages[1]
+            .tool_calls
+            .iter()
+            .map(|c| c.id.as_str())
+            .collect();
+        assert_eq!(ids, ["c2", "c3"]);
+        assert_eq!(
+            messages[1].content,
+            "[Called mcp__x__lookup with {\"q\":\"c1\"}]"
+        );
+        let shape: Vec<(Role, Option<&str>)> = messages[2..6]
+            .iter()
+            .map(|m| (m.role, m.tool_call_id.as_deref()))
+            .collect();
+        assert_eq!(
+            shape,
+            [
+                (Role::Tool, Some("c2")),
+                (Role::Tool, Some("c3")),
+                (Role::User, None),
+                (Role::User, None),
+            ]
+        );
+        assert!(
+            messages[4]
+                .content
+                .starts_with("Result of the earlier mcp__x__lookup call \"c1\":\n"),
+            "{}",
+            messages[4].content
+        );
+        assert!(messages[5].content.contains("call=\"stray\""));
+        assert_eq!(messages[6].content, "answer");
+        // With every tool offered only the stray result moves.
+        let all = HashSet::from(["fs_read".to_owned(), "mcp__x__lookup".to_owned()]);
+        let mut messages = history;
+        flatten_tool_history(&mut messages, 0, &all, "n");
+        chat_completions_order(&messages).unwrap();
+        assert_eq!(messages[1].tool_calls.len(), 3);
+        assert_eq!(messages[5].role, Role::User);
     }
 
     #[test]

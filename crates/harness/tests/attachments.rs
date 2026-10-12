@@ -14,14 +14,16 @@ use aidex_native_sessions::{
     digest,
 };
 use aidex_providers::{
-    ChatMessage, ChatRequest, ContentPart, FakeProvider, FakeScript, FakeTurn, Locality,
-    ModelCapabilities, ModelDescriptor, ModelId, ModelRef, NoVault, OfflineMode, ProviderError,
-    ProviderId, ProviderKind, ProviderRegistry, Role, ToolCallSupport,
+    ChatMessage, ChatRequest, ChatResponse, ContentPart, FakeProvider, FakeScript, FakeTurn,
+    Locality, ModelCapabilities, ModelDescriptor, ModelId, ModelProvider, ModelRef, NoVault,
+    OfflineMode, ProviderDescriptor, ProviderError, ProviderHealth, ProviderId, ProviderKind,
+    ProviderRegistry, Role, StreamEvent, ToolCall, ToolCallSupport,
 };
 use aidex_vault::{KdfParams, SecretString, VaultService, VaultServiceConfig};
 use serde_json::json;
 use std::{
-    sync::{Arc, Mutex},
+    collections::HashSet,
+    sync::{Arc, Condvar, Mutex, mpsc},
     time::{Duration, Instant},
 };
 
@@ -33,14 +35,14 @@ struct Fixture {
     events: Arc<MemoryEventSink>,
 }
 
-fn model(name: &str, vision: bool) -> ModelDescriptor {
+fn model(name: &str, vision: bool, context_window: u32) -> ModelDescriptor {
     ModelDescriptor::new(
         ModelRef::new(
             ProviderId::new("fixture").unwrap(),
             ModelId::new(name).unwrap(),
         ),
         Locality::Local,
-        1_000_000,
+        context_window,
     )
     .with_capabilities(ModelCapabilities {
         vision,
@@ -50,6 +52,15 @@ fn model(name: &str, vision: bool) -> ModelDescriptor {
 }
 
 fn fixture(kind: ProviderKind, turns: Vec<FakeTurn>) -> Fixture {
+    fixture_with(kind, turns, |provider| provider)
+}
+
+/// [`fixture`] with the provider the registry sees wrapped by `wrap`.
+fn fixture_with(
+    kind: ProviderKind,
+    turns: Vec<FakeTurn>,
+    wrap: impl FnOnce(Arc<FakeProvider>) -> Arc<dyn ModelProvider>,
+) -> Fixture {
     let drive = tempfile::tempdir().unwrap();
     aidex_drive::init_with(
         drive.path(),
@@ -94,11 +105,13 @@ fn fixture(kind: ProviderKind, turns: Vec<FakeTurn>) -> Fixture {
     let provider = Arc::new(
         FakeProvider::new(ProviderId::new("fixture").unwrap(), Locality::Local)
             .with_kind(kind)
-            .with_model(model("eyes", true))
-            .with_model(model("blind", false))
+            .with_model(model("eyes", true, 1_000_000))
+            .with_model(model("blind", false, 1_000_000))
+            // A declared 100,000-token window.
+            .with_model(model("small", true, 100_000))
             .with_script(turns.into_iter().collect::<FakeScript>()),
     );
-    registry.register_shared(provider.clone()).unwrap();
+    registry.register_shared(wrap(provider.clone())).unwrap();
     let events = Arc::new(MemoryEventSink::new());
     let engine = NativeEngine::new(
         store.clone(),
@@ -118,9 +131,13 @@ fn fixture(kind: ProviderKind, turns: Vec<FakeTurn>) -> Fixture {
 
 impl Fixture {
     fn session(&self, model: &str, fallback: Option<&str>) -> String {
+        self.session_in("chat", model, fallback)
+    }
+
+    fn session_in(&self, mode: &str, model: &str, fallback: Option<&str>) -> String {
         let mut config = json!({
             "title": "fixture",
-            "mode": "chat",
+            "mode": mode,
             "provider_id": "fixture",
             "model_id": model,
             "permission_mode": "supervised",
@@ -551,6 +568,31 @@ fn history_beyond_the_family_budget_becomes_placeholders_oldest_first() {
 }
 
 #[test]
+fn still_gifs_in_history_reach_openai_family_models() {
+    // OpenAI families read a GIF only when it is still, which only its bytes
+    // tell, so a still one in history is sent again.
+    let f = fixture(
+        ProviderKind::OpenaiCompatible,
+        vec![FakeTurn::text("one"), FakeTurn::text("two")],
+    );
+    let s = f.session("eyes", None);
+    let still = f.attach(&s, "still.gif", &gif(), None);
+    completed(&f, f.send(&s, "look", "send-1", &[&still]).unwrap());
+    completed(&f, f.send(&s, "again", "send-2", &[]).unwrap());
+    let requests = f.requests();
+    let history = users(&requests[1]);
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0].parts.len(), 1, "{}", history[0].content);
+    assert!(
+        history[0]
+            .content
+            .contains("[Attachment 1: image \"still.gif\"]"),
+        "{}",
+        history[0].content
+    );
+}
+
+#[test]
 fn a_refused_request_is_repeated_once_without_earlier_files() {
     let f = fixture(
         ProviderKind::Fake,
@@ -824,14 +866,34 @@ fn runtimes_refuse_conversations_too_large_for_them_before_storing() {
     let f = fixture(ProviderKind::Fake, vec![]);
     let s = f.session("eyes", None);
     use_runtime(&f, &s);
-    let _probe = probe(&f, "Claude Code");
-    // Claude Code receives the whole prompt as one command-line argument.
+    let claude = probe(&f, "Claude Code");
+    // Claude Code receives the whole prompt as one command-line argument:
+    // at most 30,000 characters once quoted on Windows and 128 KiB on Linux;
+    // elsewhere only the 1 MiB bounds apply.
+    let over = if cfg!(windows) {
+        Some((31_000, "30000 characters"))
+    } else if cfg!(target_os = "linux") {
+        Some((132_000, "128 KiB"))
+    } else {
+        None
+    };
+    if let Some((length, limit)) = over {
+        let error = f.send(&s, &"x".repeat(length), "once", &[]).unwrap_err();
+        assert_eq!(reason(&error), CONTEXT_TOO_LARGE_FOR_RUNTIME, "{error}");
+        assert!(error.contains("one command-line argument"), "{error}");
+        assert!(
+            error.contains(&format!("at most {limit} on this system")),
+            "{error}"
+        );
+        let session = f.store.get(&s).unwrap();
+        assert!(session.messages.is_empty() && session.runs.is_empty());
+    }
     let long = "x".repeat(31_000);
-    let error = f.send(&s, &long, "once", &[]).unwrap_err();
-    assert_eq!(reason(&error), CONTEXT_TOO_LARGE_FOR_RUNTIME, "{error}");
-    assert!(error.contains("one command-line argument"), "{error}");
-    let session = f.store.get(&s).unwrap();
-    assert!(session.messages.is_empty() && session.runs.is_empty());
+    if !cfg!(windows) {
+        // Outside Windows that much fits in one argument.
+        completed(&f, f.send(&s, &long, "fits", &[]).unwrap());
+        assert_eq!(claude.received.lock().unwrap().len(), 1);
+    }
 
     // A runtime that reads its prompt from a frame takes it.
     let f = fixture(ProviderKind::Fake, vec![]);
@@ -840,4 +902,310 @@ fn runtimes_refuse_conversations_too_large_for_them_before_storing() {
     let probe = probe(&f, "Probe");
     completed(&f, f.send(&s, &long, "once", &[]).unwrap());
     assert_eq!(probe.received.lock().unwrap().len(), 1);
+}
+
+/// OpenAI Chat Completions ordering: every tool message directly follows the
+/// assistant message whose calls it answers (or another tool message), and
+/// every call is answered there.
+fn assert_chat_completions_order(messages: &[ChatMessage]) {
+    let mut index = 0;
+    while index < messages.len() {
+        let message = &messages[index];
+        assert_ne!(
+            message.role,
+            Role::Tool,
+            "tool message {index} follows no calls: {messages:#?}"
+        );
+        index += 1;
+        if message.tool_calls.is_empty() {
+            continue;
+        }
+        let calls: HashSet<&str> = message.tool_calls.iter().map(|c| c.id.as_str()).collect();
+        let mut answered = HashSet::new();
+        while let Some(result) = messages.get(index).filter(|m| m.role == Role::Tool) {
+            let id = result.tool_call_id.as_deref().unwrap_or_default();
+            assert!(calls.contains(id), "tool message {index} answers no call");
+            answered.insert(id);
+            index += 1;
+        }
+        assert_eq!(answered, calls, "calls before {index} are unanswered");
+    }
+}
+
+#[test]
+fn a_mode_switch_keeps_offered_tool_results_right_after_their_calls() {
+    // An Agent turn called fs_read and artifact_create together; Plan offers
+    // only artifact_create, so fs_read and its result become text.
+    let f = fixture(ProviderKind::Fake, vec![FakeTurn::text("planned")]);
+    let s = f.session_in("plan", "eyes", None);
+    let call = |id: &str, name: &str| ToolCall {
+        id: id.into(),
+        name: name.into(),
+        arguments: "{}".into(),
+        provider_metadata: None,
+    };
+    f.store
+        .update(&s, |s| {
+            let mut calls = ChatMessage::assistant("");
+            calls.tool_calls = vec![call("c1", "fs_read"), call("c2", "artifact_create")];
+            s.messages.extend([
+                ChatMessage::user("look"),
+                calls,
+                ChatMessage::tool_result("c1", "file text"),
+                ChatMessage::tool_result("c2", r#"{"artifact":{}}"#),
+                ChatMessage::assistant("done"),
+            ]);
+            Ok(())
+        })
+        .unwrap();
+    completed(&f, f.send(&s, "next", "once", &[]).unwrap());
+    let requests = f.requests();
+    let request = &requests[0];
+    assert!(request.tools.iter().any(|t| t.name == "artifact_create"));
+    assert!(request.tools.iter().all(|t| t.name != "fs_read"));
+    assert_chat_completions_order(&request.messages);
+    let at = request
+        .messages
+        .iter()
+        .position(|m| !m.tool_calls.is_empty())
+        .unwrap();
+    let calls = &request.messages[at];
+    assert_eq!(calls.tool_calls.len(), 1);
+    assert_eq!(calls.tool_calls[0].id, "c2");
+    assert_eq!(calls.content, "[Called fs_read with {}]");
+    assert_eq!(request.messages[at + 1].tool_call_id.as_deref(), Some("c2"));
+    let flattened = &request.messages[at + 2];
+    assert_eq!(flattened.role, Role::User);
+    assert!(
+        flattened
+            .content
+            .contains("source=tool name=\"fs_read\" call=\"c1\" trust=project>>>\nfile text\n"),
+        "{}",
+        flattened.content
+    );
+}
+
+#[test]
+fn messages_too_long_for_a_declared_context_window_are_refused_before_storing() {
+    // `small` declares 100,000 tokens; two inlined 200,000-byte files are
+    // about that much on their own.
+    let f = fixture(ProviderKind::Fake, vec![FakeTurn::text("read")]);
+    let s = f.session("small", None);
+    let text = vec![b'x'; 200_000];
+    let logs = [
+        f.attach(&s, "a.log", &text, None),
+        f.attach(&s, "b.log", &text, None),
+    ];
+    let error = f
+        .send(&s, "read", "once", &[&logs[0], &logs[1]])
+        .unwrap_err();
+    assert_eq!(reason(&error), ATTACHMENTS_UNSUPPORTED, "{error}");
+    assert!(
+        error.contains("too long for small's context window of 100000 tokens"),
+        "{error}"
+    );
+    assert!(!error.contains("a.log"), "{error}");
+    assert!(f.store.get(&s).unwrap().messages.is_empty());
+    // Ninety PDF pages at 3,000 tokens each do not fit either.
+    let document = f.attach(&s, "long.pdf", &pdf(90), None);
+    let error = f.send(&s, "read", "pdf", &[&document]).unwrap_err();
+    assert_eq!(reason(&error), ATTACHMENTS_UNSUPPORTED, "{error}");
+    assert!(f.store.get(&s).unwrap().messages.is_empty());
+    // One file fits.
+    completed(&f, f.send(&s, "read", "twice", &[&logs[0]]).unwrap());
+
+    // Gemini bills a PDF page at 560 tokens at most, so the same document
+    // reaches the model.
+    let f = fixture(ProviderKind::Gemini, vec![FakeTurn::text("read")]);
+    let s = f.session("small", None);
+    let document = f.attach(&s, "long.pdf", &pdf(90), None);
+    completed(&f, f.send(&s, "read", "once", &[&document]).unwrap());
+    let requests = f.requests();
+    assert!(matches!(
+        &users(&requests[0])[0].parts[..],
+        [ContentPart::Pdf { pages: 90, .. }]
+    ));
+}
+
+#[test]
+fn a_refused_request_is_repeated_once_without_earlier_text() {
+    let f = fixture(
+        ProviderKind::Fake,
+        vec![
+            FakeTurn::text("one"),
+            FakeTurn::error(ProviderError::ContextOverflow {
+                limit: None,
+                requested: None,
+            }),
+            FakeTurn::text("two"),
+        ],
+    );
+    let s = f.session("eyes", None);
+    let old = f.attach(&s, "old.log", b"earlier log", None);
+    completed(&f, f.send(&s, "first", "send-1", &[&old]).unwrap());
+    let own = f.attach(&s, "new.log", b"own log", None);
+    completed(&f, f.send(&s, "second", "send-2", &[&own]).unwrap());
+    let requests = f.requests();
+    assert_eq!(requests.len(), 3);
+    assert!(users(&requests[1])[0].content.contains("earlier log"));
+    let retried = users(&requests[2]);
+    assert!(!retried[0].content.contains("earlier log"));
+    assert!(
+        retried[0].content.contains(
+            "[Attached file \"old.log\" is not shown: it was left out after the provider \
+             refused a request that included it]"
+        ),
+        "{}",
+        retried[0].content
+    );
+    assert!(
+        retried[1].content.contains("own log"),
+        "the run's own text stays"
+    );
+    assert_eq!(f.store.get(&s).unwrap().messages[3].content, "two");
+}
+
+#[test]
+fn a_refusal_is_remembered_for_the_rest_of_the_run() {
+    let f = fixture(
+        ProviderKind::Fake,
+        vec![
+            FakeTurn::text("one"),
+            FakeTurn::error(ProviderError::Http {
+                status: 400,
+                code: Some("invalid_image".into()),
+            }),
+            FakeTurn::tool_call(
+                "artifact_create",
+                r#"{"name":"n.md","kind":"document","content":"notes"}"#,
+            ),
+            FakeTurn::text("two"),
+            FakeTurn::text("three"),
+        ],
+    );
+    let s = f.session_in("plan", "eyes", None);
+    let image = f.attach(&s, "old.png", &png(10, 10, 100), None);
+    completed(&f, f.send(&s, "first", "send-1", &[&image]).unwrap());
+    completed(&f, f.send(&s, "second", "send-2", &[]).unwrap());
+    let parts = |request: &ChatRequest| users(request)[0].parts.len();
+    let requests = f.requests();
+    assert_eq!(requests.len(), 4, "one refused request, then reduced ones");
+    assert_eq!(parts(&requests[1]), 1, "refused");
+    assert_eq!(parts(&requests[2]), 0, "repeated without the earlier image");
+    assert_eq!(
+        parts(&requests[3]),
+        0,
+        "the run's next step goes without it at once"
+    );
+    // A new run tries the full request again.
+    completed(&f, f.send(&s, "third", "send-3", &[]).unwrap());
+    assert_eq!(parts(&f.requests()[4]), 1);
+}
+
+/// A provider whose model listing waits while it is held.
+struct Gated {
+    inner: Arc<FakeProvider>,
+    /// Whether listings wait, and how many are listing now.
+    state: Mutex<(bool, usize)>,
+    changed: Condvar,
+}
+
+impl Gated {
+    fn hold(&self, held: bool) {
+        self.state.lock().unwrap().0 = held;
+        self.changed.notify_all();
+    }
+
+    fn wait_for_listing(&self) {
+        let until = Instant::now() + Duration::from_secs(10);
+        let mut state = self.state.lock().unwrap();
+        while state.1 == 0 {
+            assert!(Instant::now() < until, "no listing started");
+            state = self
+                .changed
+                .wait_timeout(state, Duration::from_millis(50))
+                .unwrap()
+                .0;
+        }
+    }
+}
+
+impl ModelProvider for Gated {
+    fn descriptor(&self) -> &ProviderDescriptor {
+        self.inner.descriptor()
+    }
+    fn models(&self) -> Result<Vec<ModelDescriptor>, ProviderError> {
+        {
+            let mut state = self.state.lock().unwrap();
+            state.1 += 1;
+            self.changed.notify_all();
+            while state.0 {
+                state = self.changed.wait(state).unwrap();
+            }
+            state.1 -= 1;
+        }
+        self.inner.models()
+    }
+    fn chat(
+        &self,
+        request: &ChatRequest,
+        on_event: &mut dyn FnMut(&StreamEvent),
+        cancel: &CancelToken,
+    ) -> Result<ChatResponse, ProviderError> {
+        self.inner.chat(request, on_event, cancel)
+    }
+    fn health(&self) -> ProviderHealth {
+        self.inner.health()
+    }
+}
+
+#[test]
+fn a_slow_model_listing_for_attachments_does_not_block_other_conversations() {
+    let mut gate = None;
+    let f = fixture_with(
+        ProviderKind::Fake,
+        vec![FakeTurn::text("a"), FakeTurn::text("b")],
+        |inner| {
+            let gated = Arc::new(Gated {
+                inner,
+                state: Mutex::new((false, 0)),
+                changed: Condvar::new(),
+            });
+            gate = Some(gated.clone());
+            gated
+        },
+    );
+    let gate = gate.unwrap();
+    let a = f.session("eyes", None);
+    let b = f.session("eyes", None);
+    let image = f.attach(&a, "a.png", &png(10, 10, 100), None);
+    // The send with an image lists the provider's models to check them.
+    gate.hold(true);
+    let engine = f.engine.clone();
+    let sending = std::thread::spawn(move || {
+        engine.start_with(
+            &a,
+            "look",
+            "send-a",
+            None,
+            RunOptions {
+                attachments: vec![image],
+                ..Default::default()
+            },
+        )
+    });
+    gate.wait_for_listing();
+    // While that listing waits, another conversation can still send.
+    let engine = f.engine.clone();
+    let (sent, receive) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sent.send(engine.start(&b, "hi", "send-b", None));
+    });
+    let other = receive.recv_timeout(Duration::from_secs(10));
+    gate.hold(false);
+    let other = other
+        .expect("the other conversation waited for the listing")
+        .unwrap();
+    completed(&f, sending.join().unwrap().unwrap());
+    completed(&f, other);
 }
