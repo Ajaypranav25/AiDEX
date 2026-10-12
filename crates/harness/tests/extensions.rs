@@ -17,7 +17,7 @@ use serde_json::{Value, json};
 use std::{
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -33,6 +33,9 @@ struct Fake {
     fetches: Mutex<Vec<String>>,
     page_text: Mutex<String>,
     toolsets: Vec<McpToolset>,
+    /// A server listed only the first time tools are listed.
+    vanishing: Option<String>,
+    listings: AtomicUsize,
     mcp_calls: Mutex<Vec<(String, String, Value)>>,
     context: Mutex<Option<aidex_policy::EvaluationContext>>,
 }
@@ -132,7 +135,12 @@ impl Extensions for Fake {
     }
 
     fn mcp_toolsets(&self, _workspace: Option<&str>, _cancel: &CancelToken) -> Vec<McpToolset> {
-        self.toolsets.clone()
+        let first = self.listings.fetch_add(1, Ordering::SeqCst) == 0;
+        self.toolsets
+            .iter()
+            .filter(|set| first || self.vanishing.as_deref() != Some(set.server_id.as_str()))
+            .cloned()
+            .collect()
     }
 
     fn mcp_call(
@@ -522,6 +530,75 @@ fn chat_web_search_needs_no_workspace_and_results_are_json_and_wrapped() {
 }
 
 #[test]
+fn untrusted_results_stay_wrapped_when_call_ids_repeat_across_turns() {
+    // Providers that omit call ids get positional ones, so every turn's first
+    // call can be `call_0`.
+    let call = |name: &str, arguments: &str| {
+        FakeTurn::tool_calls(vec![aidex_providers::ToolCall {
+            id: "call_0".into(),
+            name: name.into(),
+            arguments: arguments.into(),
+            provider_metadata: None,
+        }])
+    };
+    let f = fixture(
+        vec![
+            call("web_search", r#"{"query":"rust"}"#),
+            call(
+                "artifact_create",
+                r#"{"name":"n.md","kind":"document","content":"notes"}"#,
+            ),
+            FakeTurn::text("done"),
+            FakeTurn::text("later"),
+        ],
+        Mode::Chat,
+        false,
+        web_on(),
+    );
+    let options = RunOptions {
+        skills: vec![],
+        web_search: true,
+    };
+    let run = f
+        .engine
+        .start_with(&f.session, "search", "once", None, options)
+        .unwrap();
+    let done = wait(&f.engine, &run.id);
+    assert_eq!(done.status, RunStatus::Completed, "{:?}", done.error);
+    // A later run offers no tools, so only the history needs the preamble.
+    let run = f.engine.start(&f.session, "again", "twice", None).unwrap();
+    assert_eq!(wait(&f.engine, &run.id).status, RunStatus::Completed);
+    let requests = f.provider.requests();
+    assert_eq!(requests.len(), 4);
+    assert!(requests[3].tools.is_empty());
+    for request in &requests[2..] {
+        let results: Vec<_> = request
+            .messages
+            .iter()
+            .filter(|m| m.role == Role::Tool)
+            .collect();
+        assert_eq!(results.len(), 2);
+        assert!(
+            results[0].content.starts_with("<<<aidex:context nonce=")
+                && results[0]
+                    .content
+                    .contains("source=tool name=\"web_search\"")
+                && results[0].content.contains("trust=untrusted>>>"),
+            "{}",
+            results[0].content
+        );
+        assert!(
+            results[1].content.starts_with('{'),
+            "{}",
+            results[1].content
+        );
+        assert!(request.messages.iter().any(
+            |m| m.role == Role::System && m.content.contains("Only delimiters carrying nonce")
+        ));
+    }
+}
+
+#[test]
 fn chat_web_switch_is_refused_when_web_search_is_off() {
     let f = fixture(
         vec![FakeTurn::text("never")],
@@ -785,6 +862,86 @@ fn mcp_tools_get_stable_names_and_need_approval_unless_auto_approved() {
 }
 
 #[test]
+fn mcp_calls_reach_the_server_tool_offered_under_their_name() {
+    // Both ids share the 24-character name prefix, so the second server's tool
+    // was offered with a suffix; the first server is gone when the calls run.
+    let server = |id: &str| McpToolset {
+        server_id: id.into(),
+        server_name: id.into(),
+        auto_approve_tools: vec!["create_issue".into()],
+        tools: vec![McpTool {
+            name: "create_issue".into(),
+            description: "Create an issue".into(),
+            input_schema: json!({"type":"object"}),
+        }],
+    };
+    let fake = Fake {
+        toolsets: vec![
+            server("acme-engineering-suite-github"),
+            server("acme-engineering-suite-gitlab"),
+        ],
+        vanishing: Some("acme-engineering-suite-github".into()),
+        ..Fake::default()
+    };
+    let call = |name: &str, arguments: &str| aidex_providers::ToolCall {
+        id: String::new(),
+        name: name.into(),
+        arguments: arguments.into(),
+        provider_metadata: None,
+    };
+    let f = fixture(
+        vec![
+            FakeTurn::tool_calls(vec![
+                call(
+                    "mcp__acme-engineering-suite-g__create_issue",
+                    r#"{"for":"github"}"#,
+                ),
+                call(
+                    "mcp__acme-engineering-suite-g__create_issue_2",
+                    r#"{"for":"gitlab"}"#,
+                ),
+            ]),
+            FakeTurn::text("done"),
+        ],
+        Mode::Agent,
+        true,
+        fake,
+    );
+    let run = f.engine.start(&f.session, "file it", "once", None).unwrap();
+    let done = wait(&f.engine, &run.id);
+    assert_eq!(done.status, RunStatus::Completed, "{:?}", done.error);
+    let offered = tool_names(&f.provider.requests()[0])
+        .into_iter()
+        .filter(|name| name.starts_with("mcp__"))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        offered,
+        [
+            "mcp__acme-engineering-suite-g__create_issue",
+            "mcp__acme-engineering-suite-g__create_issue_2"
+        ]
+    );
+    // The call meant for the vanished server is refused instead of being
+    // re-bound to the other server's tool; the other call reaches its server.
+    assert_eq!(
+        *f.fake.mcp_calls.lock().unwrap(),
+        vec![(
+            "acme-engineering-suite-gitlab".into(),
+            "create_issue".into(),
+            json!({"for":"gitlab"})
+        )]
+    );
+    let results = tool_results(&f.engine, &f.session);
+    assert!(
+        results[0].starts_with("Tool refused:") && results[0].contains("not available"),
+        "{}",
+        results[0]
+    );
+    assert_eq!(results[1], "create_issue result");
+}
+
+#[test]
 fn denied_mcp_calls_never_reach_the_server() {
     let fake = Fake {
         toolsets: vec![McpToolset {
@@ -919,6 +1076,57 @@ fn artifact_update_is_limited_to_the_conversation() {
 }
 
 #[test]
+fn artifact_update_refuses_plans_and_saved_web_pages() {
+    let f = fixture(vec![], Mode::Plan, false, Fake::default());
+    let store = f.engine.store();
+    let new = |kind: ArtifactKind, content: &str| {
+        store
+            .create_artifact(
+                &f.session,
+                None,
+                aidex_native_sessions::NewArtifact {
+                    name: "x.md".into(),
+                    kind,
+                    mime: "text/markdown".into(),
+                    language: None,
+                    bytes: content.as_bytes().to_vec(),
+                },
+            )
+            .unwrap()
+    };
+    let plan = new(ArtifactKind::Plan, "# Plan\n\n1. Build");
+    let page = new(
+        ArtifactKind::WebPage,
+        "Source: <https://example.com/>\n\npage",
+    );
+    for id in [&plan.id, &page.id] {
+        f.provider.push_turn(FakeTurn::tool_call(
+            "artifact_update",
+            format!(r#"{{"id":"{id}","content":"rewritten"}}"#),
+        ));
+    }
+    f.provider.push_turn(FakeTurn::text("done"));
+    let run = f.engine.start(&f.session, "revise", "once", None).unwrap();
+    let done = wait(&f.engine, &run.id);
+    assert_eq!(done.status, RunStatus::Completed, "{:?}", done.error);
+    let results = tool_results(&f.engine, &f.session);
+    assert!(
+        results[0].starts_with("Tool failed:") && results[0].contains("plan_propose"),
+        "{}",
+        results[0]
+    );
+    assert!(results[1].starts_with("Tool failed:"), "{}", results[1]);
+    let read =
+        |id: &str| String::from_utf8(store.read_artifact(id, 0, 1024).unwrap().bytes).unwrap();
+    assert_eq!(read(&plan.id), "# Plan\n\n1. Build");
+    assert_eq!(read(&page.id), "Source: <https://example.com/>\n\npage");
+    assert_eq!(
+        store.artifact(&plan.id).unwrap().plan_status,
+        Some(PlanStatus::Active)
+    );
+}
+
+#[test]
 fn chat_without_the_web_switch_offers_no_tools() {
     let fake = web_on();
     let f = fixture(vec![FakeTurn::text("hi")], Mode::Chat, false, fake);
@@ -959,4 +1167,52 @@ fn offline_switch_refuses_networked_workspace_tools_before_they_run() {
         done.error
     );
     assert!(f.engine.approvals(Some(&run.id)).unwrap().is_empty());
+}
+
+#[test]
+fn approved_networked_workspace_tools_recheck_the_offline_switch_and_settings() {
+    use aidex_policy::{EvaluationContext, HostTrust, NetworkMode, PrivacyMode, Profile};
+    let f = fixture(vec![], Mode::Agent, true, Fake::default());
+    let approve_after = |change: &dyn Fn(), command: &str| {
+        f.provider.push_turn(FakeTurn::tool_call(
+            "shell_exec",
+            r#"{"shell":true,"command":"curl https://example.com/file"}"#,
+        ));
+        let run = f
+            .engine
+            .start(&f.session, "download", command, None)
+            .unwrap();
+        let waiting = wait(&f.engine, &run.id);
+        assert_eq!(
+            waiting.status,
+            RunStatus::WaitingApproval,
+            "{:?}",
+            waiting.error
+        );
+        change();
+        let approval = f.engine.approvals(Some(&run.id)).unwrap().remove(0);
+        f.engine
+            .respond(&approval.id, &approval.fingerprint, true, command)
+            .unwrap();
+        let done = wait(&f.engine, &run.id);
+        assert_eq!(done.status, RunStatus::Failed);
+        done.error.unwrap_or_default()
+    };
+    // The offline switch turned on while the call waited for approval.
+    let error = approve_after(&|| f.fake.offline.store(true, Ordering::SeqCst), "first");
+    assert!(error.contains("offline"), "{error}");
+    // The drive's privacy setting changed while it waited.
+    f.fake.offline.store(false, Ordering::SeqCst);
+    let error = approve_after(
+        &|| {
+            *f.fake.context.lock().unwrap() = Some(EvaluationContext::new(
+                Profile::Balanced,
+                PrivacyMode::AirGapped,
+                HostTrust::Known,
+                NetworkMode::Normal,
+            ))
+        },
+        "second",
+    );
+    assert!(error.contains("policy changed"), "{error}");
 }

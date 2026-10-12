@@ -26,6 +26,25 @@ pub(crate) struct McpBinding {
     pub auto_approve: bool,
 }
 
+/// The server tool one turn offered under a model-facing name. Names depend
+/// on which servers are listed, so calls resolve against what was offered.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct McpTarget {
+    pub name: String,
+    pub server_id: String,
+    pub tool: String,
+}
+
+impl From<&McpBinding> for McpTarget {
+    fn from(binding: &McpBinding) -> Self {
+        Self {
+            name: binding.name.clone(),
+            server_id: binding.server_id.clone(),
+            tool: binding.tool.clone(),
+        }
+    }
+}
+
 fn sanitize(text: &str) -> String {
     text.chars()
         .map(|c| {

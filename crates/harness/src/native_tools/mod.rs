@@ -12,7 +12,7 @@ mod mcp;
 mod plan;
 mod specs;
 
-pub(crate) use mcp::McpBinding;
+pub(crate) use mcp::{McpBinding, McpTarget};
 pub(crate) use plan::ExtensionPlan;
 
 use crate::{NativeEngine, extensions::SkillEntry};
@@ -194,12 +194,49 @@ impl NativeEngine {
             ARTIFACT_CREATE => Some(ExtTool::ArtifactCreate),
             ARTIFACT_UPDATE => Some(ExtTool::ArtifactUpdate),
             PLAN_PROPOSE => (mode == Mode::Plan).then_some(ExtTool::PlanPropose),
-            _ if mode == Mode::Agent => mcp::bind(self.extensions.mcp_toolsets(workspace, cancel))
-                .into_iter()
-                .find(|binding| binding.name == name)
-                .map(ExtTool::Mcp),
+            // The server tool offered under this name, if it is still listed:
+            // a fresh binding may give the name to another server's tool.
+            _ if mode == Mode::Agent => self.offered_target(&run.id, name).and_then(|target| {
+                mcp::bind(self.extensions.mcp_toolsets(workspace, cancel))
+                    .into_iter()
+                    .find(|b| b.server_id == target.server_id && b.tool == target.tool)
+                    .map(|binding| {
+                        ExtTool::Mcp(McpBinding {
+                            name: target.name,
+                            ..binding
+                        })
+                    })
+            }),
             _ => None,
         };
         Some(resolved.ok_or(()).or_else(|()| unavailable()))
+    }
+
+    /// Record the MCP tools `offer` gives the next turn of `run`.
+    pub(crate) fn remember_offer(&self, run: &str, offer: &Offer) {
+        let mut offered = self.offered_mcp.lock().unwrap_or_else(|p| p.into_inner());
+        if offer.mcp.is_empty() {
+            offered.remove(run);
+        } else {
+            offered.insert(run.into(), offer.mcp.iter().map(McpTarget::from).collect());
+        }
+    }
+
+    /// Forget what `run` was offered once it settles.
+    pub(crate) fn forget_offer(&self, run: &str) {
+        self.offered_mcp
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(run);
+    }
+
+    fn offered_target(&self, run: &str, name: &str) -> Option<McpTarget> {
+        self.offered_mcp
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(run)?
+            .iter()
+            .find(|target| target.name == name)
+            .cloned()
     }
 }

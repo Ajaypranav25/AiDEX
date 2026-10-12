@@ -63,7 +63,8 @@ impl Offer {
             ));
             specs.push(spec(
                 ARTIFACT_UPDATE,
-                "Replace the content of an artifact created earlier in this conversation.",
+                "Replace the content of an artifact created earlier in this conversation. Plans \
+                 and saved web pages cannot be edited; revise a plan with plan_propose.",
                 json!({"type":"object","properties":{
                     "id":{"type":"string","description":"The artifact id (art_...)."},
                     "content":{"type":"string"}

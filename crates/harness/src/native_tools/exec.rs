@@ -290,6 +290,22 @@ impl NativeEngine {
                     .ok_or_else(|| {
                         "No artifact with that id exists in this conversation.".to_string()
                     })?;
+                // An edited plan would stay active while its Plan card still
+                // shows (and implements) the proposed text; a saved page keeps
+                // its source.
+                match existing.kind {
+                    ArtifactKind::Plan => {
+                        return Err("Plans cannot be edited in place; call plan_propose with \
+                                    the revised plan, which replaces the active one."
+                            .into());
+                    }
+                    ArtifactKind::WebPage => {
+                        return Err("Saved web pages cannot be edited; use artifact_create \
+                                    for your own document."
+                            .into());
+                    }
+                    _ => {}
+                }
                 let meta = self
                     .store
                     .update_artifact(&existing.id, args.content.into_bytes())?;

@@ -30,7 +30,11 @@ use serde_json::Value;
 use std::{sync::Arc, time::Duration};
 
 /// How long one MCP server may take to start and list its tools for a turn.
-const MCP_START_TIMEOUT: Duration = Duration::from_secs(30);
+///
+/// At least the supervisor's own `initialize` (60 s) plus one request (30 s),
+/// so a slow first start (an `npx` download) still starts on demand, and a
+/// server that truly hangs is marked failed by the supervisor's own limit.
+const MCP_START_TIMEOUT: Duration = Duration::from_secs(95);
 
 /// Daemon services behind the harness's extension hooks.
 pub struct DaemonExtensions {
@@ -146,12 +150,9 @@ impl Extensions for DaemonExtensions {
                 };
             }
         };
-        let url = settings
-            .endpoint
-            .clone()
-            .or_else(|| settings.provider.default_url().map(str::to_owned));
-        let search_target = url.as_deref().and_then(|text| {
-            let url = url::Url::parse(text).ok()?;
+        // The host a search actually contacts: an endpoint left over from an
+        // earlier SearXNG choice must not be the host policy is checked against.
+        let search_target = settings.search_url().ok().and_then(|url| {
             Some((
                 url.host_str()?
                     .trim_start_matches('[')
@@ -344,5 +345,42 @@ mod tests {
                 .is_empty()
         );
         assert!(extensions.model_skills(None).is_empty());
+    }
+
+    #[test]
+    fn the_search_target_is_the_host_a_search_contacts() {
+        let drive = crate::services::testing::temp_drive();
+        let services = Services::open(drive.path(), ShutdownSignal::new()).unwrap();
+        let extensions = services.native().extensions();
+        services
+            .web()
+            .update(&WebSettingsPatch {
+                enabled: Some(true),
+                provider: Some(SearchProvider::Searxng),
+                endpoint: Some(Some("http://localhost:8888".into())),
+                ..WebSettingsPatch::default()
+            })
+            .unwrap();
+        assert_eq!(
+            extensions.web().search_target,
+            Some(("localhost".to_owned(), 8888))
+        );
+        // Switching provider keeps the SearXNG endpoint stored, but searches go to
+        // the provider's own host, and that is the host policy must check.
+        services
+            .web()
+            .update(&WebSettingsPatch {
+                provider: Some(SearchProvider::Brave),
+                ..WebSettingsPatch::default()
+            })
+            .unwrap();
+        assert_eq!(
+            services.web().settings().unwrap().endpoint.as_deref(),
+            Some("http://localhost:8888")
+        );
+        assert_eq!(
+            extensions.web().search_target,
+            Some(("api.search.brave.com".to_owned(), 443))
+        );
     }
 }

@@ -1,7 +1,7 @@
 use crate::{
     broker::{Broker, Prepared},
     extensions::{Extensions, NoExtensions},
-    native_tools::ExtensionPlan,
+    native_tools::{ExtensionPlan, McpTarget},
 };
 use aidex_core::{CancelToken, EntityId, WorkspacePath};
 use aidex_events::{EventKind, EventScope, EventSink};
@@ -49,6 +49,9 @@ pub struct NativeEngine {
     pub(crate) extensions: Arc<dyn Extensions>,
     /// Random per-engine key for untrusted-data delimiter nonces.
     pub(crate) nonce_key: String,
+    /// The MCP tools each run's latest turn offered, which its calls resolve
+    /// against (names shift when other servers come or go).
+    pub(crate) offered_mcp: Mutex<HashMap<String, Vec<McpTarget>>>,
 }
 impl NativeEngine {
     pub fn new(
@@ -92,6 +95,7 @@ impl NativeEngine {
             operations: Mutex::new(()),
             extensions,
             nonce_key,
+            offered_mcp: Mutex::new(HashMap::new()),
         })
     }
     /// The skills, web, and MCP services this engine was built with.
@@ -404,6 +408,9 @@ impl NativeEngine {
             }
             Ok(r.clone())
         })?;
+        if !result.status.active() {
+            self.forget_offer(id);
+        }
         let task_id = EntityId::new(id).map_err(|e| e.to_string())?;
         let event = match result.status {
             RunStatus::Running => Some(EventKind::TaskStarted { task_id }),

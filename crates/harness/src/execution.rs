@@ -241,6 +241,7 @@ impl NativeEngine {
             let primary = self.primary_model(&s.configuration)?;
             let native_tools = primary.1.capabilities.tool_calls == ToolCallSupport::Native;
             let offer = self.offer(&s, &run, native_tools, tool_cancel);
+            self.remember_offer(id, &offer);
             let messages = self.assemble(&s, &run, &offer)?;
             let mut request = ChatRequest::new(
                 ModelId::new(&s.configuration.model_id).map_err(|e| e.to_string())?,

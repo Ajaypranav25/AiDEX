@@ -9,7 +9,7 @@ use crate::{
 use aidex_core::EntityId;
 use aidex_native_sessions::{Mode, Run, SessionDetail};
 use aidex_providers::{ChatMessage, Role};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Longest skill description in the catalog.
 const CATALOG_DESCRIPTION: usize = 300;
@@ -57,14 +57,11 @@ impl NativeEngine {
         if !s.configuration.instructions.trim().is_empty() {
             messages.push(ChatMessage::system(s.configuration.instructions.clone()));
         }
-        let names = call_names(&run.transcript);
-        let wraps_results = run.transcript.iter().any(|m| {
-            m.role == Role::Tool
-                && m.tool_call_id
-                    .as_ref()
-                    .and_then(|id| names.get(id.as_str()))
-                    .is_some_and(|name| untrusted_trust(name).is_some())
-        });
+        let names = result_names(&run.transcript);
+        let wraps_results = names
+            .iter()
+            .flatten()
+            .any(|name| untrusted_trust(name).is_some());
         // Child runs work from their own prompt; invoked skills belong to the
         // user's root run.
         let invoked = if run.skills.is_empty() || run.parent_run_id.is_some() {
@@ -146,12 +143,11 @@ impl NativeEngine {
                 )));
             }
         }
-        messages.extend(run.transcript.iter().map(|message| {
+        messages.extend(run.transcript.iter().zip(&names).map(|(message, name)| {
             let trust = message
                 .tool_call_id
                 .as_deref()
-                .filter(|_| message.role == Role::Tool)
-                .and_then(|id| names.get(id).map(|name| (id, *name)))
+                .zip(*name)
                 .and_then(|(id, name)| untrusted_trust(name).map(|trust| (id, name, trust)));
             match trust {
                 Some((id, name, trust)) => {
@@ -193,11 +189,41 @@ impl NativeEngine {
     }
 }
 
-/// Tool call id to tool name, from the assistant messages of a transcript.
-fn call_names(transcript: &[ChatMessage]) -> HashMap<&str, &str> {
+/// How strictly a tool's results are wrapped (higher wraps more).
+fn wrap_rank(name: &str) -> u8 {
+    match untrusted_trust(name) {
+        Some("untrusted") => 2,
+        Some(_) => 1,
+        None => 0,
+    }
+}
+
+/// For each transcript message, the name of the tool call a tool result
+/// answers: the call with its id in the latest earlier message that has one.
+/// Ids are not unique across turns (providers that omit them get positional
+/// `call_{index}` ids), so a later call never relabels an earlier result; if
+/// one message repeats an id, the name whose results are wrapped wins.
+fn result_names(transcript: &[ChatMessage]) -> Vec<Option<&str>> {
+    let mut latest: HashMap<&str, &str> = HashMap::new();
     transcript
         .iter()
-        .flat_map(|m| m.tool_calls.iter())
-        .map(|call| (call.id.as_str(), call.name.as_str()))
+        .map(|message| {
+            let mut seen = HashSet::new();
+            for call in &message.tool_calls {
+                let (id, name) = (call.id.as_str(), call.name.as_str());
+                let fresh = seen.insert(id);
+                if fresh
+                    || latest
+                        .get(id)
+                        .is_none_or(|old| wrap_rank(name) > wrap_rank(old))
+                {
+                    latest.insert(id, name);
+                }
+            }
+            match (message.role, message.tool_call_id.as_deref()) {
+                (Role::Tool, Some(id)) => latest.get(id).copied(),
+                _ => None,
+            }
+        })
         .collect()
 }
