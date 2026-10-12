@@ -4,12 +4,14 @@
 // Supported: ATX and setext headings, paragraphs, emphasis, strong, ~~strikethrough~~, code spans,
 // fenced code (an unclosed fence runs to the end, so streaming text renders as code), nested ordered,
 // unordered and task lists, blockquotes, GFM tables, thematic breaks, inline and reference links,
-// <autolinks>, bare http(s)/www links, images, hard breaks, backslash escapes, and common entities.
+// <autolinks>, bare http(s)/www links, images (also inside link text, e.g. badges), hard breaks,
+// backslash escapes, and common entities.
 //
 // Safety: raw HTML is never interpreted; it stays literal text. Link and image URLs are reduced to
 // absolute http(s) (and mailto for links) by `safeExternalUrl`; anything else becomes `url: null`, so a
 // renderer can show the text without making it actionable. Nesting depth and delimiter runs are
-// bounded so hostile input cannot exhaust the stack.
+// bounded so hostile input cannot exhaust the stack, and parsing stays linear on long whitespace runs,
+// deep bracket nests, and unclosed link titles, so it cannot freeze the UI either.
 
 import { safeExternalUrl } from "../../utils/url";
 
@@ -53,6 +55,8 @@ const MAX_BLOCK_DEPTH = 12;
 const MAX_INLINE_DEPTH = 24;
 /** Longer `*`/`_` runs are literal text rather than emphasis delimiters. */
 const MAX_DELIMITER_RUN = 12;
+/** Longer link labels are never looked up as references, as in CommonMark; nested brackets stay linear. */
+const MAX_LABEL_LENGTH = 999;
 
 // ---------------------------------------------------------------------------------------------
 // Entry point
@@ -110,16 +114,20 @@ type RawBlock =
   | { type: "table"; align: MarkdownTableAlign[]; header: string[]; rows: string[][] }
   | { type: "rule" };
 
+// Line patterns are anchored at the start and take the rest of a line with `[\s\S]*`, so each test is
+// linear in the line: `.*$` backtracks over the whole line when it holds U+2028, and `(.*?)[ \t]*$`
+// rescans a run of spaces from each of its positions. For the same reason trailing blanks are cut
+// with `trimTrailingBlanks` rather than `/[ \t]+$/`.
 const BLANK = /^[ \t]*$/;
-const ATX_HEADING = /^[ \t]*(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/;
+const ATX_HEADING = /^[ \t]*(#{1,6})(?:[ \t]+([\s\S]*))?$/;
 const THEMATIC_BREAK = /^[ \t]*([-*_])(?:[ \t]*\1){2,}[ \t]*$/;
 const SETEXT_UNDERLINE = /^[ \t]*(?:=+|-+)[ \t]*$/;
 const QUOTE = /^[ \t]*>/;
 const QUOTE_MARKER = /^[ \t]*> ?/;
-const FENCE_OPEN = /^([ \t]*)(`{3,}|~{3,})(.*)$/;
+const FENCE_OPEN = /^([ \t]*)(`{3,}|~{3,})([\s\S]*)$/;
 const FENCE_CLOSE = /^[ \t]*(`{3,}|~{3,})[ \t]*$/;
-const BULLET_ITEM = /^([ \t]*)([-+*])(?:([ \t]+)(.*))?$/;
-const ORDERED_ITEM = /^([ \t]*)(\d{1,9})([.)])(?:([ \t]+)(.*))?$/;
+const BULLET_ITEM = /^([ \t]*)([-+*])(?:([ \t]+)([\s\S]*))?$/;
+const ORDERED_ITEM = /^([ \t]*)(\d{1,9})([.)])(?:([ \t]+)([\s\S]*))?$/;
 const TASK_MARKER = /^\[([ xX])\](?:[ \t]+|$)/;
 const LANGUAGE = /^[A-Za-z0-9_+#.-]{1,40}$/;
 const DEFINITION =
@@ -127,6 +135,29 @@ const DEFINITION =
 
 function isBlank(line: string): boolean {
   return BLANK.test(line);
+}
+
+/** Drops trailing spaces and tabs in one backward scan. */
+function trimTrailingBlanks(text: string): string {
+  let end = text.length;
+  while (end > 0 && (text[end - 1] === " " || text[end - 1] === "\t")) end -= 1;
+  return end === text.length ? text : text.slice(0, end);
+}
+
+function trailingSpaceCount(text: string): number {
+  let count = 0;
+  while (count < text.length && text[text.length - 1 - count] === " ") count += 1;
+  return count;
+}
+
+/** Drops an ATX heading's closing `#` run when it stands alone or follows a space or tab. */
+function stripClosingSequence(text: string): string {
+  let end = text.length;
+  while (end > 0 && text[end - 1] === "#") end -= 1;
+  if (end === text.length) return text;
+  if (end === 0) return "";
+  const before = text[end - 1];
+  return before === " " || before === "\t" ? text.slice(0, end) : text;
 }
 
 /** Column width of the leading whitespace (tabs advance to the next multiple of 4). */
@@ -377,7 +408,7 @@ function parseBlocks(lines: readonly string[], depth: number, definitions: Defin
 
     const heading = ATX_HEADING.exec(line);
     if (heading) {
-      const text = (heading[2] ?? "").replace(/(?:^|[ \t]+)#+$/, "").trim();
+      const text = stripClosingSequence(trimTrailingBlanks(heading[2] ?? "")).trim();
       blocks.push({ type: "heading", level: heading[1].length as 1 | 2 | 3 | 4 | 5 | 6, text });
       index += 1;
       continue;
@@ -459,7 +490,7 @@ function parseBlocks(lines: readonly string[], depth: number, definitions: Defin
       index += 1;
     }
     // Trailing spaces on the last line are not a hard break.
-    const text = paragraph.join("\n").replace(/[ \t]+$/, "");
+    const text = trimTrailingBlanks(paragraph.join("\n"));
     blocks.push(setextLevel ? { type: "heading", level: setextLevel, text } : { type: "paragraph", text });
   }
 
@@ -547,9 +578,9 @@ function parseList(
 function finishBlock(block: RawBlock, definitions: Definitions): MarkdownBlock {
   switch (block.type) {
     case "heading":
-      return { type: "heading", level: block.level, children: parseInline(block.text, definitions, false) };
+      return { type: "heading", level: block.level, children: parseInline(block.text, definitions, "top") };
     case "paragraph":
-      return { type: "paragraph", children: parseInline(block.text, definitions, false) };
+      return { type: "paragraph", children: parseInline(block.text, definitions, "top") };
     case "code":
     case "rule":
       return block;
@@ -570,8 +601,8 @@ function finishBlock(block: RawBlock, definitions: Definitions): MarkdownBlock {
       return {
         type: "table",
         align: block.align,
-        header: block.header.map((cell) => parseInline(cell, definitions, false)),
-        rows: block.rows.map((row) => row.map((cell) => parseInline(cell, definitions, false))),
+        header: block.header.map((cell) => parseInline(cell, definitions, "top")),
+        rows: block.rows.map((row) => row.map((cell) => parseInline(cell, definitions, "top"))),
       };
   }
 }
@@ -757,8 +788,54 @@ function skipSpace(text: string, index: number): number {
   return position;
 }
 
+/** Where the link title opening at `open` closes, and the first non-space position after that. */
+type TitleFinder = (open: number) => { end: number; after: number } | null;
+
+/**
+ * A title scan skips each backslash-escaped character. A title only opens after whitespace, so its
+ * scan steps on the same characters as one scan from the start of the text, and that one scan's
+ * closer positions answer every title. Scanning per link was quadratic on a run of unclosed titles
+ * such as `[a](x (` repeated.
+ */
+function titleFinder(text: string): TitleFinder {
+  const closers = new Map<string, number[]>();
+  const afterCloser = new Map<number, number>();
+  return (open) => {
+    const closing = text[open] === "(" ? ")" : text[open];
+    let positions = closers.get(closing);
+    if (!positions) {
+      positions = [];
+      for (let index = 0; index < text.length; index += 1) {
+        if (text[index] === "\\") index += 1;
+        else if (text[index] === closing) positions.push(index);
+      }
+      closers.set(closing, positions);
+    }
+    // Binary search for the first closer after the opening character.
+    let low = 0;
+    let high = positions.length;
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (positions[middle] <= open) low = middle + 1;
+      else high = middle;
+    }
+    if (low === positions.length) return null;
+    const end = positions[low];
+    let after = afterCloser.get(end);
+    if (after === undefined) {
+      after = skipSpace(text, end + 1);
+      afterCloser.set(end, after);
+    }
+    return { end, after };
+  };
+}
+
 /** Parses `(destination "title")` starting just after the `(`. */
-function parseInlineDestination(text: string, open: number): { url: string; title?: string; end: number } | null {
+function parseInlineDestination(
+  text: string,
+  open: number,
+  findTitle: TitleFinder,
+): { url: string; title?: string; end: number } | null {
   let index = skipSpace(text, open);
   let destination: string;
   if (text[index] === "<") {
@@ -799,15 +876,10 @@ function parseInlineDestination(text: string, open: number): { url: string; titl
   let title: string | undefined;
   const quote = text[index];
   if (index > beforeTitle && (quote === '"' || quote === "'" || quote === "(")) {
-    const closing = quote === "(" ? ")" : quote;
-    let end = index + 1;
-    while (end < text.length && text[end] !== closing) {
-      if (text[end] === "\\") end += 1;
-      end += 1;
-    }
-    if (end >= text.length) return null;
-    title = unescapeString(text.slice(index + 1, end));
-    index = skipSpace(text, end + 1);
+    const close = findTitle(index);
+    if (!close || text[close.after] !== ")") return null;
+    title = unescapeString(text.slice(index + 1, close.end));
+    index = close.after;
   }
   if (text[index] !== ")") return null;
   return { url: unescapeString(destination), title, end: index + 1 };
@@ -817,6 +889,13 @@ function matchAutolinkLiteral(text: string, index: number): { url: string; label
   const match = AUTOLINK_LITERAL.exec(text.slice(index, index + 4096));
   if (!match) return null;
   let candidate = match[0];
+  // Counted once rather than per trimmed character: of the parentheses, trimming only drops `)`.
+  let opens = 0;
+  let closes = 0;
+  for (const char of candidate) {
+    if (char === "(") opens += 1;
+    else if (char === ")") closes += 1;
+  }
   for (;;) {
     const last = candidate[candidate.length - 1];
     if (last === undefined) return null;
@@ -824,22 +903,16 @@ function matchAutolinkLiteral(text: string, index: number): { url: string; label
       candidate = candidate.slice(0, -1);
       continue;
     }
-    if (last === ")") {
-      let opens = 0;
-      let closes = 0;
-      for (const char of candidate) {
-        if (char === "(") opens += 1;
-        else if (char === ")") closes += 1;
-      }
-      if (closes > opens) {
-        candidate = candidate.slice(0, -1);
-        continue;
-      }
+    if (last === ")" && closes > opens) {
+      candidate = candidate.slice(0, -1);
+      closes -= 1;
+      continue;
     }
     if (last === ";") {
-      const entity = /&[A-Za-z0-9]+;$/.exec(candidate);
-      if (entity) {
-        candidate = candidate.slice(0, -entity[0].length);
+      // A trailing entity reference can only start at the last `&`.
+      const amp = candidate.lastIndexOf("&");
+      if (amp !== -1 && /^&[A-Za-z0-9]+;$/.test(candidate.slice(amp))) {
+        candidate = candidate.slice(0, amp);
         continue;
       }
     }
@@ -986,7 +1059,10 @@ function processEmphasis(list: ItemList): void {
   }
 }
 
-function parseInline(text: string, definitions: Definitions, inLink: boolean): MarkdownInline[] {
+/** Where inline text sits: a link's text may hold images but not links, and alt text holds neither. */
+type InlineContext = "top" | "link" | "alt";
+
+function parseInline(text: string, definitions: Definitions, context: InlineContext): MarkdownInline[] {
   const spans = findCodeSpans(text);
   const brackets = findBracketPairs(text, spans);
   const list: ItemList = { head: null, tail: null, firstDelimiter: null, lastDelimiter: null };
@@ -1002,14 +1078,16 @@ function parseInline(text: string, definitions: Definitions, inLink: boolean): M
     appendItem(list, { node, delimiter: null, depth, previous: null, next: null });
   };
 
+  const findTitle = titleFinder(text);
   const tryLink = (open: number): { label: string; url: string; title?: string; end: number } | null => {
     const close = brackets.get(open);
     if (close === undefined) return null;
     const label = text.slice(open + 1, close);
     if (text[close + 1] === "(") {
-      const inline = parseInlineDestination(text, close + 2);
+      const inline = parseInlineDestination(text, close + 2, findTitle);
       if (inline) return { label, url: inline.url, title: inline.title, end: inline.end };
     }
+    if (definitions.size === 0) return null;
     let reference = label;
     let end = close + 1;
     if (text[close + 1] === "[") {
@@ -1020,7 +1098,8 @@ function parseInline(text: string, definitions: Definitions, inLink: boolean): M
         end = referenceClose + 1;
       }
     }
-    if (reference.trim() === "") return null;
+    // Checked before normalizing, or each `[` of a deep bracket nest would normalize its whole label.
+    if (reference.length > MAX_LABEL_LENGTH || reference.trim() === "") return null;
     const definition = definitions.get(normalizeLabel(reference));
     return definition ? { label, url: definition.url, title: definition.title, end } : null;
   };
@@ -1032,7 +1111,7 @@ function parseInline(text: string, definitions: Definitions, inLink: boolean): M
       case "\\": {
         const next = text[index + 1];
         if (next === "\n") {
-          buffer = buffer.replace(/[ \t]+$/, "");
+          buffer = trimTrailingBlanks(buffer);
           pushNode({ type: "break" });
           index = skipSpace(text, index + 2);
           continue;
@@ -1064,8 +1143,8 @@ function parseInline(text: string, definitions: Definitions, inLink: boolean): M
         continue;
       }
       case "\n": {
-        const hard = / {2,}$/.test(buffer);
-        buffer = buffer.replace(/[ \t]+$/, "");
+        const hard = trailingSpaceCount(buffer) >= 2;
+        buffer = trimTrailingBlanks(buffer);
         pushNode(hard ? { type: "break" } : { type: "softbreak" });
         index += 1;
         while (text[index] === " " || text[index] === "\t") index += 1;
@@ -1112,11 +1191,12 @@ function parseInline(text: string, definitions: Definitions, inLink: boolean): M
       case "!":
       case "[": {
         const open = char === "!" ? index + 1 : index;
-        if (!inLink && text[open] === "[") {
+        const allowed = context === "top" || (context === "link" && char === "!");
+        if (allowed && text[open] === "[") {
           const link = tryLink(open);
           if (link) {
             if (char === "!") {
-              const alt = markdownInlineText(parseInline(link.label, definitions, true));
+              const alt = markdownInlineText(parseInline(link.label, definitions, "alt"));
               pushNode({ type: "image", url: safeExternalUrl(link.url, { allowMailto: false }), alt, title: link.title });
             } else {
               pushNode(
@@ -1124,7 +1204,7 @@ function parseInline(text: string, definitions: Definitions, inLink: boolean): M
                   type: "link",
                   url: safeExternalUrl(link.url),
                   title: link.title,
-                  children: parseInline(link.label, definitions, true),
+                  children: parseInline(link.label, definitions, "link"),
                 },
                 1,
               );
@@ -1138,7 +1218,7 @@ function parseInline(text: string, definitions: Definitions, inLink: boolean): M
         continue;
       }
       case "<": {
-        if (!inLink) {
+        if (context === "top") {
           const window = text.slice(index, index + 4096);
           const uri = AUTOLINK_URI.exec(window);
           const email = uri ? null : AUTOLINK_EMAIL.exec(window);
@@ -1167,7 +1247,7 @@ function parseInline(text: string, definitions: Definitions, inLink: boolean): M
         continue;
       }
       default: {
-        if (!inLink && (char === "h" || char === "H" || char === "w" || char === "W")) {
+        if (context === "top" && (char === "h" || char === "H" || char === "w" || char === "W")) {
           const before = index > 0 ? text[index - 1] : undefined;
           if (isWhitespace(before) || (before !== undefined && "*_~(".indexOf(before) !== -1)) {
             const literal = matchAutolinkLiteral(text, index);

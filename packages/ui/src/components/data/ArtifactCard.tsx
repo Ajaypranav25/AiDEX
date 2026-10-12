@@ -29,9 +29,14 @@ const KIND_ICON: Record<ArtifactKind, ReactNode> = {
   other: <FileIcon />,
 };
 
+/** Own keys only, so names such as `constructor` or `__proto__` count as unknown kinds. */
+function isArtifactKind(kind: string): kind is ArtifactKind {
+  return Object.prototype.hasOwnProperty.call(KIND_LABEL, kind);
+}
+
 /** Display name of an artifact kind; unknown kinds read as "File". */
 export function artifactKindLabel(kind: string): string {
-  return KIND_LABEL[kind as ArtifactKind] ?? KIND_LABEL.other;
+  return KIND_LABEL[isArtifactKind(kind) ? kind : "other"];
 }
 
 export type ArtifactCardProps = Omit<ComponentPropsWithRef<"article">, "children"> & {
@@ -76,7 +81,7 @@ export function ArtifactCard({
 }: ArtifactCardProps) {
   const titleId = useId();
   const Title = `h${titleLevel}` as const;
-  const known = (kind in KIND_LABEL ? kind : "other") as ArtifactKind;
+  const known: ArtifactKind = isArtifactKind(kind) ? kind : "other";
   const created = toDate(createdAt);
   const sizeText = sizeLabel ?? (size !== undefined ? formatByteSize(size) : "");
   const facts: ReactNode[] = [];
