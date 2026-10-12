@@ -639,6 +639,7 @@ export function ConversationPage({
       value={draft}
       onValueChange={setDraft}
       onSelectionChange={composerMenu.onSelectionChange}
+      onKeyDown={composerMenu.onKeyDown}
       suggestions={composerMenu.suggestions}
       menu={composerMenu.menu}
       onSubmit={

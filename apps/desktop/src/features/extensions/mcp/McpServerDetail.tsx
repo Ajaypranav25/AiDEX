@@ -25,13 +25,36 @@ function dateText(value: string | undefined): string | null {
   return Number.isNaN(date.getTime()) ? null : formatDateTime(date);
 }
 
+type LoadedTools = { list: McpToolSummary[]; truncated: boolean; notes: string[] };
+
+/** What a loaded tool list belongs to: one run of one configuration. */
+type ServerRun = { config: string; status: McpServer["status"]; startedAt: string | undefined };
+
+/**
+ * The configuration changed, or the run that was running stopped, failed, began restarting, or was
+ * replaced by another process, so the tools it listed are gone. A server still starting has no run
+ * yet, which keeps the answer of "Start and list tools".
+ */
+function replacedRun(before: ServerRun, after: ServerRun): boolean {
+  if (before.config !== after.config) return true;
+  return before.status === "running" && (after.status !== "running" || after.startedAt !== before.startedAt);
+}
+
 /** The selected server: status and lifecycle actions, facts, tools, secrets, and its log. */
 export function McpServerDetail({ server, workspaces, onEdit, onRemoved }: Props) {
   const action = useAction();
-  const [tools, setTools] = useState<{ list: McpToolSummary[]; truncated: boolean; notes: string[] } | null>(null);
+  const [tools, setTools] = useState<LoadedTools | null>(null);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
   const status = statusLabels[server.status];
   const live = server.status === "running" || server.status === "starting";
+  // `mcp.tools` answers for the run it listed. An edit (which stops the server), a stop or failure, or a
+  // restart elsewhere drops it, so the list falls back to what `mcp.list` reports now.
+  const run: ServerRun = { config: JSON.stringify(server.config), status: server.status, startedAt: server.started_at };
+  const [seenRun, setSeenRun] = useState(run);
+  if (seenRun.config !== run.config || seenRun.status !== run.status || seenRun.startedAt !== run.startedAt) {
+    setSeenRun(run);
+    if (replacedRun(seenRun, run)) setTools(null);
+  }
   const shownTools = tools?.list ?? server.tools;
   const autoApproved = new Set(server.config.auto_approve_tools);
   const fromPlugin = server.source === "plugin";
@@ -40,8 +63,11 @@ export function McpServerDetail({ server, workspaces, onEdit, onRemoved }: Props
     (id) => workspaces.find((workspace) => workspace.id === id)?.name ?? id,
   );
 
-  const lifecycle = (verb: keyof typeof lifecycleMethods) =>
+  const lifecycle = (verb: keyof typeof lifecycleMethods) => {
+    // Start, Stop, and Restart all replace the running instance, and with it the tools it listed.
+    setTools(null);
     void action.run(verb, () => call(lifecycleMethods[verb], { id: server.id }));
+  };
 
   const loadTools = async () => {
     const result = await action.run("tools", () => call("mcp.tools", { id: server.id }));

@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent,
   type ReactNode,
   type RefObject,
 } from "react";
@@ -25,12 +26,15 @@ import {
 } from "@aidex/ui/icons";
 import type { SkillId, SkillSummary } from "@aidex/client/dto/skills";
 import { detectComposerTrigger, replaceRange, type ComposerTrigger } from "./composerText";
+import { normalizeQuery } from "./searchRanking";
 import { searchSkills, skillScopeLabels } from "./skillSearch";
 import {
+  exactSlashCommand,
   searchSlashMatches,
   slashCommands,
   type SlashCommand,
   type SlashCommandId,
+  type SlashMatch,
 } from "./slashCommands";
 
 /** A built-in `/` command as the conversation can run it right now. */
@@ -67,6 +71,8 @@ export type ComposerMenu = {
   suggestions: CommandMenuFieldState;
   /** For the composer's `onSelectionChange` prop. */
   onSelectionChange: (caret: number) => void;
+  /** For the composer's `onKeyDown` prop: Enter does not send while the menu lists only rows that can't run. */
+  onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
   /** Skills picked from a menu, by name, so a send keeps the exact skill that was picked. */
   picked: ReadonlyMap<string, SkillId>;
   /** Forgets picked skills after a send. */
@@ -184,7 +190,12 @@ export function useComposerMenu({
         sections: [],
       };
     }
-    const matches = searchSlashMatches(commandList, skillsEnabled ? skills : [], trigger.query);
+    // A typed command that can't run here stays the only row, so Enter never picks another one.
+    const exact = exactSlashCommand(commandList, trigger.query);
+    const matches: SlashMatch[] =
+      exact && commands.find((candidate) => candidate.id === exact.id)?.disabled
+        ? [{ type: "command", command: exact }]
+        : searchSlashMatches(commandList, skillsEnabled ? skills : [], trigger.query);
     const commandItems: CommandMenuItem[] = [];
     const skillItems: CommandMenuItem[] = [];
     for (const match of matches) {
@@ -266,6 +277,26 @@ export function useComposerMenu({
 
   const clearPicked = useCallback(() => setPicked(new Map()), []);
 
+  // The menu takes Enter only for an enabled row. When the typed text starts the name of a command that
+  // can't run here and no listed row can, Enter would fall through to the composer and send the
+  // command text as a message, so it does nothing instead. Text that only matches a disabled command's
+  // description (e.g. `/context`) still sends as before.
+  const listed = sections.flatMap((section) => section.items);
+  const typed = trigger?.kind === "command" ? normalizeQuery(trigger.query, /^\/+/) : "";
+  const onlyDisabled =
+    open &&
+    !!typed &&
+    listed.length > 0 &&
+    listed.every((item) => item.disabled) &&
+    listed.some((item) => item.title.startsWith(typed));
+  const onKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
+      if (onlyDisabled) event.preventDefault();
+    },
+    [onlyDisabled],
+  );
+
   const menu = (
     <CommandMenu
       id={listId}
@@ -289,6 +320,7 @@ export function useComposerMenu({
     menu,
     suggestions: { listId, open, activeId },
     onSelectionChange,
+    onKeyDown,
     picked,
     clearPicked,
   };

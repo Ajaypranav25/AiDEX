@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from "react";
-import { Dialog, Markdown, Notice } from "@aidex/ui/components";
+import { Dialog, InlineCode, Markdown, Notice } from "@aidex/ui/components";
 import { Button, Card, Grid, Stack, Text, TextArea, TextField } from "@aidex/ui/primitives";
 import { call } from "@aidex/client/rpc";
 import type { SkillDetail, SkillSummary } from "@aidex/client/dto/skills";
@@ -19,6 +19,8 @@ type Props = {
 type Errors = { name?: string; description?: string; version?: string; body?: string };
 
 const VERSION_PATTERN = /^[A-Za-z0-9.+_-]{1,64}$/;
+/** The front matter keys the editor writes; `skill.save` keeps the rest of a replaced skill's keys. */
+const DRAFT_KEYS: ReadonlySet<string> = new Set(["name", "description", "version"]);
 const BODY_ROWS = 18;
 
 const STARTER_BODY = "# What this skill does\n\nDescribe when to use it, then the steps to follow.\n\n1. First step\n2. Second step\n";
@@ -49,9 +51,13 @@ export function SkillEditor({ open, initial, driveNames, onClose, onSaved }: Pro
   const [errors, setErrors] = useState<Errors>({});
   const action = useAction();
   const replaces = !editing && driveNames.has(name.trim());
+  // Credential-like text was replaced by a marker in `initial`; saving would write the marker over it.
+  const redacted = initial?.body_redacted === true;
+  const keptKeys = initial?.front_matter.map((entry) => entry.key).filter((key) => !DRAFT_KEYS.has(key)) ?? [];
 
   const save = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (redacted) return;
     const nextErrors = validate(name.trim(), description, version, body);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
@@ -146,6 +152,15 @@ export function SkillEditor({ open, initial, driveNames, onClose, onSaved }: Pro
               </Card>
             </Stack>
           </Grid>
+          {keptKeys.length > 0 ? (
+            <Text tone="muted">Saving keeps the skill's other SKILL.md settings: {keptKeys.join(", ")}.</Text>
+          ) : null}
+          {redacted ? (
+            <Notice tone="warning">
+              This skill contains text that looks like a credential, which AiDEX hides, so saving here would replace
+              it. Edit <InlineCode>{initial?.location}</InlineCode> on the drive instead.
+            </Notice>
+          ) : null}
           {replaces ? (
             <Notice tone="warning">A drive skill named {name.trim()} already exists. Saving replaces its SKILL.md.</Notice>
           ) : null}
@@ -158,7 +173,7 @@ export function SkillEditor({ open, initial, driveNames, onClose, onSaved }: Pro
             <Button variant="ghost" onClick={onClose}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary" disabled={action.busy !== null}>
+            <Button type="submit" variant="primary" disabled={action.busy !== null || redacted}>
               {action.busy ? "Saving…" : editing ? "Save changes" : "Create skill"}
             </Button>
           </Stack>

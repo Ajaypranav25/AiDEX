@@ -134,7 +134,7 @@ export function ToolArguments({
     void call("history.read", {
       ...scope,
       index,
-      field: "arguments",
+      field: "tool_arguments",
       call_index: callIndex,
       offset,
     })

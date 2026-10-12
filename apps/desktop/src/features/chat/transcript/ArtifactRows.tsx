@@ -122,7 +122,11 @@ function PlanProposalCard({ entry }: { entry: ToolEntry }) {
     return full.loading ? null : <WorkLogRow icon={<ClipboardCheckIcon />} label="Proposed a plan" />;
   }
   const markdown = fromArguments ?? loaded.markdown;
-  const status = planStatus?.(meta.id) ?? meta.plan_status ?? "active";
+  // The stored result holds the status at creation (always active), so with a live lookup only its
+  // answer may offer Implement: a plan it has not confirmed may have been superseded.
+  const live = planStatus?.(meta.id);
+  const status = live ?? meta.plan_status ?? "active";
+  const implementable = planStatus ? live === "active" : status === "active";
   const copy = () => {
     if (!markdown) return;
     navigator.clipboard.writeText(markdown).then(
@@ -149,7 +153,7 @@ function PlanProposalCard({ entry }: { entry: ToolEntry }) {
           </>
         }
         actions={
-          planActions && status === "active" ? (
+          planActions && implementable ? (
             <>
               <Button
                 variant="primary"

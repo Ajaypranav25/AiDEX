@@ -21,7 +21,10 @@ export type TranscriptEnvironment = {
   openLink: (url: string) => void;
   openArtifact: (artifact: ArtifactRef) => void;
   downloadArtifact: (id: string) => void;
-  /** A plan's current status (a newer plan supersedes it), when known. */
+  /**
+   * A plan's current status (a newer plan supersedes it); undefined while unknown. When this is set,
+   * plan cards offer Implement only for plans it reports as active.
+   */
   planStatus?: (id: string) => PlanStatus | undefined;
   planActions?: PlanActions;
   /** Details of an invoked skill id, for chip tooltips. */

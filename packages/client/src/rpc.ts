@@ -180,7 +180,7 @@ export type RpcMethods = {
   "history.read": {
     params: HistoryScope & {
       index: number;
-      field?: string;
+      field?: "content" | "tool_arguments" | "provider_metadata";
       call_index?: number;
       offset?: number;
       limit?: number;

@@ -18,7 +18,7 @@ export const slashCommands: readonly SlashCommand[] = [
 
 export type SlashMatch = { type: "command"; command: SlashCommand } | { type: "skill"; skill: SkillSummary };
 
-function scoreSlashMatch(match: SlashMatch, query: string): number | null {
+function scoreSlashMatch(match: SlashMatch, query: string, namesOnly: boolean): number | null {
   if (match.type === "skill") {
     if (query === "skill") return 0;
     const skillQuery = query.startsWith("skill:") ? query.slice("skill:".length) : query;
@@ -27,15 +27,17 @@ function scoreSlashMatch(match: SlashMatch, query: string): number | null {
     // A partly typed "/ski" still lists every skill, after real matches.
     return "skill".startsWith(query) ? Number.MAX_SAFE_INTEGER : null;
   }
+  const byName = scoreMatch(match.command.command, query, {
+    exact: 0,
+    prefix: 2,
+    boundary: 4,
+    includes: 6,
+    fuzzy: 100,
+    boundaryMarkers: ["-", "_", "/"],
+  });
+  if (namesOnly) return byName;
   return bestScore([
-    scoreMatch(match.command.command, query, {
-      exact: 0,
-      prefix: 2,
-      boundary: 4,
-      includes: 6,
-      fuzzy: 100,
-      boundaryMarkers: ["-", "_", "/"],
-    }),
+    byName,
     scoreMatch(match.command.description.toLowerCase(), query, {
       exact: 20,
       prefix: 22,
@@ -45,7 +47,17 @@ function scoreSlashMatch(match: SlashMatch, query: string): number | null {
   ]);
 }
 
-/** Commands and skills matching the text typed after `/`; an empty query lists everything in order. */
+/** The command `query` (as typed after `/`) names exactly, if any. */
+export function exactSlashCommand(commands: readonly SlashCommand[], rawQuery: string): SlashCommand | undefined {
+  const query = normalizeQuery(rawQuery, /^\/+/);
+  return query ? commands.find((command) => command.command === query) : undefined;
+}
+
+/**
+ * Commands and skills matching the text typed after `/`; an empty query lists everything in order.
+ * Once the query starts a command's name, other commands no longer match through their descriptions,
+ * so `/chat` never puts `/new` ("Start a new chat") ahead of a `/chat` that cannot run.
+ */
 export function searchSlashMatches(
   commands: readonly SlashCommand[],
   skills: readonly SkillSummary[],
@@ -57,9 +69,10 @@ export function searchSlashMatches(
   ];
   const query = normalizeQuery(rawQuery, /^\/+/);
   if (!query) return matches;
+  const namesOnly = commands.some((command) => command.command.startsWith(query));
   return rankBy(
     matches,
-    (match) => scoreSlashMatch(match, query),
+    (match) => scoreSlashMatch(match, query, namesOnly),
     (match) => (match.type === "command" ? `0\u0000${match.command.command}` : `1\u0000${match.skill.name}`),
   );
 }

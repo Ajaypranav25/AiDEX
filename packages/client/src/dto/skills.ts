@@ -57,6 +57,11 @@ export type SkillDetail = SkillSummary & {
   /** Absent when the skill has an error. */
   body?: string;
   front_matter: FrontMatterEntry[];
+  /**
+   * True when the daemon hid credential-like text in what it returned. Saving that text back with
+   * `skill.save` would overwrite the original, so such a skill is edited in its SKILL.md file.
+   */
+  body_redacted?: boolean;
 };
 
 /** Params of `skill.list`; without `workspace_id` only drive and plugin skills are visible. */

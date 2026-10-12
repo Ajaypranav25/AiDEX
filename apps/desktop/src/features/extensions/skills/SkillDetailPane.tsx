@@ -24,6 +24,8 @@ export function SkillDetailPane({ skill, workspaceId, onEdit, onDeleted }: Props
   const headingId = `skill-detail-${skill.id}`;
   const shown = detail.data?.id === skill.id ? detail.data : undefined;
   const drive = skill.scope === "drive";
+  // The shown text has credentials replaced by a marker; saving it would write the marker over them.
+  const redacted = shown?.body_redacted === true;
 
   const remove = async () => {
     const deleted = await action.run("delete", () => call("skill.delete", { name: skill.name }));
@@ -44,8 +46,8 @@ export function SkillDetailPane({ skill, workspaceId, onEdit, onDeleted }: Props
                 <Button
                   variant="outline"
                   icon={<PencilIcon />}
-                  disabled={!shown || shown.body === undefined}
-                  onClick={() => shown && onEdit(shown)}
+                  disabled={!shown || shown.body === undefined || redacted}
+                  onClick={() => shown && !redacted && onEdit(shown)}
                 >
                   Edit
                 </Button>
@@ -64,6 +66,12 @@ export function SkillDetailPane({ skill, workspaceId, onEdit, onDeleted }: Props
         ) : startsDisabled(skill.scope) && !skill.enabled ? (
           <Notice tone="info">
             Skills from a workspace stay off until you turn them on. Read the instructions below before you enable this one.
+          </Notice>
+        ) : null}
+        {drive && redacted ? (
+          <Notice tone="info">
+            This skill contains text that looks like a credential, so AiDEX hides it here and can't edit the skill.
+            Edit <InlineCode>{skill.location}</InlineCode> on the drive instead.
           </Notice>
         ) : null}
         <KeyValueList
