@@ -26,7 +26,12 @@ use crate::sealed::{
 use crate::{SessionDetail, SessionStore, StoreError, digest, id, now};
 use chacha20poly1305::XChaCha20Poly1305;
 use rusqlite::{Connection, OptionalExtension, params};
-use std::{collections::BTreeMap, io::Read, time::Instant};
+use std::{
+    collections::BTreeMap,
+    io::Read,
+    sync::{Mutex, MutexGuard},
+    time::{Duration, Instant},
+};
 use upload::{InFlight, Upload, lock_upload};
 use zeroize::Zeroizing;
 
@@ -45,6 +50,23 @@ pub(crate) const PURGE_ORPHANS: &str =
 pub(crate) fn open_maintenance(db: &Connection, blobs: &BlobDir) -> Result<(), StoreError> {
     db.execute_batch(SCHEMA).map_err(sql)?;
     db.execute(PURGE_ORPHANS, []).map_err(sql)?;
+    for address in purge_expired_staged(db)? {
+        blobs.remove(&address);
+    }
+    blobs.sweep(|address| {
+        db.query_row(
+            "SELECT EXISTS(SELECT 1 FROM attachments WHERE blob=?)",
+            [address],
+            |r| r.get(0),
+        )
+        .map_err(sql)
+    });
+    Ok(())
+}
+
+/// Delete staged rows older than [`STAGED_TTL`] (no key needed) and return
+/// the blob addresses to remove once they are gone.
+fn purge_expired_staged(db: &Connection) -> Result<Vec<String>, StoreError> {
     let cutoff = now().saturating_sub(STAGED_TTL.as_millis() as u64);
     let cutoff = i64::try_from(cutoff).unwrap_or(i64::MAX);
     let expired = {
@@ -61,18 +83,35 @@ pub(crate) fn open_maintenance(db: &Connection, blobs: &BlobDir) -> Result<(), S
         [cutoff],
     )
     .map_err(sql)?;
-    for address in expired {
-        blobs.remove(&address);
+    Ok(expired)
+}
+
+/// When a running daemon last deleted expired staged attachments, so later
+/// calls repeat it at most once per interval (default
+/// [`STAGED_EXPIRY_INTERVAL`]). Open counts as the first time.
+pub(crate) struct StagedExpiry(Mutex<(Instant, Duration)>);
+
+impl StagedExpiry {
+    pub(crate) fn new() -> Self {
+        Self(Mutex::new((Instant::now(), STAGED_EXPIRY_INTERVAL)))
     }
-    blobs.sweep(|address| {
-        db.query_row(
-            "SELECT EXISTS(SELECT 1 FROM attachments WHERE blob=?)",
-            [address],
-            |r| r.get(0),
-        )
-        .map_err(sql)
-    });
-    Ok(())
+
+    fn state(&self) -> MutexGuard<'_, (Instant, Duration)> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// Whether an expiry is due; claims it when it is.
+    fn claim(&self) -> bool {
+        let mut state = self.state();
+        let (last, interval) = &mut *state;
+        if last.elapsed() < *interval {
+            return false;
+        }
+        *last = Instant::now();
+        true
+    }
 }
 
 fn sql(error: rusqlite::Error) -> StoreError {
@@ -366,6 +405,29 @@ impl SessionStore {
         sealed::cipher(key.expose())
     }
 
+    /// Delete staged attachments older than [`STAGED_TTL`] with their blobs
+    /// when an expiry is due, so drafts a client lost stop counting against
+    /// the staged limits on a daemon that runs for days. Needs no key.
+    fn expire_staged(&self) -> Result<(), StoreError> {
+        if !self.staged_expiry.claim() {
+            return Ok(());
+        }
+        let expired = {
+            let db = self.db.lock().map_err(|_| "session store poisoned")?;
+            purge_expired_staged(&db)?
+        };
+        for address in expired {
+            self.attachment_blobs.remove(&address);
+        }
+        Ok(())
+    }
+
+    /// Change how often a running daemon deletes expired staged attachments
+    /// (default [`STAGED_EXPIRY_INTERVAL`]).
+    pub fn set_staged_expiry_interval(&self, interval: Duration) {
+        self.staged_expiry.state().1 = interval;
+    }
+
     /// Insert a new `staged` row after re-checking, in one transaction, that
     /// the session exists and the staged limits hold. A blob written for it is
     /// removed when the insert fails.
@@ -449,9 +511,10 @@ impl SessionStore {
     /// `invalid_name`, `invalid_attachment` (SHA-256), `too_many_attachments`
     /// (staged limits, uploads in flight included), `busy` (more than
     /// [`MAX_INFLIGHT_UPLOADS`] or [`MAX_INFLIGHT_UPLOAD_BYTES`] in flight), and
-    /// a locked vault.
+    /// a locked vault. Expired staged attachments are deleted first when due.
     pub fn begin_attachment_upload(&self, new: NewUpload) -> Result<UploadTicket, StoreError> {
         self.uploads.evict_expired();
+        self.expire_staged()?;
         let name = attachment_name(&new.name)?;
         check_upload_size(new.size)?;
         let sha256 = model::normalize_sha256(&new.sha256)?;
@@ -663,6 +726,7 @@ impl SessionStore {
         let name = attachment_name(&new.name)?;
         let size = new.bytes.len() as u64;
         check_upload_size(size)?;
+        self.expire_staged()?;
         let cipher = self.attachment_cipher()?;
         {
             let db = self.db.lock().map_err(|_| "session store poisoned")?;
@@ -731,7 +795,8 @@ impl SessionStore {
 
     /// A page of `session_id`'s attachments (staged and sent), newest first
     /// (`limit` 1-[`ATTACHMENT_LIST_LIMIT`]). A row whose metadata cannot be
-    /// read (for example one a newer daemon wrote) is skipped.
+    /// read (for example one a newer daemon wrote) is skipped. Expired staged
+    /// attachments are deleted first when due.
     pub fn list_attachments(
         &self,
         session_id: &str,
@@ -743,6 +808,7 @@ impl SessionStore {
                 "attachment page limits are 1-{ATTACHMENT_LIST_LIMIT}"
             )));
         }
+        self.expire_staged()?;
         let cipher = self.attachment_cipher()?;
         let db = self.db.lock().map_err(|_| "session store poisoned")?;
         check_session(&db, session_id)?;

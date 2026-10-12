@@ -23,8 +23,8 @@ pub use attachments::{
     MAX_IMAGE_BYTES, MAX_IMAGE_DIMENSION, MAX_INFLIGHT_UPLOAD_BYTES, MAX_INFLIGHT_UPLOADS,
     MAX_MESSAGE_ATTACHMENT_BYTES, MAX_PDF_BYTES, MAX_PDF_PAGES, MAX_STAGED_BYTES,
     MAX_STAGED_PER_SESSION, MAX_TEXT_ATTACHMENT_BYTES, MAX_UPLOAD_BYTES, NewAttachment, NewUpload,
-    STAGED_TTL, Sniffed, UPLOAD_CHUNK_BYTES, UPLOAD_IDLE_TIMEOUT, UploadTicket, attachment_name,
-    sniff_attachment,
+    STAGED_EXPIRY_INTERVAL, STAGED_TTL, Sniffed, UPLOAD_CHUNK_BYTES, UPLOAD_IDLE_TIMEOUT,
+    UploadTicket, attachment_name, sniff_attachment,
 };
 pub use catalog::{Session, SessionCatalog, SessionError};
 pub use model::*;

@@ -35,8 +35,13 @@ pub const ATTACHMENT_PAGE_BYTES: usize = 512 * 1024;
 pub const ATTACHMENT_TEXT_PAGE_BYTES: usize = 128 * 1024;
 /// An in-flight upload with no chunk for this long is evicted with its file.
 pub const UPLOAD_IDLE_TIMEOUT: Duration = Duration::from_secs(10 * 60);
-/// Staged attachments older than this are deleted when the store opens.
+/// Staged attachments older than this are deleted when the store opens and,
+/// on a running daemon, at most every [`STAGED_EXPIRY_INTERVAL`].
 pub const STAGED_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+/// How often a running daemon deletes staged attachments older than
+/// [`STAGED_TTL`]: on the next upload begin, workspace attachment or list
+/// after this long.
+pub const STAGED_EXPIRY_INTERVAL: Duration = Duration::from_secs(5 * 60);
 /// Most uploads in flight per daemon.
 pub const MAX_INFLIGHT_UPLOADS: usize = 8;
 /// Most declared bytes in flight per daemon (64 MiB).

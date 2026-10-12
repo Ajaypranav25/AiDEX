@@ -356,6 +356,10 @@ fn pdf_encrypted(b: &[u8]) -> bool {
 /// Total plaintext a PDF's object streams may inflate to.
 const MAX_INFLATED_BYTES: u64 = 64 * 1024 * 1024;
 
+/// Most objects one object stream may hold (`/N`), which bounds its offset
+/// table (16 bytes an entry); real streams hold far fewer.
+const MAX_STREAM_OBJECTS: u64 = 1_000_000;
+
 #[derive(Default)]
 struct PageCount {
     /// Object numbers holding a `/Type /Page` dictionary.
@@ -439,13 +443,16 @@ fn object_header(b: &[u8], at: usize) -> Option<u64> {
 
 /// Scan objects for page dictionaries. In the file itself (`top`), `obj`
 /// headers start objects and object streams are inflated; inside an object
-/// stream the caller passes one object per call.
+/// stream the caller passes one object per call. Every byte is looked at a
+/// bounded number of times, so crafted input cannot make it superlinear.
 fn scan(b: &[u8], number: Option<u64>, count: &mut PageCount, top: bool) -> Result<(), StoreError> {
     let mut object = Object {
         number,
         ..Object::default()
     };
-    let mut object_start = 0usize;
+    // A stream's dictionary starts after the `obj` header or after the
+    // previous stream, so no byte is searched for `/Length` twice.
+    let mut dictionary_start = 0usize;
     let mut at = 0usize;
     while at < b.len() {
         match b[at] {
@@ -463,7 +470,7 @@ fn scan(b: &[u8], number: Option<u64>, count: &mut PageCount, top: bool) -> Resu
                         ..Object::default()
                     };
                     at += 3;
-                    object_start = at;
+                    dictionary_start = at;
                     continue;
                 }
             }
@@ -479,12 +486,15 @@ fn scan(b: &[u8], number: Option<u64>, count: &mut PageCount, top: bool) -> Resu
                         continue;
                     }
                 };
-                let dictionary = &b[object_start..at];
+                let dictionary = &b[dictionary_start..at];
                 let end = stream_end(b, dictionary, data);
-                if object.object_stream {
+                // An object has one stream; a stray second one is not
+                // read as an object stream with the first one's dictionary.
+                if std::mem::take(&mut object.object_stream) {
                     object_stream(dictionary, &b[data..end], count)?;
                 }
                 at = end;
+                dictionary_start = end;
                 continue;
             }
             b'/' => {
@@ -515,13 +525,25 @@ fn scan(b: &[u8], number: Option<u64>, count: &mut PageCount, top: bool) -> Resu
     Ok(())
 }
 
+/// Most whitespace between a stream's data and `endstream` that the `/Length`
+/// check skips. Writers put an end-of-line marker there, sometimes a few
+/// spaces; the bound keeps the check constant-time per stream, since crafted
+/// `/Length` values can all point into one long whitespace run.
+const MAX_ENDSTREAM_GAP: usize = 64;
+
 /// End of stream data starting at `data`: a direct `/Length` when it lands on
-/// `endstream`, else the next `endstream` keyword, else the end of the file.
+/// `endstream` (past at most [`MAX_ENDSTREAM_GAP`] whitespace bytes), else the
+/// next `endstream` keyword, else the end of the file.
 fn stream_end(b: &[u8], dictionary: &[u8], data: usize) -> usize {
     if let Some(length) = direct_integer(dictionary, b"/Length")
         && let Some(end) = data.checked_add(usize::try_from(length).unwrap_or(usize::MAX))
         && end <= b.len()
-        && b[skip_ws(b, end)..].starts_with(b"endstream")
+        && let gap = b[end..]
+            .iter()
+            .take(MAX_ENDSTREAM_GAP)
+            .take_while(|&&c| is_ws(c))
+            .count()
+        && b[end + gap..].starts_with(b"endstream")
     {
         return end;
     }
@@ -582,7 +604,9 @@ fn object_stream(dictionary: &[u8], data: &[u8], count: &mut PageCount) -> Resul
             &inflated
         }
     };
-    let objects = direct_integer(dictionary, b"/N").ok_or_else(unreadable)?;
+    let objects = direct_integer(dictionary, b"/N")
+        .filter(|&n| n <= MAX_STREAM_OBJECTS)
+        .ok_or_else(unreadable)?;
     let first = direct_integer(dictionary, b"/First")
         .and_then(|f| usize::try_from(f).ok())
         .filter(|&f| f <= content.len())
@@ -602,10 +626,13 @@ fn object_stream(dictionary: &[u8], data: &[u8], count: &mut PageCount) -> Resul
             .ok_or_else(unreadable)?;
         table.push((number, start));
     }
+    // Offsets increase in a valid stream; in order, the objects' spans
+    // partition the content, so no byte is scanned twice.
+    table.sort_by_key(|&(_, start)| start);
     for (index, &(number, start)) in table.iter().enumerate() {
         let end = table
             .get(index + 1)
-            .map_or(content.len(), |&(_, next)| next.max(start));
+            .map_or(content.len(), |&(_, next)| next);
         scan(&content[start..end], Some(number), count, false)?;
     }
     Ok(())
@@ -873,12 +900,29 @@ pub(crate) mod tests {
         }
         let content = format!("{table}\n{objects}");
         let first = table.len() + 1;
-        let data = deflate(content.as_bytes());
+        object_stream_pdf(pages, first, content.as_bytes(), count, true)
+    }
+
+    /// A PDF 1.5 file with one object stream holding `content` (`objects`
+    /// objects from `first`), Flate-compressed when `flate`, and a page tree
+    /// whose `/Count` is `count`.
+    fn object_stream_pdf(
+        objects: usize,
+        first: usize,
+        content: &[u8],
+        count: usize,
+        flate: bool,
+    ) -> Vec<u8> {
+        let (data, filter) = if flate {
+            (deflate(content), " /Filter /FlateDecode")
+        } else {
+            (content.to_vec(), "")
+        };
         let mut b = b"%PDF-1.5\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_vec();
         b.extend(format!("2 0 obj\n<< /Type /Pages /Count {count} >>\nendobj\n").bytes());
         b.extend(
             format!(
-                "9 0 obj\n<< /Type /ObjStm /N {pages} /First {first} /Filter /FlateDecode /Length {} >>\nstream\r\n",
+                "9 0 obj\n<< /Type /ObjStm /N {objects} /First {first}{filter} /Length {} >>\nstream\r\n",
                 data.len()
             )
             .bytes(),
@@ -886,6 +930,107 @@ pub(crate) mod tests {
         b.extend(&data);
         b.extend(b"\r\nendstream\nendobj\n%%EOF\n");
         b
+    }
+
+    /// Sniff crafted input that once took minutes to hours (dictionaries,
+    /// object-stream spans and whitespace after `/Length` were rescanned); the
+    /// bound is generous so debug builds do not flake.
+    fn sniff_in_linear_time(bytes: &[u8]) -> Result<Sniffed, StoreError> {
+        let started = std::time::Instant::now();
+        let sniffed = sniff_attachment(bytes, None);
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(10),
+            "sniffing took {elapsed:?}"
+        );
+        sniffed
+    }
+
+    /// Object-stream content (`/First 0`) whose offset table alternates
+    /// between 0 and the end of the content: `(objects, content)`.
+    fn alternating_offsets(bytes: usize) -> (usize, Vec<u8>) {
+        let entry = |offset: usize| format!("1 {offset:010} ");
+        let pairs = bytes / (2 * entry(0).len());
+        let len = pairs * 2 * entry(0).len();
+        let mut content = String::with_capacity(len);
+        for _ in 0..pairs {
+            content.push_str(&entry(0));
+            content.push_str(&entry(len));
+        }
+        (2 * pairs, content.into_bytes())
+    }
+
+    #[test]
+    fn pdf_page_counting_is_linear_on_crafted_input() {
+        // One object followed by many streams without a /Length.
+        let mut streams = b"%PDF-1.4\n1 0 obj\n<< >>\n".to_vec();
+        while streams.len() < 2 * 1024 * 1024 {
+            streams.extend(b"stream\nendstream\n");
+        }
+        assert_eq!(sniff_in_linear_time(&streams).unwrap().pages, Some(1));
+
+        // Streams whose /Length all land in one long whitespace run that
+        // does not end in `endstream`.
+        let mut gap = b"%PDF-1.4\n1 0 obj\n<< >>\n".to_vec();
+        let block = |length: usize| format!("/Length {length:08}\nstream\nendstream\n");
+        let blocks = 20_000;
+        let run = gap.len() + blocks * block(0).len();
+        for _ in 0..blocks {
+            let data = gap.len() + block(0).len() - "endstream\n".len();
+            gap.extend(block(run - data).bytes());
+        }
+        assert_eq!(gap.len(), run);
+        gap.resize(run + 2 * 1024 * 1024, b' ');
+        gap.extend(b"X\n");
+        assert_eq!(sniff_in_linear_time(&gap).unwrap().pages, Some(1));
+
+        // Object streams whose offsets alternate, raw and compressed.
+        let (objects, content) = alternating_offsets(2 * 1024 * 1024);
+        let raw = object_stream_pdf(objects, 0, &content, 1, false);
+        assert_eq!(sniff_in_linear_time(&raw).unwrap().pages, Some(1));
+        let (objects, content) = alternating_offsets(4 * 1024 * 1024);
+        let compressed = object_stream_pdf(objects, 0, &content, 1, true);
+        assert!(compressed.len() < 64 * 1024, "a small file");
+        assert_eq!(sniff_in_linear_time(&compressed).unwrap().pages, Some(1));
+    }
+
+    #[test]
+    fn stream_length_is_used_when_whitespace_precedes_endstream() {
+        // The second object's data holds the word `endstream`; only the
+        // /Length finds the third object, past a padded end of line.
+        let pages = [
+            "<</Type /Page>>\n",
+            "<</T (endstream) /Type /Page>>\n",
+            "<</Type /Page>>\n",
+        ];
+        let second = pages[0].len();
+        let table = format!("3 0 4 {second} 5 {} ", second + pages[1].len());
+        let content = format!("{table}{}", pages.concat());
+        let mut b = object_stream_pdf(3, table.len(), content.as_bytes(), 1, false);
+        let gap = find(&b, b"\r\nendstream\nendobj", 0).unwrap() + 2;
+        b.splice(gap..gap, [b' '; 40]);
+        assert_eq!(sniff_attachment(&b, None).unwrap().pages, Some(3));
+    }
+
+    #[test]
+    fn object_stream_offsets_out_of_order_still_count_each_object() {
+        let page = "<</Type /Page /Parent 2 0 R>>\n";
+        let table = format!("4 {} 3 0\n", page.len());
+        let content = format!("{table}{page}{page}");
+        let b = object_stream_pdf(2, table.len(), content.as_bytes(), 1, true);
+        assert_eq!(sniff_attachment(&b, None).unwrap().pages, Some(2));
+    }
+
+    #[test]
+    fn object_streams_with_too_many_objects_are_refused() {
+        // A table of empty objects, all at /First (the end of the content).
+        let objects = MAX_STREAM_OBJECTS as usize + 1;
+        let content = b"1 0 ".repeat(objects);
+        let b = object_stream_pdf(objects, content.len(), &content, 1, true);
+        assert_eq!(
+            reason(&sniff_in_linear_time(&b).unwrap_err()),
+            AttachmentReason::UnsupportedType
+        );
     }
 
     #[test]

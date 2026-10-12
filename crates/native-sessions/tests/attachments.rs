@@ -1,9 +1,9 @@
 use aidex_native_sessions::{
     ATTACHMENT_ONLY_CONTENT, ATTACHMENT_PAGE_BYTES, ATTACHMENT_TEXT_PAGE_BYTES, ArtifactKind,
     AttachmentEncoding, AttachmentKind, AttachmentReason, AttachmentSource, AttachmentState,
-    ForkRequest, INLINE_ATTACHMENT_BYTES, MAX_INFLIGHT_UPLOADS, MAX_STAGED_PER_SESSION,
-    MAX_UPLOAD_BYTES, Mode, NewArtifact, NewAttachment, NewUpload, PermissionMode, RunOptions,
-    RunStatus, SessionConfig, SessionStore, UPLOAD_CHUNK_BYTES, digest,
+    ForkRequest, INLINE_ATTACHMENT_BYTES, MAX_INFLIGHT_UPLOADS, MAX_STAGED_BYTES,
+    MAX_STAGED_PER_SESSION, MAX_UPLOAD_BYTES, Mode, NewArtifact, NewAttachment, NewUpload,
+    PermissionMode, RunOptions, RunStatus, SessionConfig, SessionStore, UPLOAD_CHUNK_BYTES, digest,
 };
 use aidex_providers::{ChatMessage, Role, ToolCall};
 use aidex_vault::{KdfParams, SecretString, VaultService, VaultServiceConfig};
@@ -1080,6 +1080,87 @@ fn stale_staged_attachments_are_purged_on_open_with_the_vault_locked() {
     assert_eq!(
         f.store.attachment(&fresh.id).unwrap().state,
         AttachmentState::Staged
+    );
+}
+
+#[test]
+fn a_running_daemon_expires_stale_staged_attachments_when_due() {
+    let f = Fixture::new();
+    let session = f.session();
+    let stale = upload(
+        &f.store,
+        &session,
+        "stale.pdf",
+        &pdf(INLINE_ATTACHMENT_BYTES + 5),
+    )
+    .unwrap();
+    let fresh = upload(&f.store, &session, "fresh.txt", b"fresh").unwrap();
+    let day = 25 * 60 * 60 * 1000i64;
+    // A draft the client lost a day ago, holding every staged byte.
+    let leak = |id: &str, age: i64| {
+        f.db().execute("INSERT INTO attachments(id,session_id,state,created_at,size,meta) VALUES(?,?,'staged',?,?,x'00')", rusqlite::params![id, session, fresh.created_at as i64 - age, MAX_STAGED_BYTES as i64]).unwrap();
+    };
+    leak("att_leaked", day);
+    f.db()
+        .execute(
+            "UPDATE attachments SET created_at=created_at-? WHERE id=?",
+            rusqlite::params![day, stale.id],
+        )
+        .unwrap();
+    let ids = || -> Vec<String> {
+        let db = f.db();
+        let mut stmt = db
+            .prepare("SELECT id FROM attachments ORDER BY id")
+            .unwrap();
+        stmt.query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    };
+    let begin = || {
+        f.store
+            .begin_attachment_upload(new_upload(&session, "a.txt", b"x"))
+    };
+    assert_eq!(
+        reason(&begin().unwrap_err()),
+        AttachmentReason::TooManyAttachments,
+        "open expired them; the next expiry is not due yet"
+    );
+    assert_eq!(ids().len(), 3);
+
+    f.store.set_staged_expiry_interval(Duration::ZERO);
+    let ticket = begin().unwrap();
+    assert!(f.store.abort_upload(&ticket.upload_id));
+    assert_eq!(ids(), vec![fresh.id.clone()], "only the stale rows go");
+    assert!(
+        files(&f.attachment_dir()).is_empty(),
+        "with their blob, without a reopen"
+    );
+
+    // Workspace attachments and lists expire them too; fresh rows still count.
+    leak("att_leaked", day);
+    let created = f
+        .store
+        .create_attachment(
+            &session,
+            NewAttachment {
+                name: "w.txt".into(),
+                mime: None,
+                source: None,
+                bytes: Zeroizing::new(b"w".to_vec()),
+            },
+        )
+        .unwrap();
+    leak("att_leaked", day);
+    let listed = f.store.list_attachments(&session, 0, 10).unwrap();
+    assert_eq!((listed.total, listed.attachments.len()), (2, 2));
+    let mut expected = vec![fresh.id.clone(), created.id];
+    expected.sort();
+    assert_eq!(ids(), expected);
+    leak("att_recent", 0);
+    assert_eq!(
+        reason(&begin().unwrap_err()),
+        AttachmentReason::TooManyAttachments
     );
 }
 

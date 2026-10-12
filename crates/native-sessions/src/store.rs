@@ -25,6 +25,7 @@ pub struct SessionStore {
     /// Attachment blobs and upload files (`<db stem>-attachments/`).
     pub(crate) attachment_blobs: crate::sealed::BlobDir,
     pub(crate) uploads: crate::attachments::Uploads,
+    pub(crate) staged_expiry: crate::attachments::StagedExpiry,
 }
 pub fn now() -> u64 {
     SystemTime::now()
@@ -64,7 +65,8 @@ impl SessionStore {
             .map_err(|e| e.to_string())
         });
         // Attachments keep their own table, directory and sweep (which also
-        // drops staged attachments older than a day); none of it needs the key.
+        // drops staged attachments older than a day, as later upload and list
+        // calls do on a running daemon); none of it needs the key.
         let attachment_blobs =
             crate::sealed::BlobDir::beside(path, crate::sealed::Domain::Attachment);
         crate::attachments::open_maintenance(&db, &attachment_blobs)?;
@@ -74,6 +76,7 @@ impl SessionStore {
             blobs,
             attachment_blobs,
             uploads: crate::attachments::Uploads::new(),
+            staged_expiry: crate::attachments::StagedExpiry::new(),
         })
     }
     pub(crate) fn key(&self) -> Result<SecretBytes, StoreError> {
