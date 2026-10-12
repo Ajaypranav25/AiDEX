@@ -1,5 +1,5 @@
 //! Injected external execution with the same encrypted history and approvals.
-use crate::NativeEngine;
+use crate::{NativeEngine, engine::relock};
 use aidex_core::{CancelToken, EntityId};
 use aidex_events::{EventKind, RiskLevel};
 use aidex_native_sessions::*;
@@ -26,10 +26,7 @@ impl NativeEngine {
         &self,
         mutation: impl FnOnce() -> Result<(T, Vec<Arc<dyn RuntimeExecutor>>), String>,
     ) -> Result<T, String> {
-        let _guard = self
-            .operations
-            .lock()
-            .map_err(|_| "native operations poisoned")?;
+        let _guard = relock(&self.operations);
         for run in self.store.run_summaries()? {
             if run.status.active() {
                 let config = self.store.get(&run.session_id)?.configuration;
@@ -56,10 +53,7 @@ impl NativeEngine {
             }
             replacement.insert(descriptor.id, executor);
         }
-        *self
-            .runtimes
-            .lock()
-            .map_err(|_| "runtime registry poisoned")? = replacement;
+        *relock(&self.runtimes) = replacement;
         Ok(result)
     }
     pub fn synchronize_runtimes(
@@ -82,10 +76,7 @@ impl NativeEngine {
         {
             return Err("invalid external runtime descriptor".into());
         }
-        let mut registry = self
-            .runtimes
-            .lock()
-            .map_err(|_| "runtime registry poisoned")?;
+        let mut registry = relock(&self.runtimes);
         if registry.contains_key(id) {
             return Err("runtime already registered".into());
         }
@@ -93,10 +84,7 @@ impl NativeEngine {
         Ok(())
     }
     pub fn runtime_descriptors(&self) -> Vec<RuntimeDescriptor> {
-        let mut items = self
-            .runtimes
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
+        let mut items = relock(&self.runtimes)
             .values()
             .map(|r| r.descriptor())
             .collect::<Vec<_>>();
@@ -111,10 +99,7 @@ impl NativeEngine {
             .runtime_id
             .as_deref()
             .ok_or("external runtime was not selected")?;
-        let runtime = self
-            .runtimes
-            .lock()
-            .map_err(|_| "runtime registry poisoned")?
+        let runtime = relock(&self.runtimes)
             .get(id)
             .cloned()
             .ok_or("selected external runtime is not registered")?;
@@ -351,11 +336,7 @@ impl NativeEngine {
             Ok(())
         })?;
         if response.status == RuntimeStatus::WaitingApproval
-            && let Some(live) = self
-                .live
-                .lock()
-                .map_err(|_| "run registry poisoned")?
-                .get_mut(id)
+            && let Some(live) = relock(&self.live).get_mut(id)
         {
             live.executing = false;
         }

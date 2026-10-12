@@ -1,5 +1,5 @@
 //! Native ownership of execution permits and the tool registry.
-use crate::launcher::NativeLauncher;
+use crate::{extensions::Extensions, launcher::NativeLauncher};
 use aidex_core::{EntityId, WorkspacePath};
 use aidex_events::NullEventSink;
 use aidex_native_sessions::{PermissionMode, SessionDetail};
@@ -19,6 +19,9 @@ pub(crate) struct Broker {
     pub sandbox: Sandbox,
     pub workspaces: Arc<WorkspaceRegistry>,
     scratch: PathBuf,
+    /// The offline switch, emergency stop, and drive policy settings that
+    /// planned network access is evaluated under.
+    extensions: Arc<dyn Extensions>,
 }
 pub(crate) struct Prepared {
     pub context: ToolContext,
@@ -26,9 +29,12 @@ pub(crate) struct Prepared {
     pub needs_approval: bool,
     pub before: Vec<(String, Option<String>)>,
     policy_fingerprint: String,
+    /// The drive settings a plan that reaches the network was evaluated
+    /// under; `None` for other plans.
+    network: Option<EvaluationContext>,
 }
 impl Broker {
-    fn policy_state(
+    pub(crate) fn policy_state(
         &self,
         root: Option<&Path>,
         workspace: Option<&EntityId>,
@@ -115,12 +121,17 @@ impl Broker {
         }
         Ok(())
     }
-    pub fn new(workspaces: Arc<WorkspaceRegistry>, scratch: PathBuf) -> Self {
+    pub fn new(
+        workspaces: Arc<WorkspaceRegistry>,
+        scratch: PathBuf,
+        extensions: Arc<dyn Extensions>,
+    ) -> Self {
         Self {
             tools: ToolRegistry::with_builtin_tools(),
             sandbox: Sandbox::locate(),
             workspaces,
             scratch,
+            extensions,
         }
     }
     pub fn prepare(
@@ -189,12 +200,23 @@ impl Broker {
         } else {
             Profile::Balanced
         };
-        let evaluation = EvaluationContext::new(
-            profile,
-            PrivacyMode::Hybrid,
-            HostTrust::Trusted,
-            NetworkMode::Unrestricted,
-        );
+        // A plan that reaches the network (a push, a networked command) is
+        // refused while offline or stopped, and its intents meet the drive's
+        // privacy, host-trust, and network-mode floors; other plans keep the
+        // permission-mode context.
+        let network = if plan.facts().network.is_some() {
+            Some(self.network_context(profile)?)
+        } else {
+            None
+        };
+        let evaluation = network.clone().unwrap_or_else(|| {
+            EvaluationContext::new(
+                profile,
+                PrivacyMode::Hybrid,
+                HostTrust::Trusted,
+                NetworkMode::Unrestricted,
+            )
+        });
         let mut needs_approval = tool.as_str() == "fs.delete";
         let mut level = SandboxLevel::Brokered;
         for intent in plan.intents() {
@@ -269,7 +291,25 @@ impl Broker {
             needs_approval,
             before,
             policy_fingerprint,
+            network,
         })
+    }
+    /// The context network-bearing plans are evaluated under: refused while
+    /// the offline switch or an emergency stop is on, otherwise the drive's
+    /// privacy, host-trust, and network-mode settings.
+    fn network_context(&self, profile: Profile) -> Result<EvaluationContext, String> {
+        let network = self.extensions.network();
+        if let Some(reason) = network.blocked {
+            return Err(format!(
+                "policy denied: network access is unavailable ({reason})"
+            ));
+        }
+        Ok(EvaluationContext::new(
+            profile,
+            network.context.privacy,
+            network.context.host_trust,
+            network.context.network_mode,
+        ))
     }
     pub fn execute(&self, p: &Prepared, issuer: PermitIssuer) -> Result<ToolOutput, String> {
         let (_, current) = self.policy_state(
@@ -277,6 +317,13 @@ impl Broker {
             Some(&p.context.workspace_id),
         )?;
         if current != p.policy_fingerprint {
+            return Err("policy changed since tool planning; request a new plan".into());
+        }
+        // The offline switch, an emergency stop, or the drive's settings may
+        // have changed while the plan waited for approval.
+        if let Some(planned) = &p.network
+            && self.network_context(planned.profile)? != *planned
+        {
             return Err("policy changed since tool planning; request a new plan".into());
         }
         self.tools

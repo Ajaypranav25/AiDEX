@@ -20,6 +20,7 @@ pub type StoreError = String;
 pub struct SessionStore {
     pub(crate) db: Mutex<Connection>,
     vault: Arc<VaultService>,
+    pub(crate) blobs: crate::artifacts::BlobDir,
 }
 pub fn now() -> u64 {
     SystemTime::now()
@@ -43,9 +44,25 @@ impl SessionStore {
         }
         let db = Connection::open(path).map_err(|e| e.to_string())?;
         db.execute_batch("PRAGMA journal_mode=DELETE; PRAGMA synchronous=FULL; CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,status TEXT NOT NULL,payload BLOB NOT NULL); CREATE TABLE IF NOT EXISTS runs(id TEXT PRIMARY KEY, session_id TEXT NOT NULL,status TEXT NOT NULL); CREATE TABLE IF NOT EXISTS memory(id TEXT PRIMARY KEY,workspace TEXT NOT NULL,payload BLOB NOT NULL); UPDATE runs SET status='interrupted' WHERE status IN ('pending','running','waiting_approval'); UPDATE sessions SET status='interrupted' WHERE status IN ('pending','running','waiting_approval');").map_err(|e|e.to_string())?;
+        db.execute_batch(crate::artifacts::SCHEMA)
+            .map_err(|e| e.to_string())?;
+        // A daemon that predates artifacts deletes sessions without their
+        // artifact rows; drop them so the sweep below reclaims their blobs.
+        db.execute(crate::artifacts::PURGE_ORPHANS, [])
+            .map_err(|e| e.to_string())?;
+        let blobs = crate::artifacts::BlobDir::beside(path);
+        blobs.sweep(|address| {
+            db.query_row(
+                "SELECT EXISTS(SELECT 1 FROM artifacts WHERE blob=?)",
+                [address],
+                |r| r.get(0),
+            )
+            .map_err(|e| e.to_string())
+        });
         Ok(Self {
             db: Mutex::new(db),
             vault,
+            blobs,
         })
     }
     pub(crate) fn key(&self) -> Result<SecretBytes, StoreError> {
@@ -233,6 +250,18 @@ impl SessionStore {
         command: &str,
         parent: Option<String>,
     ) -> Result<Run, StoreError> {
+        self.begin_with(id, content, command, parent, &RunOptions::default())
+    }
+    /// [`begin`](Self::begin) with per-request options (invoked skills, web
+    /// tools). Options are part of the command fingerprint.
+    pub fn begin_with(
+        &self,
+        id: &str,
+        content: &str,
+        command: &str,
+        parent: Option<String>,
+        options: &RunOptions,
+    ) -> Result<Run, StoreError> {
         if content.trim().is_empty()
             || content.len() > 256 * 1024
             || command.is_empty()
@@ -241,7 +270,19 @@ impl SessionStore {
             return Err("invalid message or command id".into());
         }
         self.update(id, |s| {
-            let fp = digest(format!("{content}\0{parent:?}").as_bytes());
+            // Options join the fingerprint only when present, so command ids
+            // recorded before they existed keep their fingerprints.
+            let fp = if options.is_empty() {
+                digest(format!("{content}\0{parent:?}").as_bytes())
+            } else {
+                digest(
+                    format!(
+                        "{content}\0{parent:?}\0{:?}\0{}",
+                        options.skills, options.web_search
+                    )
+                    .as_bytes(),
+                )
+            };
             if let Some(existing) = s.commands.get(command) {
                 if existing.fingerprint != fp {
                     return Err("command id reused with different arguments".into());
@@ -286,6 +327,9 @@ impl SessionStore {
                 } else {
                     None
                 },
+                skills: options.skills.clone(),
+                web_search: options.web_search,
+                message_index: parent.is_none().then_some(s.messages.len()),
             };
             if parent.is_none() {
                 s.messages.push(message);
@@ -362,10 +406,15 @@ impl SessionStore {
         let tx = db.transaction().map_err(|e| e.to_string())?;
         tx.execute("DELETE FROM runs WHERE session_id=?", [id])
             .map_err(|e| e.to_string())?;
+        let blobs = Self::delete_session_artifacts(&tx, id)?;
         let n = tx
             .execute("DELETE FROM sessions WHERE id=?", [id])
             .map_err(|e| e.to_string())?;
         tx.commit().map_err(|e| e.to_string())?;
+        drop(db);
+        for blob in blobs {
+            self.blobs.remove(&blob);
+        }
         Ok(n > 0)
     }
 }

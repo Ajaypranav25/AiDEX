@@ -3,9 +3,17 @@ mod broker;
 mod children;
 mod engine;
 mod execution;
+mod extensions;
 mod inference;
+mod native_tools;
+mod prompt;
 mod runtimes;
+mod untrusted;
 pub use children::ChildResult;
 mod inspect;
 mod launcher;
-pub use engine::NativeEngine;
+pub use engine::{MAX_INVOKED_SKILLS, NativeEngine, RunOptions};
+pub use extensions::{
+    ExtensionError, Extensions, McpOutput, McpTool, McpToolset, NetworkState, NoExtensions,
+    SkillEntry, SkillText, SkillTrust, WebHit, WebPage, WebStatus,
+};

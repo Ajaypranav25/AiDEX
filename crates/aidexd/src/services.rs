@@ -5,11 +5,17 @@
 //! are added here as fields constructed in [`Services::open`]; their JSON-RPC
 //! adapters live in `methods/<domain>.rs`.
 
+pub mod contributions;
+mod extensions;
 mod inference;
+mod mcp;
 mod models;
 mod runtime;
+mod web;
 
+pub use extensions::DaemonExtensions;
 pub use models::{EventsModelObserver, ModelServices, VaultCredentials, model_event_kind};
+pub use web::WebServices;
 
 use crate::{endpoint, lifecycle::ShutdownSignal};
 use aidex_broker::{Broker, BrokerConfig};
@@ -18,6 +24,7 @@ use aidex_core::ServiceErrorCode;
 use aidex_drive::DrivePaths;
 use aidex_events::{EventLog, EventSink, RetentionPolicy};
 use aidex_sessions::{RecoveryReport, SessionStore};
+use aidex_skills::SkillService;
 use aidex_updater::{RecoveryReport as UpdateRecovery, Updater, UpdaterConfig};
 use aidex_vault::{VaultService, VaultServiceConfig};
 use aidex_workspace::WorkspaceRegistry;
@@ -62,12 +69,16 @@ pub struct Services {
     workspaces: Arc<WorkspaceRegistry>,
     broker: Arc<Broker>,
     models: ModelServices,
+    web: Arc<WebServices>,
     sessions: Arc<SessionStore>,
     session_recovery: RecoveryReport,
     context: Arc<ContextService>,
+    skills: Arc<SkillService>,
     native: Arc<aidex_harness::NativeEngine>,
     inference: Arc<aidex_inference::InferenceService>,
+    plugins: Arc<aidex_plugins::PluginStore>,
     runtime: Result<Arc<aidex_adapters::RuntimeManager>, String>,
+    mcp: Result<Arc<aidex_mcp::McpSupervisor>, String>,
     updates: Result<Arc<Updater>, String>,
     update_recovery: Mutex<Option<Result<UpdateRecovery, String>>>,
 }
@@ -126,9 +137,21 @@ impl Services {
             Arc::clone(&broker),
             Arc::new(EventsModelObserver::new(Arc::new(events.clone()))),
         )?;
+        // Web search and fetch pass the offline switch and the broker's network
+        // policy; provider keys come from the vault for `process:web`.
+        let web = Arc::new(WebServices::open(
+            &paths,
+            Arc::clone(&broker),
+            Arc::clone(models.offline()),
+            Arc::clone(&vault),
+            Arc::new(events.clone()),
+        )?);
         let (sessions, session_recovery) = open_sessions(&paths, &events)?;
         let context = ContextService::open(&paths, Arc::new(events.clone()))
             .map_err(|error| ServicesError::new("context", error.code(), error.to_string()))?;
+        // Skills are rescanned on every request; enablement lives in
+        // `private_config/skills.toml` and changes emit `extension.*` events.
+        let skills = Arc::new(SkillService::new(paths.clone(), Arc::new(events.clone())));
         let private_sessions = Arc::new(
             aidex_native_sessions::SessionStore::open(
                 paths.sessions().join("native.sqlite3"),
@@ -136,12 +159,41 @@ impl Services {
             )
             .map_err(|e| ServicesError::new("native", ServiceErrorCode::Unavailable, e))?,
         );
-        let native = aidex_harness::NativeEngine::new(
+        // Installed plugin bundles; `extension.*` events go to the drive log.
+        let plugins = Arc::new(
+            aidex_plugins::PluginStore::open(&paths)
+                .map_err(|error| ServicesError::new("plugins", error.code(), error.to_string()))?
+                .with_events(Arc::new(events.clone())),
+        );
+        // MCP servers are optional: `mcp.*` reports why they are unavailable.
+        let mcp = mcp::open_mcp(
+            &paths,
+            &broker,
+            &vault,
+            &workspaces,
+            models.offline(),
+            Arc::new(events.clone()),
+            &shutdown,
+        );
+        // Native runs reach skills, web search and fetch, and MCP tools through
+        // these hooks; network tools see the drive's policy and offline switch.
+        let extensions = Arc::new(DaemonExtensions {
+            skills: Arc::clone(&skills),
+            plugins: Arc::clone(&plugins),
+            workspaces: Arc::clone(&workspaces),
+            web: Arc::clone(&web),
+            mcp: mcp.as_ref().ok().cloned(),
+            broker: Arc::clone(&broker),
+            offline: Arc::clone(models.offline()),
+            events: Arc::new(events.clone()),
+        });
+        let native = aidex_harness::NativeEngine::with_extensions(
             private_sessions,
             models.registry().clone(),
             workspaces.clone(),
             Arc::new(events.clone()),
             runtime.join("native-processes"),
+            extensions,
         );
         let inference = inference::open_inference(&paths, &models)?;
         // External runtimes are optional: the daemon starts without them and
@@ -160,12 +212,16 @@ impl Services {
             workspaces,
             broker,
             models,
+            web,
             sessions: Arc::new(sessions),
             session_recovery,
             context: Arc::new(context),
+            skills,
             native,
             inference,
+            plugins,
             runtime,
+            mcp,
             updates,
             update_recovery: Mutex::new(None),
         })
@@ -221,6 +277,11 @@ impl Services {
     pub fn models(&self) -> &ModelServices {
         &self.models
     }
+
+    /// Web search and fetch settings and clients (`aidex-web`).
+    pub fn web(&self) -> &Arc<WebServices> {
+        &self.web
+    }
     /// Durable sessions, checkpoints, and resume plans (`aidex-sessions`).
     pub fn sessions(&self) -> &Arc<SessionStore> {
         &self.sessions
@@ -236,16 +297,28 @@ impl Services {
     pub fn context(&self) -> &Arc<ContextService> {
         &self.context
     }
+    /// Skill discovery, enablement, and drive skill authoring (`aidex-skills`).
+    pub fn skills(&self) -> &Arc<SkillService> {
+        &self.skills
+    }
     pub fn native(&self) -> &Arc<aidex_harness::NativeEngine> {
         &self.native
     }
     pub fn inference(&self) -> &Arc<aidex_inference::InferenceService> {
         &self.inference
     }
+    /// Installed plugin bundles, their provenance, and trust (`aidex-plugins`).
+    pub fn plugins(&self) -> &Arc<aidex_plugins::PluginStore> {
+        &self.plugins
+    }
     /// External agent runtimes (`aidex-adapters`), or why they could not be
     /// opened at startup.
     pub fn runtime(&self) -> Result<&Arc<aidex_adapters::RuntimeManager>, &str> {
         self.runtime.as_ref().map_err(String::as_str)
+    }
+    /// MCP server supervision (`aidex-mcp`), or why it could not be opened at startup.
+    pub fn mcp(&self) -> Result<&Arc<aidex_mcp::McpSupervisor>, &str> {
+        self.mcp.as_ref().map_err(String::as_str)
     }
     /// The drive's updater (`aidex-updater`), or why it is unavailable (a host without
     /// a bundle target, or an invalid built-in trust configuration).

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { CodeBlock, Composer, Dialog, Notice } from "@aidex/ui/components";
 import { DockLayout } from "@aidex/ui/desktop";
-import { BoxIcon, ChatIcon, FolderIcon, StopIcon } from "@aidex/ui/icons";
+import { BoxIcon, ChatIcon, FolderIcon, LayersIcon, StopIcon } from "@aidex/ui/icons";
 import {
   Button,
   Card,
@@ -22,6 +22,7 @@ import { useNavigation } from "../../app/providers/navigation";
 import { usePreferences } from "../../app/providers/preferences";
 import { useToast } from "../../app/providers/toast";
 import { useRpc } from "../../hooks/useRpc";
+import { useShell } from "../../layouts/shell";
 import { useProviderCatalog } from "../model-manager/catalog/ProviderCatalog";
 import {
   isExternalRuntime,
@@ -31,7 +32,22 @@ import {
 } from "../model-manager/catalog/modelKeys";
 import { LOCAL_PROVIDER_ID } from "../model-manager/catalog/providerAccounts";
 import { LocalInferenceNotice } from "../model-manager/LocalInferenceNotice";
-import { HistoryMessages, MessageContent } from "../sessions/HistoryMessages";
+import { HistoryMessages } from "../sessions/HistoryMessages";
+import { ArtifactsDialog } from "./artifacts/ArtifactsDialog";
+import { useArtifactDownload } from "./artifacts/useArtifactDownload";
+import { invokedSkillIds, invokedSkillsProblem } from "./composer/composerText";
+import type { SlashCommandId } from "./composer/slashCommands";
+import { useComposerMenu, type SlashCommandState } from "./composer/useComposerMenu";
+import { useWebSearchToggle } from "./composer/useWebSearchToggle";
+import { WebSearchToggle } from "./composer/WebSearchToggle";
+import { Transcript } from "./transcript/Transcript";
+import {
+  TranscriptProvider,
+  type ArtifactRef,
+  type TranscriptEnvironment,
+} from "./transcript/TranscriptContext";
+import { useOpenLink } from "./transcript/useOpenLink";
+import { useConversationExtensions } from "./useConversationExtensions";
 import { ConversationModelPicker } from "./ConversationModelPicker";
 import { describeCurrentModel } from "./currentModel";
 import { ModelStateNotice } from "./ModelStateNotice";
@@ -98,11 +114,19 @@ export function ConversationPage({
   const createdConfig = useRef<SessionConfig | null>(null);
   const contextTouched = useRef(!!preferences.pendingWorkspaceId);
   const permissionTouched = useRef(false);
-  const pendingCommand = useRef<{ content: string; id: string } | null>(null);
+  // A retried send reuses its command id only when content, skills, and web search are unchanged.
+  const pendingCommand = useRef<{ request: string; id: string } | null>(null);
   const autoSent = useRef(false);
   const endRef = useRef<HTMLDivElement>(null);
   const following = useRef(true);
   const [arrivalPrompt] = useState(() => preferences.pendingPrompt);
+  const shell = useShell();
+  const composerRef = useRef<HTMLFormElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const webSearch = useWebSearchToggle(route.id);
+  const [artifactDialog, setArtifactDialog] = useState<{ artifact: ArtifactRef | null } | null>(null);
+  const openLink = useOpenLink();
+  const downloadArtifact = useArtifactDownload();
 
   const resolved =
     route.id && !session.data
@@ -150,6 +174,12 @@ export function ConversationPage({
     !!latestRun &&
     ["pending", "running", "waiting_approval"].includes(latestRun.status);
   const lastMessage = session.data?.messages.at(-1);
+  const external = target?.kind === "runtime";
+  const extensions = useConversationExtensions({
+    sessionId: route.id,
+    workspaceId: project?.id,
+    messages: session.data?.messages,
+  });
   useEffect(() => {
     const container = endRef.current?.closest("main");
     if (!container) return;
@@ -278,7 +308,14 @@ export function ConversationPage({
       setBusy(false);
     }
   };
-  const submit = async (text: string) => {
+  /**
+   * Sends `text`. A composer send also carries the attachment and the `$skill` mentions, and clears the
+   * draft; `mode` switches the conversation first (Implement switches a plan to Agent).
+   */
+  const submit = async (
+    text: string,
+    { composer = true, mode: nextMode }: { composer?: boolean; mode?: ConversationMode } = {},
+  ) => {
     if (busy || running || !text.trim()) return;
     setBusy(true);
     setError(undefined);
@@ -291,9 +328,17 @@ export function ConversationPage({
               ? `${modelName} is still loading. Send when it is ready.`
               : `${modelName} is not available right now. Choose another model.`,
         );
-      const config = configuration();
+      const config = configuration(nextMode ? { mode: nextMode } : {});
+      const native = !isExternalRuntime(config.runtime_id);
       let content = text.trim();
-      if (attachmentPath.trim()) {
+      // External runtimes find their own skills and tools; they get the text unchanged.
+      const skills =
+        composer && native ? invokedSkillIds(content, extensions.skills, composerMenu.picked) : [];
+      const skillsProblem = invokedSkillsProblem(skills);
+      if (skillsProblem) throw new Error(skillsProblem);
+      const searchWeb =
+        native && config.mode === "chat" && webSearch.on && extensions.web.available;
+      if (composer && attachmentPath.trim()) {
         if (!workspaceId)
           throw new Error("Choose a project before attaching a project file.");
         content += `\n\nAttached project file ${attachmentPath.trim()}:\n${await readAttachment(workspaceId, attachmentPath.trim())}`;
@@ -304,6 +349,7 @@ export function ConversationPage({
         id = created.id;
         createdId.current = id;
         createdConfig.current = config;
+        webSearch.adopt(id);
       } else if (!route.id) {
         // Created earlier, but the first send failed: apply any model, mode, or project change since.
         if (
@@ -318,26 +364,34 @@ export function ConversationPage({
         }
       } else if (
         session.data &&
-        session.data.workspace_id !== config.workspace_id
+        (session.data.workspace_id !== config.workspace_id ||
+          session.data.mode !== config.mode)
       ) {
         await call("agent.configuration.set", {
           session_id: id,
           configuration: config,
         });
       }
+      const request = JSON.stringify({ content, skills, searchWeb });
       const command =
-        pendingCommand.current?.content === content
+        pendingCommand.current?.request === request
           ? pendingCommand.current
-          : { content, id: crypto.randomUUID() };
+          : { request, id: crypto.randomUUID() };
       pendingCommand.current = command;
       await call(config.mode === "agent" ? "agent.start" : "message.send", {
         session_id: id,
         content,
         command_id: command.id,
+        ...(skills.length ? { skills } : {}),
+        ...(searchWeb ? { web_search: true } : {}),
       });
       pendingCommand.current = null;
-      setDraft("");
-      setAttachmentPath("");
+      if (nextMode) setMode(nextMode);
+      if (composer) {
+        setDraft("");
+        setAttachmentPath("");
+        composerMenu.clearPicked();
+      }
       replace({ page: config.mode === "agent" ? "agent" : "chat", id });
       session.refetch();
     } catch (caught) {
@@ -501,13 +555,93 @@ export function ConversationPage({
           : resolved.model?.capabilities.tool_calls !== "native",
     },
   ];
+  const modeDisabled = (value: ConversationMode) =>
+    !!modeOptions.find((option) => option.value === value)?.disabled;
+  const slashCommandStates: SlashCommandState[] = [
+    { id: "chat", disabled: modeDisabled("chat") },
+    { id: "plan", disabled: modeDisabled("plan") },
+    { id: "agent", disabled: modeDisabled("agent") },
+    {
+      id: "web",
+      disabled: external || !extensions.web.available || mode !== "chat",
+      description: external
+        ? "This agent runtime uses its own tools"
+        : !extensions.web.available
+          ? (extensions.web.reason ?? "Set up web search in Extensions → Web")
+          : mode !== "chat"
+            ? "Plan and Agent modes search the web while it is on in Extensions → Web"
+            : webSearch.on
+              ? "Turn web search off for this conversation"
+              : "Turn web search on for this conversation",
+    },
+    { id: "new" },
+  ];
+  const runSlashCommand = (id: SlashCommandId) => {
+    if (id === "new") shell.startNewSession();
+    else if (id === "web") webSearch.set(!webSearch.on);
+    else if (id !== mode) void changeMode(id);
+  };
+  const composerMenu = useComposerMenu({
+    draft,
+    setDraft,
+    textareaRef,
+    anchorRef: composerRef,
+    skills: extensions.skills,
+    skillsLoading: extensions.skillsLoading,
+    skillsEnabled: !external,
+    commands: slashCommandStates,
+    onCommand: runSlashCommand,
+    onManageSkills: () => navigate({ page: "extensions", tab: "skills" }),
+    onOpen: (kind) => {
+      extensions.refetchSkills();
+      if (kind === "command") extensions.refetchWeb();
+    },
+    disabled: busy || running,
+  });
+  /** Plan card "Implement": switch this conversation to Agent and send the plan. */
+  const implementPlan = (markdown: string) => {
+    if (!workspaceId) {
+      setError("Choose a project before starting Agent mode.");
+      return;
+    }
+    if (modeDisabled("agent")) {
+      setError(`${modelName} cannot use agent tools. Choose a model with tool calling to implement the plan.`);
+      return;
+    }
+    void submit(`Implement this plan:\n\n${markdown}`, { composer: false, mode: "agent" });
+  };
+  /** Plan card "Implement in a new chat": a new Agent chat in this project sends the plan on arrival. */
+  const implementPlanInNewChat = (markdown: string) => {
+    preferences.setPendingPrompt(`Implement this plan:\n\n${markdown}`);
+    preferences.setPendingWorkspaceId(workspaceId || null);
+    navigate({ page: "agent" });
+  };
+  const transcript: TranscriptEnvironment = {
+    scope: { session_id: session.data?.id ?? route.id },
+    openLink,
+    openArtifact: (artifact) => setArtifactDialog({ artifact }),
+    downloadArtifact,
+    planStatus: extensions.planStatus,
+    planActions: {
+      implement: implementPlan,
+      implementInNewChat: implementPlanInNewChat,
+      disabled: busy || running,
+    },
+    skill: extensions.skill,
+  };
   const dock = (
     <Composer
+      ref={composerRef}
+      textareaRef={textareaRef}
       size="compact"
       autoFocus
       label="Message"
       value={draft}
       onValueChange={setDraft}
+      onSelectionChange={composerMenu.onSelectionChange}
+      onKeyDown={composerMenu.onKeyDown}
+      suggestions={composerMenu.suggestions}
+      menu={composerMenu.menu}
       onSubmit={
         resolved.state === "ready" ? (text) => void submit(text) : undefined
       }
@@ -550,6 +684,15 @@ export function ConversationPage({
             disabled={busy || running}
             onClick={() => setPopup("project")}
           />
+          {!external && (
+            <WebSearchToggle
+              availability={extensions.web}
+              mode={mode}
+              on={webSearch.on}
+              onChange={webSearch.set}
+              disabled={busy || running}
+            />
+          )}
           <Text as="span" tone="muted">
             {modeLabels[mode]}
             {project ? ` · ${project.name}` : ""}
@@ -583,12 +726,21 @@ export function ConversationPage({
         <header className={styles.header}>
           <h1 tabIndex={-1}>{session.data?.title || "New chat"}</h1>
           {route.id && (
-            <IconButton
-              size="sm"
-              label="Execution details"
-              icon={<BoxIcon />}
-              onClick={() => navigate({ page: "execution", id: route.id })}
-            />
+            <Stack direction="row" gap={1}>
+              <IconButton
+                size="sm"
+                label="Artifacts"
+                icon={<LayersIcon />}
+                aria-haspopup="dialog"
+                onClick={() => setArtifactDialog({ artifact: null })}
+              />
+              <IconButton
+                size="sm"
+                label="Execution details"
+                icon={<BoxIcon />}
+                onClick={() => navigate({ page: "execution", id: route.id })}
+              />
+            </Stack>
           )}
         </header>
         {(error || session.error || catalog.error || localCatalog.error) && (
@@ -626,23 +778,14 @@ export function ConversationPage({
             </Text>
           </div>
         )}
-        <Stack gap={5} role="log" aria-label="Conversation">
-          {session.data?.messages
-            .filter(
-              (m) =>
-                m.role !== "system" &&
-                (m.role !== "assistant" ||
-                  !!m.content ||
-                  !!m.tool_calls.length),
-            )
-            .map((message) => (
-              <MessageContent
-                key={message.original_index}
-                message={message}
-                scope={{ session_id: session.data!.id }}
-              />
-            ))}
-        </Stack>
+        <TranscriptProvider value={transcript}>
+          <Stack gap={5} role="log" aria-label="Conversation">
+            <Transcript
+              messages={session.data?.messages ?? []}
+              options={{ running, complete: true }}
+            />
+          </Stack>
+        </TranscriptProvider>
         {session.data?.messages_truncated && (
           <details>
             <summary>Earlier messages</summary>
@@ -808,6 +951,16 @@ export function ConversationPage({
           Add a workspace
         </Button>
       </Dialog>
+      {route.id && (
+        <ArtifactsDialog
+          open={artifactDialog !== null}
+          sessionId={route.id}
+          artifact={artifactDialog?.artifact ?? null}
+          onClose={() => setArtifactDialog(null)}
+          onOpenLink={openLink}
+          onDownload={downloadArtifact}
+        />
+      )}
     </DockLayout>
   );
 }

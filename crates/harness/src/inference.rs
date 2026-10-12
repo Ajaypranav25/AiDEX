@@ -127,6 +127,19 @@ impl NativeEngine {
             cancel,
         )
     }
+    /// The configured model, checked against its provider's catalog (once per
+    /// turn, before the request is built, so tools match its capabilities).
+    pub(crate) fn primary_model(
+        &self,
+        config: &SessionConfig,
+    ) -> Result<(Arc<dyn ModelProvider>, ModelDescriptor), String> {
+        let target = ModelRef::new(
+            aidex_providers::ProviderId::new(&config.provider_id).map_err(|e| e.to_string())?,
+            aidex_providers::ModelId::new(&config.model_id).map_err(|e| e.to_string())?,
+        );
+        self.validate_model(&target, config)
+            .map_err(|e| e.to_string())
+    }
     pub(crate) fn infer(
         &self,
         request: &ChatRequest,
@@ -134,14 +147,13 @@ impl NativeEngine {
         config: &SessionConfig,
         index: Option<usize>,
         cancel: &CancelToken,
+        primary: (Arc<dyn ModelProvider>, ModelDescriptor),
     ) -> Result<ChatResponse, String> {
         let target = ModelRef::new(
             aidex_providers::ProviderId::new(&config.provider_id).map_err(|e| e.to_string())?,
             request.model.clone(),
         );
-        let (provider, model) = self
-            .validate_model(&target, config)
-            .map_err(|e| e.to_string())?;
+        let (provider, model) = primary;
         self.broker.authorize_native(
             &run.session_id,
             config,
@@ -187,6 +199,12 @@ impl NativeEngine {
                 );
                 let mut fallback_request = request.clone();
                 fallback_request.model = target_fallback.model_id;
+                // A fallback without native tool calling answers without tools
+                // (Agent mode already refused such a fallback above).
+                if fallback_model.capabilities.tool_calls != ToolCallSupport::Native {
+                    fallback_request.tools.clear();
+                    fallback_request.tool_choice = aidex_providers::ToolChoice::None;
+                }
                 let fallback_request = bound_request(&fallback_request, &fallback_model, config)
                     .map_err(|e| e.to_string())?;
                 self.attempt(

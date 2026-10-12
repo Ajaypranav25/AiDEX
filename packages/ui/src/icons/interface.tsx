@@ -144,3 +144,13 @@ export const StarIcon = createIcon("StarIcon", <path d={STAR_PATH} />);
 
 /** Filled star marking a favorite. */
 export const StarFilledIcon = createIcon("StarFilledIcon", <path d={STAR_PATH} fill="currentColor" />);
+
+/** Picture placeholder, e.g. for an image that is linked rather than loaded. */
+export const ImageIcon = createIcon(
+  "ImageIcon",
+  <>
+    <rect x="3.5" y="4.5" width="17" height="15" rx="2.5" />
+    <circle cx="9" cy="10" r="1.75" />
+    <path d="m20.5 15.5-4.25-4.25a1.5 1.5 0 0 0-2.12 0L5.5 19.5" />
+  </>,
+);

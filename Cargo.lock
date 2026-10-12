@@ -134,6 +134,7 @@ dependencies = [
  "aidex-providers",
  "aidex-router",
  "aidex-sessions",
+ "aidex-skills",
  "aidex-updater",
  "aidex-vault",
  "aidex-workspace",
@@ -214,6 +215,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+ "url",
 ]
 
 [[package]]
@@ -258,6 +260,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "aidex-mcp"
+version = "0.1.0"
+dependencies = [
+ "aidex-core",
+ "aidex-drive",
+ "aidex-events",
+ "aidex-sandbox",
+ "aidex-vault",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+ "ureq",
+ "zeroize",
+]
+
+[[package]]
 name = "aidex-native-sessions"
 version = "0.1.0"
 dependencies = [
@@ -287,6 +306,23 @@ dependencies = [
  "serde_json",
  "tempfile",
  "toml",
+]
+
+[[package]]
+name = "aidex-plugins"
+version = "0.1.0"
+dependencies = [
+ "aidex-core",
+ "aidex-drive",
+ "aidex-events",
+ "flate2",
+ "getrandom 0.3.4",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "toml",
+ "zip 7.2.0",
 ]
 
 [[package]]
@@ -374,6 +410,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "aidex-skills"
+version = "0.1.0"
+dependencies = [
+ "aidex-core",
+ "aidex-drive",
+ "aidex-events",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+]
+
+[[package]]
 name = "aidex-storage"
 version = "0.1.0"
 dependencies = [
@@ -441,6 +490,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "aidex-web"
+version = "0.1.0"
+dependencies = [
+ "aidex-core",
+ "aidex-drive",
+ "getrandom 0.3.4",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "toml",
+ "ureq",
+ "url",
+ "zeroize",
+]
+
+[[package]]
 name = "aidex-workspace"
 version = "0.1.0"
 dependencies = [
@@ -470,22 +535,28 @@ dependencies = [
  "aidex-harness",
  "aidex-host",
  "aidex-inference",
+ "aidex-mcp",
  "aidex-native-sessions",
+ "aidex-plugins",
  "aidex-policy",
  "aidex-preferences",
  "aidex-providers",
  "aidex-router",
  "aidex-sandbox",
  "aidex-sessions",
+ "aidex-skills",
  "aidex-tools",
  "aidex-updater",
  "aidex-vault",
+ "aidex-web",
  "aidex-workspace",
+ "base64 0.22.1",
  "getrandom 0.3.4",
  "rusqlite",
  "serde",
  "serde_json",
  "tempfile",
+ "url",
 ]
 
 [[package]]

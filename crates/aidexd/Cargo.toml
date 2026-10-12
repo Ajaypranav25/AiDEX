@@ -9,13 +9,16 @@ license.workspace = true
 aidex-broker = { path = "../broker" }
 aidex-context = { path = "../context" }
 aidex-native-sessions = { path = "../native-sessions" }
+aidex-plugins = { path = "../plugins" }
 aidex-adapters = { path = "../adapters" }
 aidex-sandbox = { path = "../sandbox" }
 aidex-preferences = { path = "../preferences" }
 aidex-inference = { path = "../inference" }
+aidex-mcp = { path = "../mcp" }
 aidex-auth = { path = "../auth" }
 aidex-core = { path = "../core" }
 aidex-sessions = { path = "../sessions" }
+aidex-skills = { path = "../skills" }
 aidex-harness = { path = "../harness" }
 aidex-drive = { path = "../drive" }
 aidex-events = { path = "../events" }
@@ -26,10 +29,13 @@ aidex-router = { path = "../router" }
 aidex-tools = { path = "../tools" }
 aidex-updater = { path = "../updater" }
 aidex-vault = { path = "../vault" }
+aidex-web = { path = "../web" }
 aidex-workspace = { path = "../workspace" }
+base64 = "0.22"
 getrandom = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+url = "2"
 
 [dev-dependencies]
 # Signed test bundles (keys generated at run time).

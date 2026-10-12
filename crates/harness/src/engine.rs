@@ -1,4 +1,8 @@
-use crate::broker::{Broker, Prepared};
+use crate::{
+    broker::{Broker, Prepared},
+    extensions::{Extensions, NoExtensions},
+    native_tools::{ExtensionPlan, McpTarget},
+};
 use aidex_core::{CancelToken, EntityId, WorkspacePath};
 use aidex_events::{EventKind, EventScope, EventSink};
 use aidex_native_sessions::*;
@@ -6,9 +10,37 @@ use aidex_providers::ProviderRegistry;
 use aidex_workspace::WorkspaceRegistry;
 use std::{
     collections::HashMap,
+    panic::{AssertUnwindSafe, catch_unwind},
     path::PathBuf,
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
+/// The error of a run whose thread panicked.
+const RUN_CRASHED: &str = "native run crashed unexpectedly";
+/// Lock one of the engine's mutexes even when a panicking thread poisoned it.
+/// Each critical section is a single lookup, insert, or remove (`operations`
+/// guards no data at all), so the contents stay consistent across a panic,
+/// and one crashed run must not refuse every later one.
+pub(crate) fn relock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(PoisonError::into_inner)
+}
+/// A call waiting for the user's approval: a workspace tool plan or a
+/// harness-level (web, MCP) plan.
+pub(crate) enum PendingPlan {
+    Tool(Box<Prepared>),
+    Extension(Box<ExtensionPlan>),
+}
+impl PendingPlan {
+    fn call_id(&self) -> &EntityId {
+        match self {
+            Self::Tool(prepared) => prepared.plan.call_id(),
+            Self::Extension(plan) => &plan.call_id,
+        }
+    }
+}
+/// Per-request options of [`NativeEngine::start_with`].
+pub use aidex_native_sessions::RunOptions;
+/// Most skills one message may invoke.
+pub const MAX_INVOKED_SKILLS: usize = 8;
 pub(crate) struct LiveRun {
     pub provider: CancelToken,
     pub tool: aidex_tools::CancelToken,
@@ -21,9 +53,15 @@ pub struct NativeEngine {
     pub(crate) broker: Broker,
     pub(crate) events: Arc<dyn EventSink>,
     pub(crate) live: Mutex<HashMap<String, LiveRun>>,
-    pub(crate) pending: Mutex<HashMap<String, Prepared>>,
+    pub(crate) pending: Mutex<HashMap<String, PendingPlan>>,
     pub(crate) runtimes: Mutex<HashMap<String, Arc<dyn RuntimeExecutor>>>,
     pub(crate) operations: Mutex<()>,
+    pub(crate) extensions: Arc<dyn Extensions>,
+    /// Random per-engine key for untrusted-data delimiter nonces.
+    pub(crate) nonce_key: String,
+    /// The MCP tools each run's latest turn offered, which its calls resolve
+    /// against (names shift when other servers come or go).
+    pub(crate) offered_mcp: Mutex<HashMap<String, Vec<McpTarget>>>,
 }
 impl NativeEngine {
     pub fn new(
@@ -33,16 +71,46 @@ impl NativeEngine {
         events: Arc<dyn EventSink>,
         scratch: PathBuf,
     ) -> Arc<Self> {
+        Self::with_extensions(
+            store,
+            registry,
+            workspaces,
+            events,
+            scratch,
+            Arc::new(NoExtensions),
+        )
+    }
+    /// [`new`](Self::new) with skills, web, and MCP services from the embedder.
+    pub fn with_extensions(
+        store: Arc<SessionStore>,
+        registry: Arc<ProviderRegistry>,
+        workspaces: Arc<WorkspaceRegistry>,
+        events: Arc<dyn EventSink>,
+        scratch: PathBuf,
+        extensions: Arc<dyn Extensions>,
+    ) -> Arc<Self> {
+        // The nonce key only needs to be unpredictable to content authors; a
+        // generated id carries 80 random bits.
+        let nonce_key = EntityId::generate("nonce")
+            .map(|id| id.to_string())
+            .unwrap_or_else(|_| format!("{:?}", std::time::SystemTime::now()));
         Arc::new(Self {
             store,
             registry,
-            broker: Broker::new(workspaces, scratch),
+            broker: Broker::new(workspaces, scratch, Arc::clone(&extensions)),
             events,
             live: Mutex::new(HashMap::new()),
             pending: Mutex::new(HashMap::new()),
             runtimes: Mutex::new(HashMap::new()),
             operations: Mutex::new(()),
+            extensions,
+            nonce_key,
+            offered_mcp: Mutex::new(HashMap::new()),
         })
+    }
+    /// The skills, web, and MCP services this engine was built with.
+    pub fn extensions(&self) -> &Arc<dyn Extensions> {
+        &self.extensions
     }
     pub fn store(&self) -> &Arc<SessionStore> {
         &self.store
@@ -63,10 +131,21 @@ impl NativeEngine {
         command: &str,
         parent: Option<String>,
     ) -> Result<Run, String> {
-        let _guard = self
-            .operations
-            .lock()
-            .map_err(|_| "native operations poisoned")?;
+        self.start_with(session, content, command, parent, RunOptions::default())
+    }
+    /// [`start`](Self::start) with invoked skills and the per-request web
+    /// switch. Skill errors start with `skill_unavailable:` and web errors
+    /// with `web_unavailable:`; external runtimes receive the text unchanged
+    /// and ignore both options.
+    pub fn start_with(
+        self: &Arc<Self>,
+        session: &str,
+        content: &str,
+        command: &str,
+        parent: Option<String>,
+        options: RunOptions,
+    ) -> Result<Run, String> {
+        let _guard = relock(&self.operations);
         let s = self.store.get(session)?;
         if s.configuration.mode == Mode::Agent && s.configuration.workspace_id.is_none() {
             return Err("agent mode requires a selected workspace".into());
@@ -86,6 +165,11 @@ impl NativeEngine {
             }
         }
         aidex_providers::ModelId::new(&s.configuration.model_id).map_err(|e| e.to_string())?;
+        let options = if external || parent.is_some() {
+            RunOptions::default()
+        } else {
+            self.check_options(&s.configuration, options)?
+        };
         if let Some(parent) = &parent {
             self.broker.authorize_native(
                 session,
@@ -118,7 +202,9 @@ impl NativeEngine {
                 return Err("child depth limit reached".into());
             }
         }
-        let r = self.store.begin(session, content, command, parent)?;
+        let r = self
+            .store
+            .begin_with(session, content, command, parent, &options)?;
         if external && r.status == RunStatus::Pending {
             let request = self.runtime_request(&r, RuntimeOperation::Start)?;
             if let Err(error) = self.runtime_for(&s.configuration)?.validate(&request) {
@@ -130,6 +216,48 @@ impl NativeEngine {
             self.launch(&r)?;
         }
         Ok(r)
+    }
+    /// Deduplicate and validate invoked skills and the web switch.
+    fn check_options(
+        &self,
+        config: &SessionConfig,
+        options: RunOptions,
+    ) -> Result<RunOptions, String> {
+        let mut skills: Vec<String> = Vec::new();
+        for id in options.skills {
+            let id = id.trim().to_owned();
+            if !id.is_empty() && !skills.contains(&id) {
+                skills.push(id);
+            }
+        }
+        if skills.len() > MAX_INVOKED_SKILLS {
+            return Err(format!(
+                "skill_unavailable: at most {MAX_INVOKED_SKILLS} skills can be invoked at once"
+            ));
+        }
+        if !skills.is_empty() {
+            self.extensions
+                .invoked_skills(config.workspace_id.as_deref(), &skills)
+                .map_err(|error| match error {
+                    crate::extensions::ExtensionError::SkillUnavailable(message) => {
+                        format!("skill_unavailable: {message}")
+                    }
+                    other => format!("skill_unavailable: {other}"),
+                })?;
+        }
+        if options.web_search && config.mode == Mode::Chat {
+            let web = self.extensions.web();
+            if !web.search_ready() {
+                return Err(match web.problem {
+                    Some(problem) if web.enabled => format!("web_unavailable: {problem}"),
+                    _ => "web_unavailable: web search is turned off in settings".into(),
+                });
+            }
+        }
+        Ok(RunOptions {
+            skills,
+            web_search: options.web_search,
+        })
     }
     pub(crate) fn launch(self: &Arc<Self>, run: &Run) -> Result<(), String> {
         self.launch_with(run, None, RuntimeOperation::Start)
@@ -145,16 +273,13 @@ impl NativeEngine {
         self: &Arc<Self>,
         run: &Run,
         prelude: Option<(
-            Prepared,
+            PendingPlan,
             aidex_providers::ToolCall,
             aidex_tools::PermitIssuer,
         )>,
         operation: RuntimeOperation,
     ) -> Result<(), String> {
-        let mut live = self
-            .live
-            .lock()
-            .map_err(|_| "native run registry poisoned")?;
+        let mut live = relock(&self.live);
         if live.get(&run.id).is_some_and(|r| r.executing) {
             return Ok(());
         }
@@ -162,10 +287,10 @@ impl NativeEngine {
             .get(&run.id)
             .map(|r| r.provider.clone())
             .unwrap_or_default();
-        let tool = prelude
-            .as_ref()
-            .map(|(prepared, _, _)| prepared.context.cancel.clone())
-            .unwrap_or_default();
+        let tool = match &prelude {
+            Some((PendingPlan::Tool(prepared), _, _)) => prepared.context.cancel.clone(),
+            _ => Default::default(),
+        };
         let generation = aidex_native_sessions::id("worker")?;
         live.insert(
             run.id.clone(),
@@ -182,9 +307,18 @@ impl NativeEngine {
         std::thread::Builder::new()
             .name("aidex-native-run".into())
             .spawn(move || {
-                let result = (|| {
-                    if let Some((prepared, call, issuer)) = prelude {
-                        engine.execute(&run.id, &call, &prepared, issuer)?;
+                // Last resort: a panic anywhere in the run (a provider, an
+                // extension, a runtime) fails the run instead of unwinding
+                // past the bookkeeping below and leaving it running forever.
+                let result = catch_unwind(AssertUnwindSafe(|| {
+                    match prelude {
+                        Some((PendingPlan::Tool(prepared), call, issuer)) => {
+                            engine.execute(&run.id, &call, &prepared, issuer)?;
+                        }
+                        Some((PendingPlan::Extension(plan), call, _)) => {
+                            engine.execute_extension(&run.id, &call, &plan, &tool)?;
+                        }
+                        None => {}
                     }
                     let session = engine.store.get(&run.session_id)?;
                     if session
@@ -197,20 +331,25 @@ impl NativeEngine {
                     } else {
                         engine.pump(&run.id, &token, &tool)
                     }
-                })();
+                }))
+                .unwrap_or_else(|_| Err(RUN_CRASHED.into()));
                 if let Err(error) = result {
                     let status = if token.is_cancelled() {
                         RunStatus::Cancelled
                     } else {
                         RunStatus::Failed
                     };
-                    let _ = engine.transition(
-                        &run.id,
-                        status,
-                        Some(aidex_events::redact_text(&error).into_owned()),
-                    );
+                    // Settling (the store, the event sink) must not skip the
+                    // registry cleanup either.
+                    let _ = catch_unwind(AssertUnwindSafe(|| {
+                        engine.transition(
+                            &run.id,
+                            status,
+                            Some(aidex_events::redact_text(&error).into_owned()),
+                        )
+                    }));
                 }
-                let mut live = engine.live.lock().unwrap_or_else(|p| p.into_inner());
+                let mut live = relock(&engine.live);
                 if live
                     .get(&run.id)
                     .is_some_and(|r| r.generation == generation)
@@ -281,6 +420,9 @@ impl NativeEngine {
             }
             Ok(r.clone())
         })?;
+        if !result.status.active() {
+            self.forget_offer(id);
+        }
         let task_id = EntityId::new(id).map_err(|e| e.to_string())?;
         let event = match result.status {
             RunStatus::Running => Some(EventKind::TaskStarted { task_id }),
@@ -323,10 +465,7 @@ impl NativeEngine {
         if command.is_empty() || command.len() > 128 {
             return Err("approval command id is required".into());
         }
-        let guard = self
-            .operations
-            .lock()
-            .map_err(|_| "native operations poisoned")?;
+        let guard = relock(&self.operations);
         let approval = self
             .approvals(None)?
             .into_iter()
@@ -350,10 +489,7 @@ impl NativeEngine {
         if approval.runtime_id.is_some() {
             return self.respond_runtime(&approval, approved);
         }
-        let prepared = self
-            .pending
-            .lock()
-            .map_err(|_| "pending plans poisoned")?
+        let prepared = relock(&self.pending)
             .remove(id)
             .ok_or("approval interrupted by daemon restart; explicitly resume run to replan")?;
         let call = run
@@ -406,7 +542,7 @@ impl NativeEngine {
             self.emit(
                 &run.session_id,
                 EventKind::ToolDenied {
-                    call_id: prepared.plan.call_id().clone(),
+                    call_id: prepared.call_id().clone(),
                     reason: "user denied native tool".into(),
                 },
             );
@@ -422,12 +558,7 @@ impl NativeEngine {
         if !r.status.active() {
             return Ok(r);
         }
-        if let Some(live) = self
-            .live
-            .lock()
-            .map_err(|_| "native run registry poisoned")?
-            .get(id)
-        {
+        if let Some(live) = relock(&self.live).get(id) {
             live.provider.cancel();
             live.tool.cancel();
         }
@@ -444,10 +575,7 @@ impl NativeEngine {
         self.transition(id, RunStatus::Cancelled, None)
     }
     pub fn resume(self: &Arc<Self>, id: &str) -> Result<Run, String> {
-        let guard = self
-            .operations
-            .lock()
-            .map_err(|_| "native operations poisoned")?;
+        let guard = relock(&self.operations);
         let r = self.store.run(id)?;
         let configuration = self.store.get(&r.session_id)?.configuration;
         let external = configuration
@@ -469,13 +597,7 @@ impl NativeEngine {
         ) {
             return Err("only an interrupted run can resume".into());
         }
-        if self
-            .live
-            .lock()
-            .map_err(|_| "native run registry poisoned")?
-            .get(id)
-            .is_some_and(|r| r.executing)
-        {
+        if relock(&self.live).get(id).is_some_and(|r| r.executing) {
             return Err("run is still executing".into());
         }
         self.store.update(&r.session_id, |s| {
@@ -616,7 +738,7 @@ impl NativeEngine {
         Ok(())
     }
     pub fn shutdown(&self) {
-        for r in self.live.lock().unwrap_or_else(|p| p.into_inner()).values() {
+        for r in relock(&self.live).values() {
             r.provider.cancel();
             r.tool.cancel();
         }
@@ -634,7 +756,7 @@ impl NativeEngine {
                 }
             }
         }
-        for r in self.live.lock().unwrap_or_else(|p| p.into_inner()).values() {
+        for r in relock(&self.live).values() {
             r.provider.cancel();
             r.tool.cancel();
         }

@@ -106,6 +106,31 @@ pub struct Run {
     pub model_used: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime_ref: Option<serde_json::Value>,
+    /// Skill ids the user invoked for this run (`<scope>:<name>`). `Run` has no
+    /// `deny_unknown_fields`, so daemons that predate the field ignore it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skills: Vec<String>,
+    /// The request turned on web tools for this run (Chat mode); per run, never
+    /// part of the session configuration.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub web_search: bool,
+    /// Index of the run's user message in the session history (root runs).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_index: Option<usize>,
+}
+/// Per-request options of a new run. Nothing here is persisted in the
+/// session configuration.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct RunOptions {
+    /// Invoked skill ids, already validated by the caller.
+    pub skills: Vec<String>,
+    /// Offer web tools in Chat mode for this run.
+    pub web_search: bool,
+}
+impl RunOptions {
+    pub fn is_empty(&self) -> bool {
+        self.skills.is_empty() && !self.web_search
+    }
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Approval {

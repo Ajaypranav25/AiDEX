@@ -1,9 +1,10 @@
 "use client";
 
-import type { FormEvent, KeyboardEvent, MouseEvent, ReactNode, Ref } from "react";
+import type { FormEvent, KeyboardEvent, MouseEvent, ReactNode, Ref, SyntheticEvent } from "react";
 import { ArrowUpIcon, PaperclipIcon } from "../icons/actions";
 import { IconButton } from "../primitives/IconButton";
 import { cx } from "../utils/cx";
+import { commandMenuFieldProps, type CommandMenuFieldState } from "./CommandMenu/model";
 import styles from "./Composer.module.css";
 
 export type ComposerProps = {
@@ -21,6 +22,19 @@ export type ComposerProps = {
   disabled?: boolean;
   autoFocus?: boolean;
   textareaRef?: Ref<HTMLTextAreaElement>;
+  /** The composer surface; pass it as a `CommandMenu` `anchorRef` so the menu sits on it and spans its width. */
+  ref?: Ref<HTMLFormElement>;
+  /**
+   * Runs before the composer's own key handling; call `event.preventDefault()` to stop Enter from
+   * sending. An open `CommandMenu` handles its keys before this runs.
+   */
+  onKeyDown?: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  /** Caret position (selection end) after typing, clicking, or moving it, e.g. to detect a `$` or `/` trigger. */
+  onSelectionChange?: (caret: number) => void;
+  /** Ties the field to a `CommandMenu` (`aria-controls`, `aria-activedescendant`) while focus stays in it. */
+  suggestions?: CommandMenuFieldState;
+  /** A popup for the field, typically a `CommandMenu`; it portals, so placing it here only groups the code. */
+  menu?: ReactNode;
   /** Content above the text, e.g. attached-file chips. */
   attachments?: ReactNode;
   /** Controls after the attach button, e.g. a Chat/Agent switch. */
@@ -45,6 +59,11 @@ export function Composer({
   disabled = false,
   autoFocus = false,
   textareaRef,
+  ref,
+  onKeyDown,
+  onSelectionChange,
+  suggestions,
+  menu,
   attachments,
   toolbarStart,
   toolbarEnd,
@@ -64,10 +83,15 @@ export function Composer({
 
   // Enter keeps its newline behavior unless this composer can actually send.
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (!onSubmit || disabled) return;
+    onKeyDown?.(event);
+    if (event.defaultPrevented || !onSubmit || disabled) return;
     if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
     event.preventDefault();
     submit();
+  };
+
+  const reportCaret = (event: SyntheticEvent<HTMLTextAreaElement>) => {
+    onSelectionChange?.(event.currentTarget.selectionEnd);
   };
 
   // Clicks on the padded surface around the field should still place the caret.
@@ -79,6 +103,7 @@ export function Composer({
 
   return (
     <form
+      ref={ref}
       className={cx(styles.composer, size === "compact" && styles.compact, disabled && styles.disabled, className)}
       onSubmit={handleSubmit}
       onMouseDown={focusField}
@@ -93,8 +118,13 @@ export function Composer({
         rows={size === "compact" ? 1 : 2}
         disabled={disabled}
         autoFocus={autoFocus}
-        onChange={(event) => onValueChange(event.target.value)}
+        onChange={(event) => {
+          onValueChange(event.target.value);
+          reportCaret(event);
+        }}
+        onSelect={reportCaret}
         onKeyDown={handleKeyDown}
+        {...(suggestions ? commandMenuFieldProps(suggestions) : null)}
       />
       <div className={styles.toolbar} onMouseDown={focusField}>
         <div className={styles.group}>
@@ -122,6 +152,7 @@ export function Composer({
           />
         </div>
       </div>
+      {menu}
     </form>
   );
 }
