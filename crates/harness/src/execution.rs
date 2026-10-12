@@ -2,6 +2,7 @@
 use crate::{
     NativeEngine,
     engine::{PendingPlan, relock},
+    inference::Turn,
     native_tools::{AGENT_RESULT, AGENT_SPAWN},
 };
 use aidex_core::{CancelToken, EntityId, WorkspacePath};
@@ -237,6 +238,8 @@ impl NativeEngine {
             let offer = self.offer(&s, &run, native_tools, tool_cancel);
             self.remember_offer(id, &offer);
             let messages = self.assemble(&s, &run, &offer)?;
+            let start = messages.len().saturating_sub(run.transcript.len());
+            let attachments = self.turn_attachments(&s, &run)?;
             let mut request = ChatRequest::new(
                 ModelId::new(&s.configuration.model_id).map_err(|e| e.to_string())?,
                 messages,
@@ -276,14 +279,13 @@ impl NativeEngine {
                     Ok(None)
                 }
             })?;
-            let response = self.infer(
-                &request,
-                &run,
-                &s.configuration,
-                message_index,
-                cancel,
-                primary,
-            )?;
+            let turn = Turn {
+                start,
+                nonce: self.run_nonce(&run),
+                index: message_index,
+                attachments,
+            };
+            let response = self.infer(&request, &run, &s.configuration, cancel, primary, &turn)?;
             if cancel.is_cancelled() {
                 self.transition(id, RunStatus::Cancelled, None)?;
                 return Ok(());

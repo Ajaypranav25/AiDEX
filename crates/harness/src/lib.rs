@@ -1,14 +1,17 @@
 //! Native execution through the durable store, policy, and tool broker.
+mod attachments;
 mod broker;
 mod children;
 mod engine;
 mod execution;
 mod extensions;
+mod history;
 mod inference;
 mod native_tools;
 mod prompt;
 mod runtimes;
 mod untrusted;
+pub use attachments::{ATTACHMENTS_UNSUPPORTED, CONTEXT_TOO_LARGE_FOR_RUNTIME, start_refusal};
 pub use children::ChildResult;
 mod inspect;
 mod launcher;

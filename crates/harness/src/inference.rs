@@ -1,5 +1,16 @@
 //! One selected-model attempt and at most one user-selected transient fallback.
-use crate::NativeEngine;
+//!
+//! Each attempt gets its own copy of the turn's request, prepared for the
+//! model it goes to: attachments as parts, wrapped text, or placeholders
+//! ([`crate::attachments`]), historical tool calls the request does not offer
+//! flattened to text, and empty assistant placeholders dropped
+//! ([`crate::history`]).
+use crate::{
+    NativeEngine,
+    attachments::TurnAttachments,
+    history::{drop_empty_assistants, flatten_tool_history},
+    untrusted::ensure_preamble,
+};
 use aidex_core::{CancelToken, EntityId};
 use aidex_events::EventKind;
 use aidex_native_sessions::{Mode, Run, SessionConfig};
@@ -8,9 +19,36 @@ use aidex_providers::{
     ProviderError, RegistryError, StreamEvent, ToolCallSupport,
 };
 use std::{
+    collections::HashSet,
     sync::Arc,
     time::{Duration, Instant},
 };
+
+/// What every attempt of one turn shares.
+pub(crate) struct Turn {
+    /// Index of the run transcript in the request's messages.
+    pub start: usize,
+    /// The run's delimiter nonce.
+    pub nonce: String,
+    /// History index of the assistant placeholder the reply streams into.
+    pub index: Option<usize>,
+    pub attachments: TurnAttachments,
+}
+
+/// A refusal that may come from images or PDFs of earlier messages: the
+/// attempt is repeated once without them.
+fn refused_for_size_or_content(error: &ProviderError) -> bool {
+    matches!(
+        error,
+        ProviderError::InvalidRequest(_)
+            | ProviderError::ContextOverflow { .. }
+            | ProviderError::Http {
+                status: 400 | 413,
+                ..
+            }
+    )
+}
+
 impl NativeEngine {
     fn validate_model(
         &self,
@@ -140,15 +178,67 @@ impl NativeEngine {
         self.validate_model(&target, config)
             .map_err(|e| e.to_string())
     }
+    /// `base` prepared for `model`; also whether it carries images or PDFs
+    /// of messages before the run's own one.
+    fn prepare(
+        &self,
+        base: &ChatRequest,
+        model: &ModelDescriptor,
+        turn: &Turn,
+        drop_earlier: bool,
+    ) -> (ChatRequest, bool) {
+        let mut request = base.clone();
+        let (earlier, wrapped_text) = self.apply_attachments(
+            &mut request.messages,
+            turn.start,
+            model,
+            &turn.attachments,
+            &turn.nonce,
+            drop_earlier,
+        );
+        let offered: HashSet<String> = request.tools.iter().map(|t| t.name.clone()).collect();
+        let wrapped_results =
+            flatten_tool_history(&mut request.messages, turn.start, &offered, &turn.nonce);
+        drop_empty_assistants(&mut request.messages, turn.start);
+        ensure_preamble(
+            &mut request.messages,
+            &turn.nonce,
+            !turn.attachments.is_empty(),
+            wrapped_text || wrapped_results,
+        );
+        (request, earlier)
+    }
     pub(crate) fn infer(
         &self,
         request: &ChatRequest,
         run: &Run,
         config: &SessionConfig,
-        index: Option<usize>,
         cancel: &CancelToken,
         primary: (Arc<dyn ModelProvider>, ModelDescriptor),
+        turn: &Turn,
     ) -> Result<ChatResponse, String> {
+        let index = turn.index;
+        // One model's attempt. When the provider refuses a request carrying
+        // images or PDFs of earlier messages, it is repeated once with those
+        // as placeholders, so one unreadable old file cannot block the chat.
+        let run_model = |provider: &dyn ModelProvider,
+                         model: &ModelDescriptor,
+                         base: &ChatRequest|
+         -> Result<ChatResponse, ProviderError> {
+            let (prepared, earlier) = self.prepare(base, model, turn, false);
+            let first = bound_request(&prepared, model, config)
+                .and_then(|bounded| self.attempt(provider, &bounded, run, index, cancel));
+            match first {
+                Err(error)
+                    if earlier && refused_for_size_or_content(&error) && !cancel.is_stopped() =>
+                {
+                    let (prepared, _) = self.prepare(base, model, turn, true);
+                    let bounded = bound_request(&prepared, model, config)?;
+                    self.attempt(provider, &bounded, run, index, cancel)
+                }
+                other => other,
+            }
+        };
         let target = ModelRef::new(
             aidex_providers::ProviderId::new(&config.provider_id).map_err(|e| e.to_string())?,
             request.model.clone(),
@@ -163,8 +253,7 @@ impl NativeEngine {
                 aidex_providers::Locality::Remote => aidex_policy::ModelLocality::Remote,
             }),
         )?;
-        let bounded = bound_request(request, &model, config).map_err(|e| e.to_string())?;
-        match self.attempt(provider.as_ref(), &bounded, run, index, cancel) {
+        match run_model(provider.as_ref(), &model, request) {
             Ok(response) => Ok(response),
             Err(error) => {
                 if !error.is_retryable() || cancel.is_stopped() {
@@ -205,14 +294,10 @@ impl NativeEngine {
                     fallback_request.tools.clear();
                     fallback_request.tool_choice = aidex_providers::ToolChoice::None;
                 }
-                let fallback_request = bound_request(&fallback_request, &fallback_model, config)
-                    .map_err(|e| e.to_string())?;
-                self.attempt(
+                run_model(
                     fallback_provider.as_ref(),
+                    &fallback_model,
                     &fallback_request,
-                    run,
-                    index,
-                    cancel,
                 )
                 .map_err(|e| e.to_string())
             }

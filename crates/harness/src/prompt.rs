@@ -70,7 +70,7 @@ impl NativeEngine {
             self.invoked_for_run(workspace, &run.skills)
         };
         if offer.has_untrusted() || wraps_results || !invoked.is_empty() {
-            messages.push(ChatMessage::system(preamble(&nonce)));
+            messages.push(ChatMessage::system(preamble(&nonce, false)));
         }
         if offer.web_search || offer.web_fetch {
             messages.push(ChatMessage::system(
@@ -203,7 +203,7 @@ fn wrap_rank(name: &str) -> u8 {
 /// Ids are not unique across turns (providers that omit them get positional
 /// `call_{index}` ids), so a later call never relabels an earlier result; if
 /// one message repeats an id, the name whose results are wrapped wins.
-fn result_names(transcript: &[ChatMessage]) -> Vec<Option<&str>> {
+pub(crate) fn result_names(transcript: &[ChatMessage]) -> Vec<Option<&str>> {
     let mut latest: HashMap<&str, &str> = HashMap::new();
     transcript
         .iter()

@@ -347,6 +347,7 @@ fn invoked_skills_are_injected_as_delimited_data_and_the_typed_text_is_kept() {
     let options = RunOptions {
         skills: vec!["drive:review".into(), "drive:review".into()],
         web_search: false,
+        ..Default::default()
     };
     let run = f
         .engine
@@ -421,6 +422,7 @@ fn unknown_or_too_many_skills_are_refused_before_a_run_starts() {
             RunOptions {
                 skills: vec!["drive:missing".into()],
                 web_search: false,
+                ..Default::default()
             },
         )
         .unwrap_err();
@@ -436,6 +438,7 @@ fn unknown_or_too_many_skills_are_refused_before_a_run_starts() {
             RunOptions {
                 skills: many,
                 web_search: false,
+                ..Default::default()
             },
         )
         .unwrap_err();
@@ -504,6 +507,7 @@ fn chat_web_search_needs_no_workspace_and_results_are_json_and_wrapped() {
             RunOptions {
                 skills: vec![],
                 web_search: true,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -575,6 +579,7 @@ fn untrusted_results_stay_wrapped_when_call_ids_repeat_across_turns() {
     let options = RunOptions {
         skills: vec![],
         web_search: true,
+        ..Default::default()
     };
     let run = f
         .engine
@@ -588,27 +593,67 @@ fn untrusted_results_stay_wrapped_when_call_ids_repeat_across_turns() {
     let requests = f.provider.requests();
     assert_eq!(requests.len(), 4);
     assert!(requests[3].tools.is_empty());
-    for request in &requests[2..] {
-        let results: Vec<_> = request
-            .messages
+    let results: Vec<_> = requests[2]
+        .messages
+        .iter()
+        .filter(|m| m.role == Role::Tool)
+        .collect();
+    assert_eq!(results.len(), 2);
+    assert!(
+        results[0].content.starts_with("<<<aidex:context nonce=")
+            && results[0]
+                .content
+                .contains("source=tool name=\"web_search\"")
+            && results[0].content.contains("trust=untrusted>>>"),
+        "{}",
+        results[0].content
+    );
+    assert!(
+        results[1].content.starts_with('{'),
+        "{}",
+        results[1].content
+    );
+    // Without tools in the request, the calls become text and their results
+    // become user messages wrapped as data, so no vendor sees tool blocks it
+    // has no definitions for.
+    let later = &requests[3].messages;
+    assert!(
+        later
             .iter()
-            .filter(|m| m.role == Role::Tool)
-            .collect();
-        assert_eq!(results.len(), 2);
-        assert!(
-            results[0].content.starts_with("<<<aidex:context nonce=")
-                && results[0]
-                    .content
-                    .contains("source=tool name=\"web_search\"")
-                && results[0].content.contains("trust=untrusted>>>"),
-            "{}",
-            results[0].content
-        );
-        assert!(
-            results[1].content.starts_with('{'),
-            "{}",
-            results[1].content
-        );
+            .all(|m| m.role != Role::Tool && m.tool_calls.is_empty())
+    );
+    let calls: Vec<_> = later
+        .iter()
+        .filter(|m| m.role == Role::Assistant && m.content.starts_with("[Called "))
+        .map(|m| m.content.as_str())
+        .collect();
+    assert_eq!(calls.len(), 2, "{later:#?}");
+    assert!(calls[0].starts_with("[Called web_search with {\"query\":\"rust\"}]"));
+    assert!(calls[1].starts_with("[Called artifact_create with "));
+    let flattened: Vec<_> = later
+        .iter()
+        .filter(|m| {
+            m.role == Role::User
+                && m.content.starts_with("<<<aidex:context")
+                && m.content.contains("call=\"call_0\"")
+        })
+        .map(|m| m.content.as_str())
+        .collect();
+    assert_eq!(flattened.len(), 1);
+    assert!(
+        flattened[0].starts_with("<<<aidex:context nonce=")
+            && flattened[0]
+                .contains("source=tool name=\"artifact_create\" call=\"call_0\" trust=project>>>"),
+        "{}",
+        flattened[0]
+    );
+    assert!(later.iter().any(|m| m.role == Role::User
+        && m.content.starts_with(
+            "Result of the earlier web_search call \"call_0\":
+<<<aidex:context"
+        )
+        && m.content.contains("trust=untrusted>>>")));
+    for request in &requests[2..] {
         assert!(request.messages.iter().any(
             |m| m.role == Role::System && m.content.contains("Only delimiters carrying nonce")
         ));
@@ -633,6 +678,7 @@ fn chat_web_switch_is_refused_when_web_search_is_off() {
             RunOptions {
                 skills: vec![],
                 web_search: true,
+                ..Default::default()
             },
         )
         .unwrap_err();
@@ -692,6 +738,7 @@ fn network_tools_follow_the_drive_policy_settings() {
     let options = RunOptions {
         skills: vec![],
         web_search: true,
+        ..Default::default()
     };
     let run = f
         .engine
@@ -715,6 +762,7 @@ fn network_tools_follow_the_drive_policy_settings() {
     let options = RunOptions {
         skills: vec![],
         web_search: true,
+        ..Default::default()
     };
     let run = f
         .engine
@@ -748,6 +796,7 @@ fn web_fetch_is_approved_in_supervised_mode_and_large_pages_become_artifacts() {
             RunOptions {
                 skills: vec![],
                 web_search: true,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -1240,6 +1289,7 @@ fn web_options() -> RunOptions {
     RunOptions {
         skills: vec![],
         web_search: true,
+        ..Default::default()
     }
 }
 
@@ -1374,6 +1424,7 @@ fn a_panic_while_starting_a_run_does_not_block_later_runs() {
             RunOptions {
                 skills: vec!["drive:crash".into()],
                 web_search: false,
+                ..Default::default()
             },
         )
     }));

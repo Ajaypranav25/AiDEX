@@ -159,6 +159,14 @@ impl NativeEngine {
         if operation != RuntimeOperation::Approval {
             approvals.clear();
         }
+        // Runtimes cannot receive files: attachments of the conversation
+        // reach them as placeholder lines.
+        let mut messages = run.transcript.clone();
+        let runtime_name = self
+            .runtime_for(&s.configuration)
+            .map(|runtime| runtime.descriptor().name)
+            .unwrap_or_else(|_| "this runtime".into());
+        self.runtime_placeholders(&s, run, &runtime_name, &mut messages)?;
         Ok(RuntimeRequest {
             session_id: run.session_id.clone(),
             run_id: run.id.clone(),
@@ -175,7 +183,7 @@ impl NativeEngine {
             // The default-model sentinel lets the runtime pick its own default.
             model: (s.configuration.model_id != RUNTIME_DEFAULT_MODEL)
                 .then(|| s.configuration.model_id.clone()),
-            messages: run.transcript.clone(),
+            messages,
             max_steps: s.configuration.max_steps.saturating_sub(run.steps),
             max_tokens: s.configuration.max_tokens,
             runtime_ref: run.runtime_ref.clone(),
