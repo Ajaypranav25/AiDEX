@@ -4,7 +4,7 @@ export {
   type AttachmentTrayProps,
   type AttachmentUploadStatus,
 } from "./AttachmentTray";
-export { installFileDropGuard, useFileDropGuard } from "./fileDropGuard";
+export { containFileDrag, installFileDropGuard, useFileDropGuard } from "./fileDropGuard";
 export {
   FileDropZone,
   FileDropZoneContext,

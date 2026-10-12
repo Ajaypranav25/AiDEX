@@ -49,8 +49,10 @@ export type ComposerProps = {
   onAttach?: (openFilePicker: () => void) => void;
   /**
    * Files picked, pasted, or dropped. Setting it enables the attach button (a hidden
-   * `<input type="file" multiple>`), file paste, and dropping files on the composer. Pasted images
-   * always become files; other pasted files only when the clipboard has no plain text.
+   * `<input type="file" multiple>`), file paste, and dropping files on the composer. Pasted files
+   * become files when the clipboard has no plain text, and a pasted image also when the clipboard's
+   * HTML is just that image ("Copy image"); rich copies such as Excel cells paste as text
+   * (`shouldClaimFilePaste`).
    */
   onFiles?: (files: File[], source: ComposerFileSource) => void;
   /** File picker filter, e.g. "image/png,image/jpeg,application/pdf,text/*". */
@@ -112,7 +114,7 @@ export type ComposerProps = {
 /**
  * Multi-line prompt input with attach and send actions. Enter sends; Shift+Enter adds a line. With
  * `onFiles`, files can also be picked, pasted, or dropped on it (inside a `FileDropZone`, the zone
- * takes the drops instead).
+ * takes the drops instead, unless the composer is inside a `Dialog`).
  */
 export function Composer({
   value,
@@ -212,7 +214,8 @@ export function Composer({
     const data = event.clipboardData;
     const text = data.getData("text/plain");
     const files = Array.from(data.files);
-    if (filesEnabled && !keepAsText && shouldClaimFilePaste(files, text.length > 0)) {
+    // HTML is read only when files are offered: it tells a copied image from a rich copy with a bitmap.
+    if (filesEnabled && !keepAsText && files.length > 0 && shouldClaimFilePaste(files, text, data.getData("text/html"))) {
       event.preventDefault();
       onFiles?.(files, "paste");
       return;

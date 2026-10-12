@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, type DragEvent as ReactDragEvent } from "react";
 import { isFileDrag } from "./model";
 
 function hasType(types: ArrayLike<string>, type: string): boolean {
@@ -54,4 +54,23 @@ export function installFileDropGuard(target: Window = window): () => void {
  */
 export function useFileDropGuard(): void {
   useEffect(() => installFileDropGuard(window), []);
+}
+
+/**
+ * `onDragEnter`, `onDragOver`, and `onDrop` handler for a modal surface (`Dialog`, `ImageLightbox`).
+ * A file drag over the modal never reaches a drop target behind it (such as a page-level
+ * `FileDropZone`, which would attach files to a hidden composer) and is refused (`dropEffect =
+ * "none"`); a file drop never navigates the window. A drop target nested inside the modal still
+ * works: it handles the event first, and once it has cancelled the drag its `dropEffect` is kept.
+ */
+export function containFileDrag(event: ReactDragEvent<Element>): void {
+  if (!isFileDrag(event.dataTransfer.types)) return;
+  event.stopPropagation();
+  if (event.type === "drop") {
+    event.preventDefault();
+    return;
+  }
+  if (event.defaultPrevented) return;
+  event.preventDefault();
+  event.dataTransfer.dropEffect = "none";
 }

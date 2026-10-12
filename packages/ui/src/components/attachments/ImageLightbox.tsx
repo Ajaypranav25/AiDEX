@@ -5,7 +5,6 @@ import {
   useLayoutEffect,
   useRef,
   useState,
-  type DragEvent,
   type KeyboardEvent,
   type MouseEvent,
 } from "react";
@@ -19,7 +18,8 @@ import {
   ZoomOutIcon,
 } from "../../icons/interface";
 import { IconButton } from "../../primitives/IconButton";
-import { isFileDrag, safeImageDataUrl } from "./model";
+import { containFileDrag } from "./fileDropGuard";
+import { safeImageDataUrl } from "./model";
 import styles from "./ImageLightbox.module.css";
 
 export type LightboxImage = {
@@ -54,17 +54,6 @@ const PAN: Record<string, [number, number]> = {
 
 /** Zoomed size in pixels, the image it belongs to, and the point (0 to 1) to center in view. */
 type Zoom = { key: string; width: number; height: number; focusX: number; focusY: number };
-
-/**
- * The viewer is modal: files dragged over it are refused here, so they never reach a drop target
- * behind it (the composer or page it was opened from), and a drop never navigates the window.
- */
-function refuseFileDrag(event: DragEvent<HTMLDialogElement>) {
-  if (!isFileDrag(event.dataTransfer.types)) return;
-  event.preventDefault();
-  event.stopPropagation();
-  if (event.type !== "drop") event.dataTransfer.dropEffect = "none";
-}
 
 function wrap(index: number, count: number): number {
   return count > 0 ? ((index % count) + count) % count : 0;
@@ -177,9 +166,10 @@ export function ImageLightbox({ open, images, index, onIndexChange, onClose, lab
         if (visibleRef.current) onClose();
       }}
       onKeyDown={onKeyDown}
-      onDragEnter={refuseFileDrag}
-      onDragOver={refuseFileDrag}
-      onDrop={refuseFileDrag}
+      // The viewer is modal: files dragged over it never reach the composer or page behind it.
+      onDragEnter={containFileDrag}
+      onDragOver={containFileDrag}
+      onDrop={containFileDrag}
       onClick={(event) => {
         if (event.target instanceof HTMLElement && event.target.dataset.lightboxBackdrop !== undefined) onClose();
       }}

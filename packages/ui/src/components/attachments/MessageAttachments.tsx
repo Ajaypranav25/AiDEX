@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { FileCodeIcon, FileIcon } from "../../icons/development";
 import { DownloadIcon, ImageIcon, LoaderIcon } from "../../icons/interface";
 import { FileTextIcon } from "../../icons/objects";
@@ -40,10 +40,17 @@ export type MessageAttachmentItem = {
 export type MessageAttachmentsProps = {
   items: readonly MessageAttachmentItem[];
   /**
-   * Asks the app for an image's data URL: called when a tile without `src` scrolls into view or the
-   * viewer shows it. It can repeat for the same id, so cache by id.
+   * Asks the app for an image's data URL: called when a tile without `src` scrolls into view (or
+   * loses its `src` while in view) or the viewer shows it. It can repeat for the same id, so cache
+   * by id.
    */
   onRequestImage?: (id: string) => void;
+  /**
+   * Reports when an image comes on screen (its tile within 200px of the viewport, or the viewer
+   * showing it) and when it leaves. Every id reported `true` is reported `false` again, at the
+   * latest when the component unmounts, so an app can keep on-screen images out of cache eviction.
+   */
+  onImageVisibilityChange?: (id: string, visible: boolean) => void;
   /** Adds a Download button to file rows (`Download <name>`). */
   onDownload?: (id: string) => void;
   /** Accessible name of the group (default "Attachments"). */
@@ -66,6 +73,7 @@ const ROW_ICON: Record<AttachmentKind, ReactNode> = {
 export function MessageAttachments({
   items,
   onRequestImage,
+  onImageVisibilityChange,
   onDownload,
   label = "Attachments",
   className,
@@ -75,38 +83,93 @@ export function MessageAttachments({
   const [viewerIndex, setViewerIndex] = useState<number | null>(null);
   const tileRefs = useRef(new Map<string, HTMLElement>());
   const requestRef = useRef(onRequestImage);
-  useEffect(() => {
-    requestRef.current = onRequestImage;
-  });
+  const visibilityRef = useRef(onImageVisibilityChange);
+  const pendingRef = useRef(new Set<string>());
+  // Tiles in view, the image the viewer shows, and the ids reported on screen (either of the two).
+  const inViewRef = useRef(new Set<string>());
+  const viewedRef = useRef<string | undefined>(undefined);
+  const shownRef = useRef(new Set<string>());
+  const observerRef = useRef<IntersectionObserver | null>(null);
+  const observedRef = useRef(new Map<string, Element>());
 
-  // Ask for images as their tiles come into view; tiles that already have a source are skipped.
+  // Images still to ask for: no source yet, and not loading or failed.
   const pendingKey = images
     .filter((item) => !safeImageDataUrl(item.src) && item.status !== "loading" && item.status !== "error")
     .map((item) => item.id)
     .join("\n");
   useEffect(() => {
-    if (!pendingKey || !requestRef.current) return;
-    const pending = new Set(pendingKey.split("\n"));
-    if (typeof IntersectionObserver === "undefined") {
-      pending.forEach((id) => requestRef.current?.(id));
-      return;
-    }
+    requestRef.current = onRequestImage;
+    visibilityRef.current = onImageVisibilityChange;
+    pendingRef.current = new Set(pendingKey ? pendingKey.split("\n") : []);
+  });
+
+  // Reports a change in whether an image is on screen.
+  const syncShown = useCallback((id: string) => {
+    const shown = inViewRef.current.has(id) || viewedRef.current === id;
+    if (shown === shownRef.current.has(id)) return;
+    if (shown) shownRef.current.add(id);
+    else shownRef.current.delete(id);
+    visibilityRef.current?.(id, shown);
+  }, []);
+
+  // One observer for the component's lifetime watches every image tile: it tracks which are in
+  // view and asks for those without a source as they come into view.
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined") return;
+    const inView = inViewRef.current;
+    const observed = observedRef.current;
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
-          if (!entry.isIntersecting) continue;
           const id = (entry.target as HTMLElement).dataset.attachmentId;
-          observer.unobserve(entry.target);
-          if (id && pending.has(id)) requestRef.current?.(id);
+          if (!id || observed.get(id) !== entry.target) continue;
+          if (entry.isIntersecting) inView.add(id);
+          else inView.delete(id);
+          syncShown(id);
+          if (entry.isIntersecting && pendingRef.current.has(id)) requestRef.current?.(id);
         }
       },
       { rootMargin: "200px" },
     );
-    pending.forEach((id) => {
-      const tile = tileRefs.current.get(id);
-      if (tile) observer.observe(tile);
-    });
-    return () => observer.disconnect();
+    observerRef.current = observer;
+    return () => {
+      observer.disconnect();
+      observerRef.current = null;
+      observed.clear();
+      const ids = [...inView];
+      inView.clear();
+      ids.forEach(syncShown);
+    };
+  }, [syncShown]);
+
+  // Keep the observer on the current tiles; a tile that went away is no longer on screen.
+  useEffect(() => {
+    const observer = observerRef.current;
+    if (!observer) return;
+    const observed = observedRef.current;
+    const tiles = tileRefs.current;
+    for (const [id, tile] of observed) {
+      if (tiles.get(id) === tile) continue;
+      observer.unobserve(tile);
+      observed.delete(id);
+      inViewRef.current.delete(id);
+      syncShown(id);
+    }
+    for (const [id, tile] of tiles) {
+      if (observed.get(id) === tile) continue;
+      observed.set(id, tile);
+      observer.observe(tile);
+    }
+  });
+
+  // A tile in view that needs its image (again) asks for it now. Without an observer, every
+  // pending image is asked for.
+  useEffect(() => {
+    if (!pendingKey || !requestRef.current) return;
+    const watching = observerRef.current !== null;
+    for (const id of pendingKey.split("\n")) {
+      if (!watching || inViewRef.current.has(id)) requestRef.current?.(id);
+    }
   }, [pendingKey]);
 
   const hasImages = images.length > 0;
@@ -121,6 +184,16 @@ export function MessageAttachments({
     viewed && !safeImageDataUrl(viewed.src) && viewed.status !== "loading" && viewed.status !== "error"
       ? viewed.id
       : undefined;
+  const shownInViewer = viewed?.id;
+  useEffect(() => {
+    if (!shownInViewer) return;
+    viewedRef.current = shownInViewer;
+    syncShown(shownInViewer);
+    return () => {
+      viewedRef.current = undefined;
+      syncShown(shownInViewer);
+    };
+  }, [shownInViewer, syncShown]);
   useEffect(() => {
     if (viewedId) requestRef.current?.(viewedId);
   }, [viewedId]);

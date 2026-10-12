@@ -50,15 +50,70 @@ export function isImageFile(file: { type: string }): boolean {
   return file.type.toLowerCase().startsWith("image/");
 }
 
+/** Elements whose content never shows, so the HTML scan skips past their end tag. */
+const HIDDEN_HTML_ELEMENTS: ReadonlySet<string> = new Set(["head", "style", "script", "title"]);
+
+/** True when `html` between `start` and `end` has text other than whitespace and `&nbsp;`. */
+function hasVisibleText(html: string, start: number, end: number): boolean {
+  if (start >= end) return false;
+  return /\S/.test(html.slice(start, end).replace(/&(?:nbsp|#160|#x0*a0);/g, " "));
+}
+
 /**
- * Whether pasted files should become attachments instead of the default paste: any image claims the
- * paste; other files only when the clipboard carries no plain text (so copying rich text that also
- * offers a file keeps pasting text).
+ * True when clipboard HTML shows images and no text, as a browser's "Copy image" writes it
+ * (`<img src="...">`, perhaps inside a document with comments and a `<meta>`). One forward pass,
+ * so its cost is linear in the length; a comment, tag, or head, style, script, or title element
+ * left open reads as not image-only, and the paste stays text.
  */
-export function shouldClaimFilePaste(files: ReadonlyArray<{ type: string }>, hasPlainText: boolean): boolean {
+function isImageOnlyHtml(html: string): boolean {
+  if (!/<img\b/i.test(html)) return false;
+  const lower = html.toLowerCase();
+  const tagName = /[a-z][a-z0-9]*/y;
+  let sawImage = false;
+  let index = 0;
+  while (index < lower.length) {
+    const open = lower.indexOf("<", index);
+    if (hasVisibleText(lower, index, open === -1 ? lower.length : open)) return false;
+    if (open === -1) break;
+    if (lower.startsWith("<!--", open)) {
+      const commentEnd = lower.indexOf("-->", open + 4);
+      if (commentEnd === -1) return false;
+      index = commentEnd + 3;
+      continue;
+    }
+    const close = lower.indexOf(">", open + 1);
+    if (close === -1) return false;
+    tagName.lastIndex = open + 1;
+    const name = tagName.exec(lower)?.[0] ?? "";
+    index = close + 1;
+    if (name === "img") sawImage = true;
+    else if (HIDDEN_HTML_ELEMENTS.has(name)) {
+      const endTag = lower.indexOf(`</${name}`, index);
+      const endClose = endTag === -1 ? -1 : lower.indexOf(">", endTag);
+      if (endClose === -1) return false;
+      index = endClose + 1;
+    }
+  }
+  return sawImage;
+}
+
+/**
+ * Whether pasted files should become attachments instead of the default paste, given the
+ * clipboard's `text/plain` and `text/html`. Files claim a paste without plain text; blank text
+ * counts as none only when the clipboard has no HTML either. With text, only an image copied on
+ * its own claims it, that is when the HTML is just the image (a browser's "Copy image");
+ * everything else pastes as text, including rich copies that also carry a bitmap of what was
+ * copied (cells from Excel or Calc, even empty ones, or a OneNote page).
+ */
+export function shouldClaimFilePaste(
+  files: ReadonlyArray<{ type: string }>,
+  plainText: string,
+  html: string = "",
+): boolean {
   if (files.length === 0) return false;
-  if (files.some(isImageFile)) return true;
-  return !hasPlainText;
+  if (plainText === "") return true;
+  if (files.some(isImageFile) && isImageOnlyHtml(html)) return true;
+  return !/\S/.test(plainText) && !/\S/.test(html);
 }
 
 /** Default size from which a plain-text paste is offered to `onLargePaste` (32 KiB). */
