@@ -8,6 +8,7 @@
 
 pub mod approvals;
 pub mod artifacts;
+pub mod attachments;
 pub mod auth;
 pub mod context;
 pub mod daemon;
@@ -18,6 +19,7 @@ pub mod mcp;
 pub mod memory;
 pub mod models;
 pub mod native;
+pub mod native_fork;
 pub mod native_history;
 pub mod native_view;
 pub mod plugins;
@@ -76,6 +78,7 @@ pub(crate) fn register_all(
 ) -> Result<(), RouterError> {
     approvals::register(router, services)?;
     artifacts::register(router, services)?;
+    attachments::register(router, services)?;
     context::register(router, services)?;
     auth::register(router, services)?;
     inference::register(router, services)?;

@@ -45,6 +45,7 @@ import type {
   HistoryPage,
   HistoryScope,
   Checkpoint,
+  ConversationForkParams,
   SendParams,
 } from "./dto/sessions";
 import type {
@@ -90,6 +91,18 @@ import type {
   ArtifactPlanUpdateParams,
   ArtifactReadParams,
 } from "./dto/artifacts";
+import type {
+  Attachment,
+  AttachmentContent,
+  AttachmentExcludeParams,
+  AttachmentFromWorkspaceParams,
+  AttachmentList,
+  AttachmentListParams,
+  AttachmentReadParams,
+  AttachmentUploadBeginParams,
+  AttachmentUploadChunkParams,
+  AttachmentUploadTicket,
+} from "./dto/attachments";
 import type { AppPreferences, ModelPreferences } from "./dto/preferences";
 import type {
   InferenceCatalog,
@@ -169,6 +182,7 @@ export type RpcMethods = {
     result: { sessions: SessionSummary[] };
   };
   "conversation.create": { params: SessionConfig; result: SessionDetail };
+  "conversation.fork": { params: ConversationForkParams; result: SessionDetail };
   "conversation.get": {
     params: { id: string; message_offset?: number; message_limit?: number };
     result: SessionDetail;
@@ -347,6 +361,30 @@ export type RpcMethods = {
   "artifact.read": { params: ArtifactReadParams; result: ArtifactContent };
   "artifact.delete": { params: { id: string }; result: { deleted: boolean } };
   "artifact.plan.update": { params: ArtifactPlanUpdateParams; result: ArtifactMeta };
+  "attachment.upload.begin": {
+    params: AttachmentUploadBeginParams;
+    result: AttachmentUploadTicket;
+  };
+  "attachment.upload.chunk": {
+    params: AttachmentUploadChunkParams;
+    result: { received: number };
+  };
+  "attachment.upload.commit": { params: { upload_id: string }; result: Attachment };
+  /** Works while the vault is locked. */
+  "attachment.upload.abort": {
+    params: { upload_id: string };
+    result: { aborted: boolean };
+  };
+  "attachment.from_workspace": {
+    params: AttachmentFromWorkspaceParams;
+    result: Attachment;
+  };
+  "attachment.list": { params: AttachmentListParams; result: AttachmentList };
+  "attachment.get": { params: { id: string }; result: Attachment };
+  "attachment.read": { params: AttachmentReadParams; result: AttachmentContent };
+  /** Staged attachments only (`attachment_sent` otherwise). */
+  "attachment.delete": { params: { id: string }; result: { deleted: boolean } };
+  "attachment.exclude": { params: AttachmentExcludeParams; result: Attachment };
 };
 
 export type RpcMethod = keyof RpcMethods;
