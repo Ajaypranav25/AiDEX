@@ -616,6 +616,9 @@ impl RuntimeExecutor for ExternalRuntime {
                 ));
             }
             let mut live = guard.remove(&r.run_id).unwrap();
+            // Release the live map first: a failed send drops `live`, whose
+            // transport waits for the native tree to be reaped.
+            drop(guard);
             let pending = live.pending.take().unwrap();
             live.transport.send(json!({"jsonrpc":"2.0","id":pending.wire,"result":if decision.approved{pending.allow}else{pending.deny}}))?;
             live
