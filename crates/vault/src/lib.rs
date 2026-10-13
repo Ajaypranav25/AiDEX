@@ -19,6 +19,7 @@ mod fsio;
 mod handles;
 mod kdf;
 mod model;
+mod observer;
 mod recovery;
 mod scope;
 mod secret;
@@ -32,6 +33,7 @@ pub use format::FORMAT_VERSION;
 pub use handles::{MAX_HANDLE_TTL, MAX_HANDLES, SecretHandle};
 pub use kdf::{KdfParams, MAX_PASSPHRASE_BYTES, MIN_PASSPHRASE_CHARS};
 pub use model::{MAX_CONSUMERS, MAX_NAME_LEN, SecretKind, SecretMeta, SecretName, SecretPolicy};
+pub use observer::{LockNotice, LockReason};
 pub use recovery::RecoveryKey;
 pub use scope::{ConsumerKind, ConsumerScope};
 pub use secret::{SecretBytes, SecretString};
@@ -39,5 +41,13 @@ pub use service::{
     DEFAULT_IDLE_TIMEOUT, InitOutcome, LockOutcome, VaultService, VaultServiceConfig, VaultState,
     VaultStatus,
 };
-pub use unlocked::{MAX_SECRET_BYTES, MAX_SECRETS, UnlockedVault, VerifyReport};
+pub use unlocked::{MAX_RECORD_FILES, MAX_SECRET_BYTES, MAX_SECRETS, UnlockedVault, VerifyReport};
 pub use vault::{CreateOptions, LockedVault, UnlockMethod, Vault};
+
+/// Filesystem failure injection for the tests of crates that embed the vault. Only
+/// with the `test-hooks` feature, which only dev-dependencies enable.
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub mod testing {
+    pub use crate::fsio::{WriteFailure, fail_next_write};
+}
